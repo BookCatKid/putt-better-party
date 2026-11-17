@@ -65,7 +65,6 @@ Verification: `bun test`, `bun scripts/check-recovery.mjs` (starts and restarts 
 
 Random holes support 1–9 rounds and timers of 20–300 integer seconds, using synchronized sliders and number fields. The optional daily exclusion uses all pages of the live public daily catalog on each new random match and the original Pacific-time daily numbering function. Manual playlists have no nine-hole cap; maps are fetched live as rounds advance. Normal transport and storage resource limits still apply. The original toolbar Home button preserves the room for rejoining.
 
-
 ## Independent upstream capture
 
 From this project directory, run:

@@ -9,9 +9,9 @@ browser=$!
 cleanup(){
  kill "$browser" 2>/dev/null || true
  wait "$browser" 2>/dev/null || true
- for i in {1..10}; do rm -rf "$profile" 2>/dev/null && return 0; sleep .2; done
+ for _ in {1..10}; do rm -rf "$profile" 2>/dev/null && return 0; sleep .2; done
  echo "Warning: could not remove isolated browser test profile" >&2
 }
 trap cleanup EXIT
-for i in {1..50}; do curl -sf http://127.0.0.1:9239/json/version >/dev/null && break; sleep .2; done
+for _ in {1..50}; do curl -sf http://127.0.0.1:9239/json/version >/dev/null && break; sleep .2; done
 bun "${BROWSER_SCRIPT:-scripts/browser-match.mjs}"

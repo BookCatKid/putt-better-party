@@ -18,3 +18,5 @@ captures/
 *.sqlite-shm
 *.pid
 *.har
+
+.ruff_cache/

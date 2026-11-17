@@ -6,6 +6,17 @@
     "start": "bun src/server.js",
     "test": "bun test",
     "prepare:client": "python3 scripts/prepare-client.py",
-    "capture:client": "python3 scripts/capture-client.py"
+    "capture:client": "python3 scripts/capture-client.py",
+    "format": "prettier --write . && ruff format scripts",
+    "format:check": "prettier --check . && ruff format --check scripts",
+    "lint": "eslint . --max-warnings 0 && ruff check scripts && shellcheck scripts/*.sh",
+    "lint:fix": "eslint . --fix && ruff check scripts --fix",
+    "check": "bun run format:check && bun run lint && bun test"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5",
+    "globals": "16.5.0",
+    "prettier": "3.10.1"
   }
 }

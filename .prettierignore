@@ -1,0 +1,14 @@
+private-client/
+web/
+captures/
+maps/
+state/
+node_modules/
+*.log
+*.har
+*.sqlite*
+bun.lock
+scripts/assets.txt
+scripts/media-paths.txt
+
+.ruff_cache/
