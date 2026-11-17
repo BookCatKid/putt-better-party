@@ -61,15 +61,11 @@ try {
     '[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add "))';
   await waitFor(client, '!!' + add);
   const title = await client.evalJS(add + '.getAttribute("aria-label").slice(4)');
-  await client.evalJS(
-    '[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Preview ")).click()',
-  );
   await waitFor(
     client,
     '[...document.images].some(x=>x.src.includes("/api/preview/")&&x.complete&&x.naturalWidth>0)',
   );
   console.log('PASS actual public course preview:', title);
-  await click('Close');
   await client.evalJS(add + '.click()');
   await expect('s.config.selectedHoleIds.length===1');
   await client.evalJS(add + '.click()');
