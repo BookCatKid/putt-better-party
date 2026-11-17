@@ -8,8 +8,20 @@ if [[ -z "${CHROME:-}" ]]; then
 fi
 if [[ ! -x "${CHROME:-}" ]]; then echo "Set CHROME to a Chromium-compatible executable." >&2; exit 1; fi
 if curl -sf http://127.0.0.1:9239/json/version >/dev/null; then echo 'Debug port already in use'; exit 1; fi
+# SwiftShader keeps the suites runnable without a display, but two live WebGL
+# contexts stall for minutes while levels load and textures upload. macOS can
+# render headless with Metal, so prefer that; override with CHROME_GL=swiftshader
+# or another ANGLE backend name.
+if [[ -z "${CHROME_GL:-}" ]]; then
+  if [[ "$(uname -s)" == Darwin ]]; then CHROME_GL=metal; else CHROME_GL=swiftshader; fi
+fi
+if [[ "$CHROME_GL" == swiftshader ]]; then
+  gl_flags=(--enable-unsafe-swiftshader --use-angle=swiftshader)
+else
+  gl_flags=(--use-angle="$CHROME_GL")
+fi
 profile=$(mktemp -d /tmp/putt-bp-chrome-test.XXXXXX)
-"$CHROME" --headless=new --no-first-run --no-default-browser-check --disable-background-networking --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-sync --disable-extensions --proxy-server=http://127.0.0.1:9 --proxy-bypass-list=127.0.0.1 --disable-dev-shm-usage --enable-unsafe-swiftshader --use-angle=swiftshader --remote-debugging-port=9239 --user-data-dir="$profile" about:blank >browser-chrome.log 2>&1 &
+"$CHROME" --headless=new --no-first-run --no-default-browser-check --disable-background-networking --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-sync --disable-extensions --proxy-server=http://127.0.0.1:9 --proxy-bypass-list=127.0.0.1 --disable-dev-shm-usage "${gl_flags[@]}" --remote-debugging-port=9239 --user-data-dir="$profile" about:blank >browser-chrome.log 2>&1 &
 browser=$!
 cleanup(){
  kill "$browser" 2>/dev/null || true

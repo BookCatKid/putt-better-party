@@ -4,6 +4,7 @@ export async function connect(target) {
   const pending = new Map();
   const events = [];
   const requests = new Map();
+  const listeners = new Map();
   let seq = 0;
   await new Promise((res, rej) => {
     ws.onopen = res;
@@ -21,8 +22,15 @@ export async function connect(target) {
           : pendingRequest.resolve(message.result);
       }
     } else {
+      const listener = listeners.get(message.method);
+      listener?.(message.params);
       if (message.method === 'Network.requestWillBeSent') {
         requests.set(message.params.requestId, message.params.request.url);
+      }
+      if (message.method === 'Inspector.targetCrashed') {
+        // A crashed renderer never answers again; surface it as a crash rather
+        // than letting every later evaluation time out.
+        events.push({ type: 'crash', text: 'Renderer target crashed' });
       }
       if (message.method === 'Runtime.exceptionThrown') {
         events.push({
@@ -80,22 +88,22 @@ export async function connect(target) {
     }
     pending.clear();
   };
-  const call = (method, params = {}) =>
+  const call = (method, params = {}, timeout = 8000) =>
     new Promise((resolve, reject) => {
       const id = ++seq;
       const timer = setTimeout(() => {
         pending.delete(id);
         reject(Error('CDP timeout: ' + method));
-      }, 8000);
+      }, timeout);
       pending.set(id, { resolve, reject, timer });
       ws.send(JSON.stringify({ id, method, params }));
     });
-  const evalJS = async (expression) => {
-    const response = await call('Runtime.evaluate', {
-      expression,
-      awaitPromise: true,
-      returnByValue: true,
-    });
+  const evalJS = async (expression, timeout = 8000) => {
+    const response = await call(
+      'Runtime.evaluate',
+      { expression, awaitPromise: true, returnByValue: true },
+      timeout,
+    );
     if (response.exceptionDetails) {
       throw Error(
         response.exceptionDetails.exception?.description || response.exceptionDetails.text,
@@ -105,21 +113,32 @@ export async function connect(target) {
   };
   await call('Page.enable');
   await call('Runtime.enable');
+  await call('Inspector.enable');
   await call('Log.enable');
   await call('Network.enable');
-  return { call, evalJS, events, requests, close: () => ws.close() };
+  // Subscribe to one protocol event; each event name has at most one listener.
+  const on = (method, listener) => listeners.set(method, listener);
+  return { call, evalJS, events, requests, on, close: () => ws.close() };
 }
 export async function waitFor(client, expression, timeout = 30000) {
   const until = Date.now() + timeout;
   let error;
   while (Date.now() < until) {
     try {
-      const response = await client.evalJS(expression);
+      // A busy software-rendered page can stall the main thread past the
+      // default per-request timeout; keep retrying within the caller's budget
+      // instead of aborting the whole wait on one slow evaluation.
+      const attemptTimeout = Math.max(1000, Math.min(8000, until - Date.now()));
+      const response = await client.evalJS(expression, attemptTimeout);
       if (response) {
         return response;
       }
     } catch (event) {
       error = event;
+    }
+    const crash = client.events.find((event) => event.type === 'crash');
+    if (crash) {
+      throw Error('Browser target crashed while waiting for: ' + expression);
     }
     await pause(200);
   }
