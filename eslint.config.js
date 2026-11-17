@@ -110,6 +110,18 @@ export default [
     },
   },
   {
+    files: ['scripts/party-loading.js'],
+    languageOptions: {
+      globals: { ...globals.browser, partyRouteJsx: 'readonly' },
+    },
+    rules: {
+      'no-unused-vars': [
+        'error',
+        { varsIgnorePattern: '^PartyLoadingScreen$', args: 'none', caughtErrors: 'none' },
+      ],
+    },
+  },
+  {
     files: ['scripts/party-entry.js'],
     languageOptions: {
       globals: {
@@ -122,7 +134,11 @@ export default [
     rules: {
       'no-unused-vars': [
         'error',
-        { varsIgnorePattern: '^PartyEntry$', args: 'none', caughtErrors: 'none' },
+        {
+          varsIgnorePattern: '^(PartyEntry|usePartyAdmission)$',
+          args: 'none',
+          caughtErrors: 'none',
+        },
       ],
     },
   },
@@ -144,6 +160,8 @@ export default [
         resetPartyRuntime: 'readonly',
         PartyGameRoot: 'readonly',
         PartyEntry: 'readonly',
+        usePartyAdmission: 'readonly',
+        PartyLoadingScreen: 'readonly',
       },
     },
     rules: {

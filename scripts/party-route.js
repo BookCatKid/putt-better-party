@@ -6,6 +6,7 @@ function PartyRoute() {
   const partyStore = partyRouteStore;
   const usePartyState = (selector) => selectPartyRouteState(partyStore, selector);
   const code = decodeURIComponent(location.pathname.split('/').at(-1));
+  const admission = usePartyAdmission(code);
   const active = usePartyState((state) => state.active);
   const holeIds = usePartyState((state) => state.holeIds);
   const holeIndex = usePartyState((state) => state.holeIndex);
@@ -103,57 +104,37 @@ function PartyRoute() {
     return () => clearTimeout(timeout);
   }, [active, ready]);
 
-  if (!active) {
-    return jsx.jsx(PartyEntry, { code });
+  let loadingOverlay = null;
+  if (!active && admission.resume) {
+    loadingOverlay = jsx.jsx(PartyLoadingScreen, {
+      message: 'Rejoining party…',
+      error: admission.error,
+      onRetry: admission.sessionExpired ? undefined : admission.join,
+      onEnterName: admission.sessionExpired ? admission.enterName : undefined,
+    });
+  } else if (active && !ready) {
+    loadingOverlay = jsx.jsx(PartyLoadingScreen, {
+      message: 'Loading party…',
+      error: mapError || error,
+      onRetry: mapError ? () => setRetry((previous) => previous + 1) : undefined,
+      onReload: takingTooLong ? () => location.reload() : undefined,
+    });
   }
 
-  const loadingOverlay = !ready
-    ? jsx.jsxs('div', {
-        className: 'bp-party-loading',
-        role: 'status',
-        'aria-live': 'polite',
-        children: [
-          jsx.jsxs('p', {
-            className: 'bp-loading-wordmark',
-            children: ['better', jsx.jsx('span', { children: '.party' })],
-          }),
-          !mapError &&
-            jsx.jsx('span', {
-              className: 'bp-loading-spinner',
-              'aria-hidden': true,
-            }),
-          jsx.jsx('p', { children: mapError || error || 'Loading party…' }),
-          mapError &&
-            jsx.jsx('button', {
-              className: 'bp-loading-action',
-              type: 'button',
-              onClick: () => setRetry((previous) => previous + 1),
-              children: 'Retry',
-            }),
-          takingTooLong &&
-            jsx.jsx('button', {
-              className: 'bp-loading-action',
-              type: 'button',
-              onClick: () => location.reload(),
-              children: 'Reload',
-            }),
-          (takingTooLong || error || mapError) &&
-            jsx.jsx('a', {
-              href: '/home',
-              className: 'bp-loading-action',
-              children: 'Back to home',
-            }),
-        ],
-      })
-    : null;
+  let content = null;
+  if (active) {
+    content = jsx.jsx('div', {
+      className: ready ? 'bp-party-view' : 'bp-party-view bp-party-initializing',
+      'aria-busy': !ready,
+      children: jsx.jsx(PartyGameRoot, { level }, code),
+    });
+  } else if (!admission.resume) {
+    content = jsx.jsx(PartyEntry, { code, admission });
+  }
 
   return jsx.jsxs(jsx.Fragment, {
     children: [
-      jsx.jsx('div', {
-        className: ready ? 'bp-party-view' : 'bp-party-view bp-party-initializing',
-        'aria-busy': !ready,
-        children: jsx.jsx(PartyGameRoot, { level }, code),
-      }),
+      content,
       loadingOverlay,
       ready &&
         error &&

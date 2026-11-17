@@ -626,16 +626,6 @@ body:has(> #app) {
   text-decoration: none;
   box-sizing: border-box;
 }
-.bp-entry .bp-resume-status {
-  min-height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  font-size: 14px;
-  color: #a7b9af;
-}
-
 /* Keep the canvas mounted so its original socket and scene can initialize.
    Never display the incomplete HUD or let it receive pointer input. */
 .bp-party-initializing [data-overview-hud-root] {
@@ -652,9 +642,10 @@ body:has(> #app) {
   justify-content: center;
   gap: 16px;
   padding: 24px;
-  background: #112820;
-  color: #e4eee9;
+  background: var(--bp-page-background);
+  color: var(--bp-page-text);
   text-align: center;
+  overflow-y: auto;
 }
 .bp-loading-wordmark {
   font-size: 32px;
@@ -669,4 +660,31 @@ body:has(> #app) {
   background: #ffffff12;
   color: inherit;
   cursor: pointer;
+}
+
+.bp-loading-message {
+  max-width: 400px;
+  min-height: 1.5em;
+}
+.bp-loading-spinner-slot {
+  height: 18px;
+}
+.bp-loading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.bp-loading-action {
+  text-decoration: none;
+  font: inherit;
+  transition: background-color 0.15s;
+}
+.bp-loading-action:hover {
+  background: #ffffff20;
+}
+.bp-loading-action:focus-visible {
+  outline: 2px solid #34d399;
+  outline-offset: 3px;
 }

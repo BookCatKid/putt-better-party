@@ -47,6 +47,7 @@ const selectPartyRouteState = l, joinPartyRuntime = f, resetPartyRuntime = p;
 const defaultPartyLevel = C, defaultPartySeed = S, loadPartyLevel = T;
 const setPartyMapReady = d, sanitizePartyLevel = g, validatePartyLevel = h, PartyGameRoot = m;
 """
+        + (root / "scripts/party-loading.js").read_text()
         + (root / "scripts/party-entry.js").read_text()
         + (root / "scripts/party-route.js").read_text()
         + source[end:].replace("export{E as component}", "export{PartyRoute as component}", 1)

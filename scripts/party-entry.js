@@ -1,4 +1,4 @@
-function PartyEntry({ code }) {
+function usePartyAdmission(code) {
   const [name, setName] = partyRouteReact.useState(sessionStorage.getItem('bp.name.' + code) ?? '');
   const [error, setError] = partyRouteReact.useState('');
   const [busy, setBusy] = partyRouteReact.useState(false);
@@ -10,6 +10,7 @@ function PartyEntry({ code }) {
         sessionStorage.getItem('bp.name.' + code)
       ),
   );
+  const [sessionExpired, setSessionExpired] = partyRouteReact.useState(false);
   const joining = partyRouteReact.useRef(false);
   async function join() {
     if (!name.trim() || joining.current) {
@@ -18,11 +19,13 @@ function PartyEntry({ code }) {
     joining.current = true;
     setBusy(true);
     setError('');
+    setSessionExpired(false);
     try {
       const savedUid = sessionStorage.getItem('bp.uid.' + code);
       const host = sessionStorage.getItem('bp.host.' + code);
       const response = await fetch('/api/join', {
         method: 'POST',
+        signal: AbortSignal.timeout(15_000),
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           code,
@@ -37,8 +40,9 @@ function PartyEntry({ code }) {
         if (identity.error?.includes('Session expired')) {
           sessionStorage.removeItem('bp.uid.' + code);
           sessionStorage.removeItem('bp.session.' + code);
+          setSessionExpired(true);
         }
-        throw Error(identity.error);
+        throw new Error(identity.error || 'Could not join this party.');
       }
       sessionStorage.setItem('bp.lastRoom', code);
       sessionStorage.setItem('bp.name.' + code, identity.name);
@@ -55,9 +59,12 @@ function PartyEntry({ code }) {
         },
         host ?? undefined,
       );
-    } catch (err) {
-      setError(err.message);
-      setResume(false);
+    } catch (joinError) {
+      if (joinError.name === 'TimeoutError') {
+        setError('The party did not respond. Please try again.');
+      } else {
+        setError(joinError.message);
+      }
     } finally {
       joining.current = false;
       setBusy(false);
@@ -68,6 +75,17 @@ function PartyEntry({ code }) {
       join();
     }
   }, [code]);
+  function enterName() {
+    setResume(false);
+    setError('');
+  }
+
+  return { name, setName, error, busy, resume, sessionExpired, join, enterName };
+}
+
+function PartyEntry({ code, admission }) {
+  const { name, setName, error, busy, join } = admission;
+
   return partyRouteJsx.jsx('main', {
     className: 'bp-home',
     children: partyRouteJsx.jsxs('section', {
@@ -81,40 +99,31 @@ function PartyEntry({ code }) {
           className: 'bp-join-code',
           children: ['Party ', partyRouteJsx.jsx('strong', { children: code })],
         }),
-        resume
-          ? partyRouteJsx.jsxs('p', {
-              role: 'status',
-              className: 'bp-resume-status',
-              children: [
-                partyRouteJsx.jsx('span', { className: 'bp-loading-spinner', 'aria-hidden': true }),
-                'Rejoining party…',
-              ],
-            })
-          : partyRouteJsx.jsxs('form', {
-              className: 'bp-join-form',
-              onSubmit: (event) => {
-                event.preventDefault();
-                join();
-              },
-              children: [
-                partyRouteJsx.jsx('input', {
-                  autoFocus: true,
-                  placeholder: 'Your name',
-                  'aria-label': 'Your name',
-                  maxLength: 24,
-                  value: name,
-                  onChange: (event) => setName(event.target.value),
-                  className: 'bp-name-input',
-                  autoComplete: 'nickname',
-                }),
-                partyRouteJsx.jsx('button', {
-                  type: 'submit',
-                  disabled: busy || !name.trim(),
-                  className: 'bp-create',
-                  children: busy ? 'Joining…' : 'Join',
-                }),
-              ],
+        partyRouteJsx.jsxs('form', {
+          className: 'bp-join-form',
+          onSubmit: (event) => {
+            event.preventDefault();
+            join();
+          },
+          children: [
+            partyRouteJsx.jsx('input', {
+              autoFocus: true,
+              placeholder: 'Your name',
+              'aria-label': 'Your name',
+              maxLength: 24,
+              value: name,
+              onChange: (event) => setName(event.target.value),
+              className: 'bp-name-input',
+              autoComplete: 'nickname',
             }),
+            partyRouteJsx.jsx('button', {
+              type: 'submit',
+              disabled: busy || !name.trim(),
+              className: 'bp-create',
+              children: busy ? 'Joining…' : 'Join',
+            }),
+          ],
+        }),
         error &&
           partyRouteJsx.jsx('p', { className: 'bp-entry-error', role: 'alert', children: error }),
         partyRouteJsx.jsx('a', {
