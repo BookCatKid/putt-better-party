@@ -187,6 +187,13 @@ function connectBetterParty(code, identity, options = {}) {
     awaitingSnapshot = true;
     receivedRoster = false;
     receivedBoard = false;
+    // Re-arm completion and forfeit transmission on every connection: a
+    // prior send only proves the socket accepted the write, not that the
+    // server processed it. Retransmission is idempotent because the server
+    // ignores results from players it has already marked done.
+    completionSent = false;
+    forfeitSent = false;
+    lastStrokeCount = -1;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     let nextSocket;
     try {
