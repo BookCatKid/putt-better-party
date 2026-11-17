@@ -162,11 +162,38 @@ export function rememberPublicMetadata(id: string, title?: string): void {
   }
 }
 
-interface PublicCourseDetail {
+export interface PublicCourseDetail {
   id: string;
   title: string;
   author: string;
   spec: unknown;
+}
+
+/**
+ * The only way a course becomes playable. A detail response is accepted only
+ * when upstream itself calls it public, names the course that was asked for and
+ * carries a specification; anything else is a refusal, never a fallback to
+ * locally stored geometry. Kept separate from the network call so this boundary
+ * can be exercised directly.
+ */
+export function parsePublicCourseDetail(
+  id: string,
+  result: unknown,
+  listed: { title?: string; author?: string } = {},
+): PublicCourseDetail {
+  if (!isRecord(result) || result.public !== true || result.id !== id || !result.spec) {
+    throw new Error('Map is unavailable or not public');
+  }
+  const metadata = { ...listed, ...result };
+  if (typeof metadata.title !== 'string') {
+    throw new Error('Missing public course title');
+  }
+  return {
+    id,
+    title: metadata.title,
+    author: typeof metadata.author === 'string' ? metadata.author : '',
+    spec: result.spec,
+  };
 }
 
 export async function detail(
@@ -179,20 +206,11 @@ export async function detail(
   ) {
     throw new Error('Choose a hole from the public catalog first');
   }
-  const result = await callPublicFunction(DETAIL_FUNCTION, { id });
-  if (!isRecord(result) || result.public !== true || result.id !== id || !result.spec) {
-    throw new Error('Map is unavailable or not public');
-  }
-  const metadata = { ...listedCourses.get(id), ...result };
-  if (typeof metadata.title !== 'string') {
-    throw new Error('Missing public course title');
-  }
-  const course = {
+  const course = parsePublicCourseDetail(
     id,
-    title: metadata.title,
-    author: typeof metadata.author === 'string' ? metadata.author : '',
-    spec: result.spec,
-  };
+    await callPublicFunction(DETAIL_FUNCTION, { id }),
+    listedCourses.get(id),
+  );
   if (!listedCourses.has(id)) {
     listedCourses.set(id, { id, title: course.title, author: course.author });
   }

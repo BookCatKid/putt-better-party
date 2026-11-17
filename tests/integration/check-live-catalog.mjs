@@ -80,6 +80,41 @@ try {
 } finally {
   manualParty.ws.close();
 }
+// Only a course the live public detail vouches for may become playable. The
+// bundled research maps under maps/ are deliberately not reachable this way, and
+// a made-up id must not be served from disk or from a stale cache.
+const sourceParty = await connectRoom();
+try {
+  const listed = page.holes[0];
+  const importCourse = (id, saved) =>
+    fetch(base + '/api/import', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        code: sourceParty.r.code,
+        uid: sourceParty.j.uid,
+        session: sourceParty.j.session,
+        host: sourceParty.r.hostToken,
+        id,
+        saved,
+      }),
+    });
+  assert.equal((await importCourse(listed.id, true)).status, 200);
+  for (const id of [
+    'scenic',
+    'starfall',
+    'public-52e0ccaa8f0347ad84ef9ac42fa12682',
+    'deadbeefdeadbeefdeadbeefdeadbeef',
+  ]) {
+    const response = await importCourse(id, true);
+    assert.equal(response.status, 400, id + ' must not be importable');
+    assert.equal((await fetch(base + '/api/map/' + id)).status, 404, id + ' must not be served');
+  }
+  console.log('PASS only an upstream-validated public course is playable');
+} finally {
+  sourceParty.ws.close();
+}
+
 const randomParty = await connectRoom();
 try {
   randomParty.send({ t: 'config', config: { mapSource: 'random', holes: 2 } });
