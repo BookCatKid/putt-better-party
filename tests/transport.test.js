@@ -299,6 +299,73 @@ test('handshake timeout closes a silent socket and schedules a reconnect', () =>
   dispose();
 });
 
+test('a partial handshake times out when the board never arrives', () => {
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const socket = env.WebSocket.sockets[0];
+  socket.open();
+  socket.message({ t: 'hello', id: 'conn-1', isHost: false, count: 1, role: 'player' });
+  socket.message({
+    t: 'party',
+    matchId: 'm1',
+    holeIndex: 0,
+    phase: 'playing',
+    holeIds: ['p'],
+    currentMap: { id: 'p' },
+  });
+  socket.message({ t: 'roster', players: [] });
+  env.clock.advance(11_999);
+  expect(socket.readyState).toBe(1);
+  expect(env.sender()({ t: 'ping' })).toBe(false);
+  env.clock.advance(1);
+  expect(socket.readyState).toBe(3);
+  expect(env.log.connection.at(-1).connected).toBe(false);
+  dispose();
+});
+
+test('roster and board arriving before the snapshot do not synchronize early', () => {
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const socket = env.WebSocket.sockets[0];
+  socket.open();
+  socket.message({ t: 'hello', id: 'conn-1', isHost: false, count: 1, role: 'player' });
+  // Out of order relative to the server's usual sequence: state first.
+  socket.message({ t: 'roster', players: [] });
+  socket.message({ t: 'board', standings: [], alive: 1, holed: 0 });
+  expect(env.sender()({ t: 'ping' })).toBe(false);
+  expect(env.log.connection.some((entry) => entry.connected === true)).toBe(false);
+  socket.message({
+    t: 'party',
+    matchId: 'm1',
+    holeIndex: 0,
+    phase: 'playing',
+    holeIds: ['p'],
+    currentMap: { id: 'p' },
+  });
+  env.partyStore.setState({ mapReady: true });
+  expect(env.log.connection.some((entry) => entry.connected === true)).toBe(true);
+  expect(env.sender()({ t: 'ping' })).toBe(true);
+  dispose();
+});
+
+test('final standings are re-delivered by a reconnecting server, not reused from the old socket', () => {
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  let socket = env.WebSocket.sockets[0];
+  handshake(env, socket, { phase: 'final' });
+  socket.message({ t: 'final', podium: [{ id: 'old', name: 'Old' }], standings: [] });
+  expect(env.log.finals.at(-1)).toMatchObject({ podium: [{ id: 'old', name: 'Old' }] });
+  socket.drop();
+  env.clock.advance(1000);
+  socket = env.WebSocket.sockets[1];
+  handshake(env, socket, { phase: 'final' });
+  expect(env.log.finals.length).toBe(1);
+  socket.message({ t: 'final', podium: [{ id: 'new', name: 'New' }], standings: [] });
+  expect(env.log.finals.length).toBe(2);
+  expect(env.log.finals.at(-1)).toMatchObject({ podium: [{ id: 'new', name: 'New' }] });
+  dispose();
+});
+
 test('replacement-tab close is terminal: no further reconnects and the error is surfaced', () => {
   const env = fakeEnvironment();
   const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
