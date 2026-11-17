@@ -1,5 +1,7 @@
 import js from '@eslint/js';
 import globals from 'globals';
+import tsParser from '@typescript-eslint/parser';
+import tsPlugin from '@typescript-eslint/eslint-plugin';
 
 export default [
   {
@@ -14,7 +16,7 @@ export default [
   },
   js.configs.recommended,
   {
-    files: ['**/*.{js,mjs}'],
+    files: ['**/*.{js,mjs,ts}'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -31,7 +33,33 @@ export default [
       'no-empty': ['error', { allowEmptyCatch: true }],
       'no-constant-condition': ['error', { checkLoops: false }],
       'prefer-const': 'error',
+      curly: ['error', 'all'],
+      'one-var': ['error', 'never'],
+      'id-length': ['error', { min: 2, properties: 'never' }],
+      'no-nested-ternary': 'error',
+      'no-unneeded-ternary': 'error',
+      'no-shadow': 'error',
       eqeqeq: ['error', 'always', { null: 'ignore' }],
+    },
+  },
+  {
+    files: ['src/**/*.ts'],
+    languageOptions: { parser: tsParser },
+    plugins: { '@typescript-eslint': tsPlugin },
+    rules: {
+      'no-undef': 'off', // The strict compiler checks unresolved names in TypeScript.
+      'no-unused-vars': 'off',
+      'no-shadow': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { args: 'none', caughtErrors: 'none', ignoreRestSiblings: true },
+      ],
+      '@typescript-eslint/no-shadow': 'error',
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/ban-ts-comment': [
+        'error',
+        { 'ts-ignore': true, 'ts-nocheck': true, 'ts-expect-error': true },
+      ],
     },
   },
   {
@@ -40,10 +68,10 @@ export default [
     languageOptions: {
       globals: {
         ...globals.browser,
-        q: 'readonly',
-        j: 'readonly',
-        R: 'readonly',
-        L: 'readonly',
+        BetterPartyReact: 'readonly',
+        useBetterPartyState: 'readonly',
+        betterPartyStore: 'readonly',
+        updateBetterPartyConfig: 'readonly',
         bpPickerBusy: 'readonly',
         bpHostAction: 'readonly',
       },
@@ -52,7 +80,7 @@ export default [
       'no-unused-vars': [
         'error',
         {
-          varsIgnorePattern: '^(At|Bp[A-Z])',
+          varsIgnorePattern: '^(CommunityCoursePicker|Bp[A-Z])',
           args: 'none',
           caughtErrors: 'none',
           ignoreRestSiblings: true,
@@ -61,6 +89,10 @@ export default [
     },
   },
 
+  {
+    files: ['scripts/home.js'],
+    languageOptions: { globals: globals.browser },
+  },
   {
     files: ['scripts/client-bootstrap.js'],
     languageOptions: {
@@ -80,14 +112,51 @@ export default [
   {
     files: ['scripts/party-entry.js'],
     languageOptions: {
-      globals: { ...globals.browser, y: 'readonly', x: 'readonly', f: 'readonly' },
+      globals: {
+        ...globals.browser,
+        partyRouteReact: 'readonly',
+        partyRouteJsx: 'readonly',
+        joinPartyRuntime: 'readonly',
+      },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^D$', args: 'none', caughtErrors: 'none' }],
+      'no-unused-vars': [
+        'error',
+        { varsIgnorePattern: '^PartyEntry$', args: 'none', caughtErrors: 'none' },
+      ],
+    },
+  },
+  {
+    files: ['scripts/party-route.js'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        partyRouteReact: 'readonly',
+        partyRouteJsx: 'readonly',
+        partyRouteStore: 'readonly',
+        selectPartyRouteState: 'readonly',
+        defaultPartyLevel: 'readonly',
+        defaultPartySeed: 'readonly',
+        loadPartyLevel: 'readonly',
+        setPartyMapReady: 'readonly',
+        sanitizePartyLevel: 'readonly',
+        validatePartyLevel: 'readonly',
+        resetPartyRuntime: 'readonly',
+        PartyGameRoot: 'readonly',
+        PartyEntry: 'readonly',
+      },
+    },
+    rules: {
+      'no-unused-vars': [
+        'error',
+        { varsIgnorePattern: '^PartyRoute$', args: 'none', caughtErrors: 'none' },
+      ],
     },
   },
   {
     files: ['scripts/party-runtime.js'],
-    languageOptions: { globals: { ...globals.browser, i: 'readonly', u: 'readonly' } },
+    languageOptions: {
+      globals: { ...globals.browser, partyRuntimeStore: 'readonly', u: 'readonly' },
+    },
   },
 ];

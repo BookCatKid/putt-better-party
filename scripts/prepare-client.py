@@ -73,3 +73,5 @@ for name in ("assets", "models", "sky", "sfx"):
 shutil.copyfile(private / "favicon.ico", web / "favicon.ico")
 # Preserve the original hashed copies; patch only web.
 subprocess.run([sys.executable, str(root / "scripts/patch-client.py")], check=True)
+
+shutil.copyfile(root / "scripts/home.js", web / "assets/bp-home.js")

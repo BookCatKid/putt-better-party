@@ -23,54 +23,6 @@
         <p id="error" class="bp-entry-error" role="alert"></p>
       </section>
     </main>
-    <script>
-      const q = (id) => document.getElementById(id);
-      q('create').onclick = async () => {
-        q('create').disabled = true;
-        q('error').textContent = '';
-        try {
-          const r = await fetch('/api/create', { method: 'POST' }),
-            j = await r.json();
-          if (!r.ok) throw Error(j.error);
-          sessionStorage.setItem('bp.host.' + j.code, j.hostToken);
-          sessionStorage.setItem('bp.lastRoom', j.code);
-          location.href = '/party/' + j.code;
-        } catch (e) {
-          q('error').textContent = e.message;
-          q('create').disabled = false;
-        }
-      };
-      async function join(code) {
-        q('error').textContent = '';
-        code = code.trim().toUpperCase();
-        if (!/^[A-Z2-9]{5}$/.test(code)) {
-          q('error').textContent = 'Enter a valid five-character code.';
-          return;
-        }
-        try {
-          const r = await fetch('/api/room/' + code),
-            d = await r.json();
-          if (!r.ok) throw Error(d.error);
-          location.href = '/party/' + code;
-        } catch (e) {
-          q('error').textContent = e.message;
-        }
-      }
-      q('join').onsubmit = (e) => {
-        e.preventDefault();
-        join(q('code').value);
-      };
-      const recent = sessionStorage.getItem('bp.lastRoom');
-      if (recent && /^[A-Z2-9]{5}$/.test(recent))
-        fetch('/api/room/' + recent)
-          .then((r) => {
-            if (r.ok) {
-              q('resume').hidden = false;
-              q('resume').textContent = 'Return to ' + recent;
-              q('resume').onclick = () => join(recent);
-            }
-          })
-          .catch(() => {});
-    </script>
+    <script src="/assets/bp-home.js" defer></script>
   </body>
 </html>

@@ -1,9 +1,10 @@
 function BpGuestPlaylist() {
-  const config = j(R, (s) => s.config),
-    titles = j(R, (s) => s.playlistTitles) ?? {};
-  const h = q.createElement;
-  return h('div', { className: 'mb-4 rounded-xl bg-white/5 p-3 text-left' }, [
-    h(
+  const config = useBetterPartyState(betterPartyStore, (partyState) => partyState.config);
+  const titles =
+    useBetterPartyState(betterPartyStore, (partyState) => partyState.playlistTitles) ?? {};
+  const createElement = BetterPartyReact.createElement;
+  return createElement('div', { className: 'mb-4 rounded-xl bg-white/5 p-3 text-left' }, [
+    createElement(
       'p',
       { className: 'mb-2 text-sm font-bold' },
       config.holes +
@@ -13,27 +14,33 @@ function BpGuestPlaylist() {
         (config.elimination ? 'Elimination' : 'Stroke play'),
     ),
     config.mapSource === 'picked'
-      ? h(
+      ? createElement(
           'ol',
           { className: 'bp-guest-course-list' },
-          (config.selectedHoleIds ?? []).map((id, i) =>
-            h('li', { key: i + ':' + id }, [
-              h('img', { src: '/api/preview/' + encodeURIComponent(id), alt: '', loading: 'lazy' }),
-              h('span', {}, i + 1 + '. ' + (titles[id] ?? id)),
+          (config.selectedHoleIds ?? []).map((id, index) =>
+            createElement('li', { key: index + ':' + id }, [
+              createElement('img', {
+                src: '/api/preview/' + encodeURIComponent(id),
+                alt: '',
+                loading: 'lazy',
+              }),
+              createElement('span', {}, index + 1 + '. ' + (titles[id] ?? id)),
             ]),
           ),
         )
-      : h('p', { className: 'text-xs text-white/70' }, 'Random holes'),
+      : createElement('p', { className: 'text-xs text-white/70' }, 'Random holes'),
   ]);
 }
 function BpScorecard() {
-  const history = j(R, (s) => s.roundHistory),
-    final = j(R, (s) => s.final),
-    [open, setOpen] = q.useState(false);
-  if (!history?.length || !final?.standings?.length) return null;
-  const h = q.createElement;
-  return h('section', { className: 'bp-scorecard' }, [
-    h(
+  const history = useBetterPartyState(betterPartyStore, (partyState) => partyState.roundHistory);
+  const final = useBetterPartyState(betterPartyStore, (partyState) => partyState.final);
+  const [open, setOpen] = BetterPartyReact.useState(false);
+  if (!history?.length || !final?.standings?.length) {
+    return null;
+  }
+  const createElement = BetterPartyReact.createElement;
+  return createElement('section', { className: 'bp-scorecard' }, [
+    createElement(
       'button',
       {
         type: 'button',
@@ -44,45 +51,51 @@ function BpScorecard() {
       open ? 'Hide scorecard' : 'Scorecard',
     ),
     open &&
-      h(
+      createElement(
         'div',
         { className: 'bp-scorecard-scroll' },
-        h('table', {}, [
-          h('thead', {}, [
-            h('tr', {}, [
-              h('th', {}, 'Hole'),
-              ...history.map((r) => h('th', { key: r.index, title: r.title }, r.index + 1)),
-              h('th', {}, 'Total'),
-            ]),
-            h('tr', {}, [
-              h('th', {}, 'Par'),
-              ...history.map((r) =>
-                h('td', { key: r.index }, r.status === 'skipped' ? '—' : r.par),
+        createElement('table', {}, [
+          createElement('thead', {}, [
+            createElement('tr', {}, [
+              createElement('th', {}, 'Hole'),
+              ...history.map((round) =>
+                createElement('th', { key: round.index, title: round.title }, round.index + 1),
               ),
-              h('td', {}, ''),
+              createElement('th', {}, 'Total'),
+            ]),
+            createElement('tr', {}, [
+              createElement('th', {}, 'Par'),
+              ...history.map((round) =>
+                createElement(
+                  'td',
+                  { key: round.index },
+                  round.status === 'skipped' ? '—' : round.par,
+                ),
+              ),
+              createElement('td', {}, ''),
             ]),
           ]),
-          h(
+          createElement(
             'tbody',
             {},
-            final.standings.map((p) =>
-              h('tr', { key: p.uid }, [
-                h('th', {}, p.name),
-                ...history.map((r) => {
-                  const a = r.rows.find((x) => x.uid === p.uid);
-                  return h(
+            final.standings.map((player) =>
+              createElement('tr', { key: player.uid }, [
+                createElement('th', {}, player.name),
+                ...history.map((round) => {
+                  const score = round.rows.find((entry) => entry.uid === player.uid);
+                  return createElement(
                     'td',
                     {
-                      key: r.index,
-                      title: r.title + ' · ' + (a?.status ?? r.status),
-                      className: a?.status === 'holed' ? 'bp-holed' : '',
+                      key: round.index,
+                      title: round.title + ' · ' + (score?.status ?? round.status),
+                      className: score?.status === 'holed' ? 'bp-holed' : '',
                     },
-                    r.status === 'skipped'
+                    round.status === 'skipped'
                       ? 'Skip'
-                      : (a?.strokes ?? (a?.status === 'eliminated' ? 'DNF' : '—')),
+                      : (score?.strokes ?? (score?.status === 'eliminated' ? 'DNF' : '—')),
                   );
                 }),
-                h('td', {}, p.totalStrokes),
+                createElement('td', {}, player.totalStrokes),
               ]),
             ),
           ),
@@ -92,39 +105,45 @@ function BpScorecard() {
 }
 
 function BpLobbyOptions() {
-  const config = j(R, (s) => s.config),
-    preparing = j(R, (s) => s.preparing),
-    connected = j(R, (s) => s.bpConnected),
-    count = j(R, (s) => s.count),
-    h = q.createElement;
-  return h('div', { className: 'bp-lobby-options' }, [
-    h('label', {}, [
-      h('span', {}, 'Maximum players'),
-      h(
+  const config = useBetterPartyState(betterPartyStore, (partyState) => partyState.config);
+  const preparing = useBetterPartyState(betterPartyStore, (partyState) => partyState.preparing);
+  const connected = useBetterPartyState(betterPartyStore, (partyState) => partyState.bpConnected);
+  const count = useBetterPartyState(betterPartyStore, (partyState) => partyState.count);
+  const createElement = BetterPartyReact.createElement;
+  return createElement('div', { className: 'bp-lobby-options' }, [
+    createElement('label', {}, [
+      createElement('span', {}, 'Maximum players'),
+      createElement(
         'select',
         {
           'aria-label': 'Maximum players',
           disabled: preparing || !connected,
           value: config.maxPlayers,
-          onChange: (e) => L({ maxPlayers: Number(e.target.value) }),
+          onChange: (event) => updateBetterPartyConfig({ maxPlayers: Number(event.target.value) }),
         },
         [...new Set([2, 4, 6, 8, 10, 12, 16, 20, 30, 50, config.maxPlayers])]
-          .sort((a, b) => a - b)
-          .map((n) => h('option', { key: n, value: n, disabled: n < count }, n)),
+          .sort((score, right) => score - right)
+          .map((number) =>
+            createElement(
+              'option',
+              { key: number, value: number, disabled: number < count },
+              number,
+            ),
+          ),
       ),
     ]),
-    h('label', {}, [
-      h('span', {}, 'Lock party'),
-      h('input', {
+    createElement('label', {}, [
+      createElement('span', {}, 'Lock party'),
+      createElement('input', {
         type: 'checkbox',
         'aria-label': 'Lock party',
         checked: !!config.locked,
         disabled: preparing || !connected,
-        onChange: (e) => L({ locked: e.target.checked }),
+        onChange: (event) => updateBetterPartyConfig({ locked: event.target.checked }),
       }),
     ]),
     config.locked &&
-      h(
+      createElement(
         'p',
         { className: 'text-xs text-white/60' },
         'Existing players can reconnect. New players cannot join.',
@@ -132,9 +151,12 @@ function BpLobbyOptions() {
   ]);
 }
 function BpRecoveryNotice() {
-  const recovered = j(R, (s) => s.recoveryNotice);
+  const recovered = useBetterPartyState(
+    betterPartyStore,
+    (partyState) => partyState.recoveryNotice,
+  );
   return recovered
-    ? q.createElement(
+    ? BetterPartyReact.createElement(
         'p',
         { className: 'mb-3 rounded-xl bg-amber-500/10 p-3 text-xs text-amber-200', role: 'status' },
         'The server restarted. Your party and settings were recovered; start a new match when ready.',
@@ -142,11 +164,13 @@ function BpRecoveryNotice() {
     : null;
 }
 function BpUpcoming() {
-  const ids = j(R, (s) => s.holeIds),
-    index = j(R, (s) => s.holeIndex),
-    titles = j(R, (s) => s.playlistTitles);
-  if (!ids[index + 1] || !titles?.[ids[index + 1]]) return null;
-  return q.createElement(
+  const ids = useBetterPartyState(betterPartyStore, (partyState) => partyState.holeIds);
+  const index = useBetterPartyState(betterPartyStore, (partyState) => partyState.holeIndex);
+  const titles = useBetterPartyState(betterPartyStore, (partyState) => partyState.playlistTitles);
+  if (!ids[index + 1] || !titles?.[ids[index + 1]]) {
+    return null;
+  }
+  return BetterPartyReact.createElement(
     'p',
     { className: 'bp-upcoming', title: titles[ids[index + 1]] },
     'Next: ' + titles[ids[index + 1]],
@@ -154,11 +178,11 @@ function BpUpcoming() {
 }
 
 function BpNumericField({ label, value, min, max, apply, disabled, unit, sliderStep = 1 }) {
-  const h = q.createElement,
-    [draft, setDraft] = q.useState(String(value)),
-    [slider, setSlider] = q.useState(value),
-    cancel = q.useRef(false);
-  q.useEffect(() => {
+  const createElement = BetterPartyReact.createElement;
+  const [draft, setDraft] = BetterPartyReact.useState(String(value));
+  const [slider, setSlider] = BetterPartyReact.useState(value);
+  const cancel = BetterPartyReact.useRef(false);
+  BetterPartyReact.useEffect(() => {
     setDraft(String(value));
     setSlider(value);
   }, [value]);
@@ -168,23 +192,29 @@ function BpNumericField({ label, value, min, max, apply, disabled, unit, sliderS
       setDraft(String(value));
       return;
     }
-    const n = Number(draft);
-    if (draft.trim() && Number.isInteger(n) && n >= min && n <= max) {
-      if (n !== value) apply(n);
-      setDraft(String(n));
-      setSlider(n);
-    } else setDraft(String(value));
+    const number = Number(draft);
+    if (draft.trim() && Number.isInteger(number) && number >= min && number <= max) {
+      if (number !== value) {
+        apply(number);
+      }
+      setDraft(String(number));
+      setSlider(number);
+    } else {
+      setDraft(String(value));
+    }
   }
-  function slide(e) {
-    const n = Number(e.target.value);
-    setSlider(n);
-    setDraft(String(n));
-    if (n !== value) apply(n);
+  function slide(event) {
+    const number = Number(event.target.value);
+    setSlider(number);
+    setDraft(String(number));
+    if (number !== value) {
+      apply(number);
+    }
   }
-  return h('div', { className: 'bp-number-row' }, [
-    h('span', {}, label),
-    h('div', { className: 'bp-number-wrap' }, [
-      h('input', {
+  return createElement('div', { className: 'bp-number-row' }, [
+    createElement('span', {}, label),
+    createElement('div', { className: 'bp-number-wrap' }, [
+      createElement('input', {
         type: 'range',
         'aria-label': label + ' slider',
         min,
@@ -195,8 +225,8 @@ function BpNumericField({ label, value, min, max, apply, disabled, unit, sliderS
         onChange: slide,
         className: 'bp-number-slider',
       }),
-      h('div', { className: 'bp-number-box' }, [
-        h('input', {
+      createElement('div', { className: 'bp-number-box' }, [
+        createElement('input', {
           type: 'number',
           'aria-label': label,
           min,
@@ -204,44 +234,47 @@ function BpNumericField({ label, value, min, max, apply, disabled, unit, sliderS
           step: 1,
           value: draft,
           disabled,
-          onChange: (e) => setDraft(e.target.value),
+          onChange: (event) => setDraft(event.target.value),
           onBlur: commit,
-          onKeyDown: (e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              e.currentTarget.blur();
+          onKeyDown: (event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              event.currentTarget.blur();
             }
-            if (e.key === 'Escape') {
+            if (event.key === 'Escape') {
               cancel.current = true;
-              e.currentTarget.blur();
+              event.currentTarget.blur();
             }
           },
         }),
-        unit && h('span', { className: 'bp-number-unit' }, unit),
+        unit && createElement('span', { className: 'bp-number-unit' }, unit),
       ]),
     ]),
   ]);
 }
 function BpNumericSettings() {
-  const c = j(R, (s) => s.config),
-    disabled = j(R, (s) => s.preparing || s.bpPickerBusy || !s.bpConnected),
-    h = q.createElement;
-  return h(q.Fragment, {}, [
-    c.mapSource === 'random' &&
-      h(BpNumericField, {
+  const configuration = useBetterPartyState(betterPartyStore, (partyState) => partyState.config);
+  const disabled = useBetterPartyState(
+    betterPartyStore,
+    (partyState) => partyState.preparing || partyState.bpPickerBusy || !partyState.bpConnected,
+  );
+  const createElement = BetterPartyReact.createElement;
+  return createElement(BetterPartyReact.Fragment, {}, [
+    configuration.mapSource === 'random' &&
+      createElement(BpNumericField, {
         label: 'Holes',
-        value: c.holes,
+        value: configuration.holes,
         min: 1,
         max: 9,
-        apply: (holes) => L({ holes }),
+        apply: (holes) => updateBetterPartyConfig({ holes }),
         disabled,
       }),
-    h(BpNumericField, {
+    createElement(BpNumericField, {
       label: 'Timer',
-      value: Math.round(c.timerMs / 1000),
+      value: Math.round(configuration.timerMs / 1000),
       min: 20,
       max: 300,
-      apply: (n) => L({ timerMs: n * 1000 }),
+      apply: (number) => updateBetterPartyConfig({ timerMs: number * 1000 }),
       disabled,
       unit: 's',
     }),
@@ -249,15 +282,21 @@ function BpNumericSettings() {
 }
 
 function BpGuestStarting() {
-  const preparing = j(R, (s) => s.preparing),
-    phase = j(R, (s) => s.phase);
-  if (!preparing || phase !== 'lobby') return null;
-  const h = q.createElement;
-  return h('div', { className: 'bp-guest-starting', role: 'status', 'aria-live': 'polite' }, [
-    h('span', { className: 'bp-loading-spinner', 'aria-hidden': true }),
-    h('div', {}, [
-      h('p', { className: 'bp-starting-title' }, 'The host has started the party'),
-      h('p', { className: 'bp-starting-detail' }, 'Loading courses…'),
-    ]),
-  ]);
+  const preparing = useBetterPartyState(betterPartyStore, (partyState) => partyState.preparing);
+  const phase = useBetterPartyState(betterPartyStore, (partyState) => partyState.phase);
+  if (!preparing || phase !== 'lobby') {
+    return null;
+  }
+  const createElement = BetterPartyReact.createElement;
+  return createElement(
+    'div',
+    { className: 'bp-guest-starting', role: 'status', 'aria-live': 'polite' },
+    [
+      createElement('span', { className: 'bp-loading-spinner', 'aria-hidden': true }),
+      createElement('div', {}, [
+        createElement('p', { className: 'bp-starting-title' }, 'The host has started the party'),
+        createElement('p', { className: 'bp-starting-detail' }, 'Loading courses…'),
+      ]),
+    ],
+  );
 }

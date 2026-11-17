@@ -2,17 +2,18 @@
 
 ## Tooling
 
-Install Bun, Python 3, curl and ShellCheck. In a Python virtual environment, install the pinned Ruff version:
+Install Bun, Node.js 22 or later (for lint-staged), Python 3, curl and ShellCheck. In a Python virtual environment, install the pinned Ruff version:
 
 ```sh
 bun install --frozen-lockfile
 python3 -m pip install -r requirements-dev.txt
+bun run hooks:install
 bun run format
 bun run lint
 bun run check
 ```
 
-The quality check runs Prettier, ESLint, Ruff, ShellCheck and the offline unit tests. CI uses the same check. Generated assets and room data are excluded from source control and formatting.
+The quality check runs Prettier, ESLint, Ruff, ShellCheck, strict TypeScript checking and the offline unit tests. CI uses the same check. The installed pre-commit hook formats and lints staged source, runs the type checker and runs the unit tests. Generated assets and room data are excluded from source control and formatting.
 
 ## Integration tests
 
@@ -30,6 +31,8 @@ Browser integration uses Chromium via the DevTools protocol. Set `CHROME` to an 
 ```sh
 BROWSER_SCRIPT=tests/integration/check-entry-style.mjs bun run test:browser
 ```
+
+The loading regression (`check-party-loading.mjs`) delays the initial roster and scoreboard messages while the engine loads to verify that the incomplete HUD remains hidden.
 
 Recovery tests start an isolated process with a temporary database. A browser debugging disconnection is a test failure, not a successful result.
 

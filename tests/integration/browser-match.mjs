@@ -1,34 +1,38 @@
 import { connect, waitFor, pause } from './cdp.mjs';
-const base = process.env.BASE || 'http://127.0.0.1:8789',
-  debug = 'http://127.0.0.1:9239';
-const targets = await fetch(debug + '/json/list').then((r) => r.json());
-const host = await connect(targets.find((t) => t.type === 'page'));
+const base = process.env.BASE || 'http://127.0.0.1:8789';
+const debug = 'http://127.0.0.1:9239';
+const targets = await fetch(debug + '/json/list').then((response) => response.json());
+const host = await connect(targets.find((target) => target.type === 'page'));
 let guest;
 const state = '(await import("/assets/runtime-DL2fiDAQ.js")).E.state';
 const game = '(await import("/assets/runtime-DL2fiDAQ.js")).m.state';
-const read = async (c) =>
-  c.evalJS(
+const read = async (client) =>
+  client.evalJS(
     `(async()=>{const s=${state},g=${game};return {phase:s.phase,host:s.isHost,count:s.count,mapReady:s.mapReady,map:s.currentMap?.name,ids:s.holeIds,level:g.level?.name,strokes:g.strokes,gamePhase:g.phase,canvas:document.querySelectorAll("canvas").length,error:s.error}})()`,
   );
-const expect = async (c, cond, ms = 30000) =>
-  waitFor(c, `(async()=>{const s=${state},g=${game};return (${cond})})()`, ms);
-const join = async (c, name) => {
-  await waitFor(c, '!!document.querySelector("input[placeholder=\\"Your name\\"]")');
-  await c.evalJS(
+const expect = async (client, cond, ms = 30000) =>
+  waitFor(
+    client,
+    `(async()=>{const s=${state},g=${game};return (${cond})&&!document.querySelector(".bp-party-loading")})()`,
+    ms,
+  );
+const join = async (client, name) => {
+  await waitFor(client, '!!document.querySelector("input[placeholder=\\"Your name\\"]")');
+  await client.evalJS(
     `(()=>{let x=document.querySelector("input");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(x,${JSON.stringify(name)});x.dispatchEvent(new Event("input",{bubbles:true}));})()`,
   );
   await waitFor(
-    c,
+    client,
     '!![...document.querySelectorAll("button")].find(x=>x.textContent==="Join"&&!x.disabled)',
   );
-  await c.evalJS(
+  await client.evalJS(
     '[...document.querySelectorAll("button")].find(x=>x.textContent==="Join").click()',
   );
-  await expect(c, 's.roster.length>0 && s.mapReady && !!g.level', 45000);
+  await expect(client, 's.roster.length>0 && s.mapReady && !!g.level', 45000);
 };
 try {
   await host.call('Page.navigate', { url: base + '/home' });
-  await waitFor(host, '!!document.querySelector("#create")');
+  await waitFor(host, 'typeof document.querySelector("#create")?.onclick === "function"');
   await host.evalJS('document.querySelector("#create").click()');
   await waitFor(host, 'location.pathname.startsWith("/party/")');
   await join(host, 'Host');
@@ -37,7 +41,7 @@ try {
   console.log('Room', url, 'host', await read(host));
   const target = await fetch(debug + '/json/new?' + encodeURIComponent(url), {
     method: 'PUT',
-  }).then((r) => r.json());
+  }).then((response) => response.json());
   guest = await connect(target);
   await join(guest, 'Guest');
   await expect(host, 's.roster.length===2');
@@ -118,17 +122,17 @@ try {
     });
     console.log('After actual pointer drag', await read(guest));
   }
-  async function giveUp(c) {
-    await c.call('Page.bringToFront');
+  async function giveUp(client) {
+    await client.call('Page.bringToFront');
     await waitFor(
-      c,
+      client,
       '!![...document.querySelectorAll("button")].find(x=>x.textContent==="Give up")',
       10000,
     );
-    await c.evalJS(
+    await client.evalJS(
       '[...document.querySelectorAll("button")].find(x=>x.textContent==="Give up").click()',
     );
-    await c.evalJS(
+    await client.evalJS(
       '[...document.querySelectorAll("button")].find(x=>x.textContent==="Yes").click()',
     );
   }
@@ -155,21 +159,22 @@ try {
     'PASS two-player, two-hole public playlist, actual input, give-up, final results, back to lobby',
   );
 } finally {
-  for (const [label, c] of [
+  for (const [label, client] of [
     ['Host', host],
     ['Guest', guest],
-  ])
-    if (c) {
-      console.log(label + ' events', JSON.stringify(c.events.slice(-50)));
+  ]) {
+    if (client) {
+      console.log(label + ' events', JSON.stringify(client.events.slice(-50)));
       console.log(
         label + ' external network requests',
         JSON.stringify(
-          [...c.requests.values()].filter(
+          [...client.requests.values()].filter(
             (url) =>
               url && !url.startsWith(base) && !url.startsWith('data:') && !url.startsWith('blob:'),
           ),
         ),
       );
-      c.close();
+      client.close();
     }
+  }
 }

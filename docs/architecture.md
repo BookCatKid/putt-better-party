@@ -19,3 +19,7 @@ Hosts can extend the current round by 15, 30 or 60 seconds up to 15 minutes. Ski
 ## Deployment considerations
 
 The service is intended to operate independently of putt.day's official party servers. Public course availability depends on the pinned upstream read protocol. Before exposing a service publicly, obtain any needed asset redistribution permission and review authentication, abuse prevention, rate limits and deployment security. Client-reported scores are not server-verified physics.
+
+## Client initialization
+
+The original game component must mount before its WebSocket connects. The party route keeps that component mounted but suppresses its incomplete HUD until the authoritative snapshot, local player roster entry, scoreboard, accepted map and original scene preparation callback are available. Final results also require the final standings message. The original scene preparation includes its upstream fallback timeout; this is not a guarantee that every GPU or asset has loaded successfully.

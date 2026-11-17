@@ -1,26 +1,28 @@
 function BpHostMenu({ settingsOpen, closeSettings }) {
-  const active = j(R, (s) => s.active),
-    host = j(R, (s) => s.isHost),
-    phase = j(R, (s) => s.phase),
-    hole = j(R, (s) => s.holeIndex);
-  const [open, setOpen] = q.useState(false),
-    [confirm, setConfirm] = q.useState(null),
-    [pending, setPending] = q.useState(false),
-    [error, setError] = q.useState('');
-  q.useEffect(() => {
+  const active = useBetterPartyState(betterPartyStore, (partyState) => partyState.active);
+  const host = useBetterPartyState(betterPartyStore, (partyState) => partyState.isHost);
+  const phase = useBetterPartyState(betterPartyStore, (partyState) => partyState.phase);
+  const hole = useBetterPartyState(betterPartyStore, (partyState) => partyState.holeIndex);
+  const [open, setOpen] = BetterPartyReact.useState(false);
+  const [confirm, setConfirm] = BetterPartyReact.useState(null);
+  const [pending, setPending] = BetterPartyReact.useState(false);
+  const [error, setError] = BetterPartyReact.useState('');
+  BetterPartyReact.useEffect(() => {
     setOpen(false);
     setConfirm(null);
   }, [phase, hole]);
-  q.useEffect(() => {
+  BetterPartyReact.useEffect(() => {
     if (settingsOpen) {
       setOpen(false);
       setConfirm(null);
     }
   }, [settingsOpen]);
-  q.useEffect(() => {
-    if (!open) return;
-    const key = (e) => {
-      if (e.key === 'Escape') {
+  BetterPartyReact.useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const key = (event) => {
+      if (event.key === 'Escape') {
         setOpen(false);
         setConfirm(null);
       }
@@ -28,25 +30,29 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   }, [open]);
-  if (!active || !host || !['playing', 'countdown', 'hole-results'].includes(phase)) return null;
-  const h = q.createElement,
-    live = phase === 'playing' || phase === 'countdown';
+  if (!active || !host || !['playing', 'countdown', 'hole-results'].includes(phase)) {
+    return null;
+  }
+  const createElement = BetterPartyReact.createElement;
+  const live = phase === 'playing' || phase === 'countdown';
   const run = async (action, seconds) => {
-    if (pending) return;
+    if (pending) {
+      return;
+    }
     setPending(true);
     setError('');
     try {
       await bpHostAction(action, seconds);
       setOpen(false);
       setConfirm(null);
-    } catch (e) {
-      setError(e.message);
+    } catch (commandError) {
+      setError(commandError.message);
     } finally {
       setPending(false);
     }
   };
   const btn = (label, fn, disabled = false, cls = '') =>
-    h(
+    createElement(
       'button',
       {
         type: 'button',
@@ -56,8 +62,13 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
       },
       label,
     );
-  return h('div', { className: 'relative bp-host-control' }, [
-    h(
+  const confirmationMessages = {
+    end: 'End the party now?',
+    skip: 'Skip this hole for everyone?',
+    restart: 'Restart this hole for everyone?',
+  };
+  return createElement('div', { className: 'relative bp-host-control' }, [
+    createElement(
       'button',
       {
         type: 'button',
@@ -68,11 +79,11 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
           'pointer-events-auto rounded-xl bg-black/50 px-3 py-2 text-lg transition hover:bg-black/70',
         onClick: () => {
           closeSettings();
-          setOpen((v) => !v);
+          setOpen((previousOpen) => !previousOpen);
           setConfirm(null);
         },
       },
-      h(
+      createElement(
         'svg',
         {
           width: 20,
@@ -85,43 +96,36 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
           strokeLinejoin: 'round',
           'aria-hidden': true,
         },
-        [h('path', { d: 'M4 21V4m0 1c5-4 8 4 16 0v10c-8 4-11-4-16 0' })],
+        [createElement('path', { d: 'M4 21V4m0 1c5-4 8 4 16 0v10c-8 4-11-4-16 0' })],
       ),
     ),
     open &&
-      h(
+      createElement(
         'div',
         {
           className:
             'bp-host-panel pointer-events-auto absolute right-0 top-12 rounded-2xl bg-[#11272b] p-4 shadow-2xl',
         },
         [
-          h('h3', { className: 'mb-3 text-sm font-bold' }, 'Party controls'),
-          error && h('p', { role: 'alert', className: 'mb-2 text-xs text-red-300' }, error),
-          pending && h('p', { role: 'status', className: 'text-xs' }, 'Applying…'),
+          createElement('h3', { className: 'mb-3 text-sm font-bold' }, 'Party controls'),
+          error &&
+            createElement('p', { role: 'alert', className: 'mb-2 text-xs text-red-300' }, error),
+          pending && createElement('p', { role: 'status', className: 'text-xs' }, 'Applying…'),
           confirm
-            ? h('div', { className: 'bp-host-confirm' }, [
-                h(
-                  'p',
-                  {},
-                  confirm === 'end'
-                    ? 'End the party now?'
-                    : confirm === 'skip'
-                      ? 'Skip this hole for everyone?'
-                      : 'Restart this hole for everyone?',
-                ),
-                h('div', { className: 'bp-host-time' }, [
+            ? createElement('div', { className: 'bp-host-confirm' }, [
+                createElement('p', {}, confirmationMessages[confirm]),
+                createElement('div', { className: 'bp-host-time' }, [
                   btn('Cancel', () => setConfirm(null)),
                   btn('Confirm', () => run(confirm), false, 'bp-danger'),
                 ]),
               ])
             : [
-                h('p', { className: 'text-xs text-white/70' }, 'Add time'),
-                h(
+                createElement('p', { className: 'text-xs text-white/70' }, 'Add time'),
+                createElement(
                   'div',
                   { className: 'bp-host-time' },
-                  [15, 30, 60].map((s) =>
-                    btn('+' + s + 's', () => run('time', s), phase !== 'playing'),
+                  [15, 30, 60].map((seconds) =>
+                    btn('+' + seconds + 's', () => run('time', seconds), phase !== 'playing'),
                   ),
                 ),
                 btn('Skip level', () => setConfirm('skip'), !live),
@@ -134,21 +138,21 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
 }
 
 function BpConnectionNotice() {
-  const active = j(R, (s) => s.active),
-    connected = j(R, (s) => s.bpConnected);
-  const [show, setShow] = q.useState(false);
-  q.useEffect(() => {
+  const active = useBetterPartyState(betterPartyStore, (partyState) => partyState.active);
+  const connected = useBetterPartyState(betterPartyStore, (partyState) => partyState.bpConnected);
+  const [show, setShow] = BetterPartyReact.useState(false);
+  BetterPartyReact.useEffect(() => {
     if (!active || connected) {
       setShow(false);
       return;
     }
-    const t = setTimeout(() => setShow(true), 2000);
-    return () => clearTimeout(t);
+    const timeout = setTimeout(() => setShow(true), 2000);
+    return () => clearTimeout(timeout);
   }, [active, connected]);
   return active && !connected && show
-    ? q.createElement('div', { className: 'bp-disconnected', role: 'alert' }, [
+    ? BetterPartyReact.createElement('div', { className: 'bp-disconnected', role: 'alert' }, [
         'Party disconnected. Reconnecting… ',
-        q.createElement('a', { href: '/home' }, 'Return to party home'),
+        BetterPartyReact.createElement('a', { href: '/home' }, 'Return to party home'),
       ])
     : null;
 }

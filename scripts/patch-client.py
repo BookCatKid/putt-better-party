@@ -31,32 +31,26 @@ def index_patch(s):
 patch("index-DFMxt6BL.js", index_patch)
 
 
-def route_patch(s):
-    s = replace_once(
-        s,
-        "let{code:e}=s.useParams()",
-        'let e=decodeURIComponent(location.pathname.split("/").at(-1))',
-    )
-    s = replace_once(
-        s,
+def route_patch(source):
+    source = replace_once(
+        source,
         "let t=await c({data:{id:e}})",
         'let t=await fetch("/api/map/"+encodeURIComponent(e)).then(r=>r.json())',
     )
-    # Derive the title from the original party state, including actual course metadata.
-    s = replace_once(
-        s,
-        "a=l(u,e=>e.matchId),o=l(u,e=>e.error)",
-        "a=l(u,e=>e.matchId),bpPhase=l(u,e=>e.phase),o=l(u,e=>e.error)",
+    start = source.index("function E(){")
+    end = source.index("export{E as component}", start)
+    return (
+        source[:start]
+        + """
+const partyRouteReact = y, partyRouteJsx = x, partyRouteStore = u;
+const selectPartyRouteState = l, joinPartyRuntime = f, resetPartyRuntime = p;
+const defaultPartyLevel = C, defaultPartySeed = S, loadPartyLevel = T;
+const setPartyMapReady = d, sanitizePartyLevel = g, validatePartyLevel = h, PartyGameRoot = m;
+"""
+        + (root / "scripts/party-entry.js").read_text()
+        + (root / "scripts/party-route.js").read_text()
+        + source[end:].replace("export{E as component}", "export{PartyRoute as component}", 1)
     )
-    s = replace_once(
-        s,
-        "[O,k]=(0,y.useState)(C);return",
-        '[O,k]=(0,y.useState)(C);(0,y.useEffect)(()=>{document.title=!t?"Join "+e+" · Better Party":bpPhase==="lobby"?"Party "+e+" · Better Party":bpPhase==="final"?"Results · Better Party":i?.name?i.name+" · Hole "+(r+1)+"/"+n.length+" · Better Party":"Party "+e+" · Better Party"},[e,t,bpPhase,i,r,n.length]);return',
-    )
-    # Independent identity and name entry, same runtime join; no official verification/auth.
-    start = s.index("function D({code:e})")
-    end = s.index("export{E as component}", start)
-    return s[:start] + (root / "scripts/party-entry.js").read_text() + s[end:]
 
 
 patch("party._code-D3a-IB4-.js", route_patch)
@@ -107,7 +101,15 @@ def transport_patch(s):
         "&&ne(!1);return;case`roster`",
         "&&ne(!1);if(bpSame&&t.phase===`playing`&&M.state.selfRole!==`spectator`&&r?.readyState===WebSocket.OPEN){let g=B.state;if(g.phase===`holed`&&g.result)r.send(JSON.stringify({f:1,s:g.result.strokes,p:g.result.par,matchId:t.matchId,holeIndex:t.holeIndex}));else if(g.phase===`forfeit`)r.send(JSON.stringify({t:`forfeit`,matchId:t.matchId,holeIndex:t.holeIndex}));else r.send(JSON.stringify({t:`prog`,st:g.strokes,matchId:t.matchId,holeIndex:t.holeIndex}))}return;case`roster`",
     )
-    return 'import{bpConnection,bpAck}from"./runtime-DL2fiDAQ.js";' + s[:a] + part + s[b:]
+    # It invokes onReady after the original scene's shader/texture preparation.
+    # Retain the original quality timer and report the actual prepared level ID.
+    source = s[:a] + part + s[b:]
+    source = replace_once(
+        source,
+        "ne=(0,J.useCallback)(()=>{window.setTimeout(()=>j(!0),2500)},[])",
+        "ne=(0,J.useCallback)(()=>{bpScenePrepared(l.id);window.setTimeout(()=>j(!0),2500)},[l.id])",
+    )
+    return 'import{bpConnection,bpAck,bpScenePrepared}from"./runtime-DL2fiDAQ.js";' + source
 
 
 patch("GameCanvas-C5hQh1sR.js", transport_patch)
@@ -116,8 +118,18 @@ patch("GameCanvas-C5hQh1sR.js", transport_patch)
 def runtime_patch(s):
     s = replace_once(
         s,
+        "active:!0,code:e,hostToken:n,self:t,selfRole:",
+        "active:!0,bpInitialSnapshot:false,bpSceneReady:null,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
+    )
+    s = replace_once(
+        s,
+        "active:!1,selfRole:",
+        "active:!1,bpInitialSnapshot:false,bpSceneReady:null,selfRole:",
+    )
+    s = replace_once(
+        s,
         "phase:e.phase,holeIndex:e.holeIndex",
-        "recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
+        "bpInitialSnapshot:true,recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
     )
     s = replace_once(
         s,
@@ -129,7 +141,7 @@ def runtime_patch(s):
         "t.state.active&&(e.phase===`holed`",
         "(t.state.active||(i.state.active&&i.state.phase===`playing`&&i.state.selfRole===`player`))&&(e.phase===`holed`",
     )
-    return s + (root / "scripts/party-runtime.js").read_text()
+    return s + "\nconst partyRuntimeStore = i;\n" + (root / "scripts/party-runtime.js").read_text()
 
 
 patch("runtime-DL2fiDAQ.js", runtime_patch)
@@ -139,7 +151,13 @@ def game_patch(s):
     s = 'import{bpHostAction,bpPickerBusy}from"./runtime-DL2fiDAQ.js";' + s
     a = s.index("function At(")
     b = s.index("function jt(", a)
-    s = s[:a] + (root / "scripts/picker.js").read_text() + s[b:]
+    s = (
+        s[:a]
+        + "\nconst BetterPartyReact = q, useBetterPartyState = j, betterPartyStore = R, updateBetterPartyConfig = L;\n"
+        + (root / "scripts/picker.js").read_text()
+        + "\nfunction At(props){return CommunityCoursePicker(props)}\n"
+        + s[b:]
+    )
     a = s.index("function Mt(")
     b = s.index("function Nt(", a)
     s = (
@@ -215,9 +233,7 @@ def game_patch(s):
     )
     s = replace_once(
         s,
-        "(0,J.jsx)(It,{}),(0,J.jsx)(Lt,{} as never)"
-        if False
-        else "(0,J.jsx)(It,{}),(0,J.jsx)(Lt,{})",
+        "(0,J.jsx)(It,{}),(0,J.jsx)(Lt,{})",
         "(0,J.jsx)(It,{}),(0,J.jsx)(BpConnectionNotice,{}),(0,J.jsx)(Lt,{})",
     )
     s = replace_once(
@@ -240,7 +256,6 @@ def game_patch(s):
         "className:`flex shrink-0 items-start gap-2`,children:[s&&",
         "className:`flex shrink-0 items-start gap-2 bp-toolbar`,children:[s&&",
     )
-    s = replace_once(s, "children:`⚙️`}),A&&", "children:`⚙️`}),A&&")
     # Host menu is a sibling of the settings wrapper, not inside it.
     a = s.index("function It(")
     s = s[:a] + (root / "scripts/match-details.js").read_text() + s[a:]
@@ -280,5 +295,5 @@ for source in (private / "assets").glob("*.js"):
     "export const Xt={state:{active:false}}; export const A=new Map();"
 )
 print(
-    "Patched isolated browser bootstrap, local join, local catalog, original validation; Only party transport changed in GameCanvas; physics unchanged."
+    "Patched isolated browser bootstrap, local join, local catalog, original validation; Party transport and scene readiness changes only in GameCanvas; physics unchanged."
 )

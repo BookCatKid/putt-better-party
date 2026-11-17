@@ -1,88 +1,113 @@
 import assert from 'node:assert/strict';
-const base = process.env.BASE || 'http://127.0.0.1:8789',
-  headers = { origin: base, 'content-type': 'application/json' };
+const base = process.env.BASE || 'http://127.0.0.1:8789';
+const headers = { origin: base, 'content-type': 'application/json' };
 const post = async (path, data) => {
-  const res = await fetch(base + path, { method: 'POST', headers, body: JSON.stringify(data) }),
-    body = await res.json();
+  const res = await fetch(base + path, { method: 'POST', headers, body: JSON.stringify(data) });
+  const body = await res.json();
   assert(res.ok, JSON.stringify(body));
   return body;
 };
-const room = await post('/api/create', {}),
-  page = await fetch(base + '/api/catalog?sort=new&offset=0').then((r) => r.json()),
-  id = page.holes[0].id;
+const room = await post('/api/create', {});
+const page = await fetch(base + '/api/catalog?sort=new&offset=0').then((response) =>
+  response.json(),
+);
+const id = page.holes[0].id;
 const sockets = [];
 async function connect(name, host) {
-  const j = await post('/api/join', { code: room.code, name }),
-    frames = [];
+  const identity = await post('/api/join', { code: room.code, name });
+  const frames = [];
   const ws = new WebSocket(base.replace('http', 'ws') + '/ws/party/' + room.code, {
     headers: { origin: base },
   });
   sockets.push(ws);
-  ws.onmessage = (e) => frames.push(JSON.parse(e.data));
-  await new Promise((r, j) => {
-    ws.onopen = r;
-    ws.onerror = j;
+  ws.onmessage = (event) => frames.push(JSON.parse(event.data));
+  await new Promise((resolve, reject) => {
+    ws.onopen = resolve;
+    ws.onerror = reject;
   });
-  const send = (m) => ws.send(JSON.stringify(m));
+  const send = (message) => ws.send(JSON.stringify(message));
   const wait = async (predicate, timeout = 25000) => {
     const end = Date.now() + timeout;
     while (Date.now() < end) {
-      const m = frames.find(predicate);
-      if (m) return m;
+      const message = frames.find(predicate);
+      if (message) {
+        return message;
+      }
       await Bun.sleep(25);
     }
-    throw Error(JSON.stringify(frames.slice(-5).map(({ t, phase, code }) => ({ t, phase, code }))));
+    throw Error(
+      JSON.stringify(
+        frames.slice(-5).map(({ t: target, phase, code }) => ({ t: target, phase, code })),
+      ),
+    );
   };
-  send({ t: 'join', ...j, host: host ? room.hostToken : undefined, protocol: 2, instance: name });
-  await wait((m) => m.t === 'hello' && m.isHost === host);
-  return { j, frames, send, wait };
+  send({
+    t: 'join',
+    ...identity,
+    host: host ? room.hostToken : undefined,
+    protocol: 2,
+    instance: name,
+  });
+  await wait((message) => message.t === 'hello' && message.isHost === host);
+  return { j: identity, frames, send, wait };
 }
 try {
-  const h = await connect('Lifecycle host', true),
-    g = await connect('Lifecycle guest', false);
+  const host = await connect('Lifecycle host', true);
+  const guest = await connect('Lifecycle guest', false);
   await post('/api/import', {
     code: room.code,
-    uid: h.j.uid,
-    session: h.j.session,
+    uid: host.j.uid,
+    session: host.j.session,
     host: room.hostToken,
     id,
   });
-  h.send({
+  host.send({
     t: 'config',
     config: { mapSource: 'picked', selectedHoleIds: [id, id], elimination: false, timerMs: 20000 },
   });
-  await h.wait((m) => m.t === 'party' && m.config.selectedHoleIds.length === 2);
-  h.send({ t: 'start' });
-  await h.wait((m) => m.t === 'party' && m.preparing);
-  for (let i = 0; i < 2; i++) {
-    const pred = (m) => m.t === 'party' && m.phase === 'playing' && m.holeIndex === i;
-    const s = await h.wait(pred);
-    await g.wait(pred);
-    assert.equal(s.currentMap.name, page.holes[0].title);
-    assert.deepEqual(s.holeIds, [id, id]);
-    h.send({ t: 'prog', st: 1 });
-    h.send({ f: 1, s: 1, p: s.currentMap.par });
-    g.send({ t: 'forfeit' });
-    await h.wait((m) => m.t === 'party' && m.phase === 'hole-results' && m.holeIndex === i);
-    console.log('PASS live WebSocket hole', i + 1);
+  await host.wait(
+    (message) => message.t === 'party' && message.config.selectedHoleIds.length === 2,
+  );
+  host.send({ t: 'start' });
+  await host.wait((message) => message.t === 'party' && message.preparing);
+  for (let index = 0; index < 2; index++) {
+    const pred = (message) =>
+      message.t === 'party' && message.phase === 'playing' && message.holeIndex === index;
+    const snapshot = await host.wait(pred);
+    await guest.wait(pred);
+    assert.equal(snapshot.currentMap.name, page.holes[0].title);
+    assert.deepEqual(snapshot.holeIds, [id, id]);
+    host.send({ t: 'prog', st: 1 });
+    host.send({ f: 1, s: 1, p: snapshot.currentMap.par });
+    guest.send({ t: 'forfeit' });
+    await host.wait(
+      (message) =>
+        message.t === 'party' && message.phase === 'hole-results' && message.holeIndex === index,
+    );
+    console.log('PASS live WebSocket hole', index + 1);
   }
-  const final = await h.wait((m) => m.t === 'final');
-  await g.wait((m) => m.t === 'final');
-  assert.equal(final.standings[0].uid, h.j.uid);
+  const final = await host.wait((message) => message.t === 'final');
+  await guest.wait((message) => message.t === 'final');
+  assert.equal(final.standings[0].uid, host.j.uid);
   assert.equal(final.standings[0].totalStrokes, 2);
   assert.equal(final.standings.length, 2);
   console.log('PASS final standings');
-  h.frames.length = 0;
-  g.frames.length = 0;
-  h.send({ t: 'rematch' });
-  await h.wait(
-    (m) => m.t === 'party' && m.phase === 'lobby' && m.config.selectedHoleIds.length === 2,
+  host.frames.length = 0;
+  guest.frames.length = 0;
+  host.send({ t: 'rematch' });
+  await host.wait(
+    (message) =>
+      message.t === 'party' &&
+      message.phase === 'lobby' &&
+      message.config.selectedHoleIds.length === 2,
   );
-  await g.wait((m) => m.t === 'party' && m.phase === 'lobby');
+  await guest.wait((message) => message.t === 'party' && message.phase === 'lobby');
   console.log('PASS rematch retains selected playlist');
-} catch (e) {
-  console.error(e);
+} catch (event) {
+  console.error(event);
   process.exitCode = 1;
 } finally {
-  for (const ws of sockets) ws.close();
+  for (const ws of sockets) {
+    ws.close();
+  }
 }

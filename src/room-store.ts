@@ -1,15 +1,23 @@
-import { Database } from 'bun:sqlite';
+import { Database, type Statement } from 'bun:sqlite';
+import { errorMessage, type CourseIndex } from './domain.js';
+import type { RoomCheckpoint, RoomOptions } from './room-types.js';
 import { mkdirSync, chmodSync } from 'node:fs';
 import path from 'node:path';
 import { Room } from './room.js';
 
 export class RoomStore {
-  constructor(filename) {
+  readonly db: Database;
+  private readonly put: Statement<unknown, [string, number, string]>;
+  private readonly del: Statement<unknown, [string]>;
+
+  constructor(filename: string) {
     if (filename !== ':memory:') {
       mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
     }
     this.db = new Database(filename, { create: true });
-    if (filename !== ':memory:') chmodSync(filename, 0o600);
+    if (filename !== ':memory:') {
+      chmodSync(filename, 0o600);
+    }
     this.db.exec(
       'PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS rooms(code TEXT PRIMARY KEY, updated INTEGER NOT NULL, payload TEXT NOT NULL)',
     );
@@ -18,25 +26,30 @@ export class RoomStore {
     );
     this.del = this.db.prepare('DELETE FROM rooms WHERE code=?');
   }
-  save(room) {
+  save(room: Room) {
     this.put.run(room.code, room.lastActivity, JSON.stringify(room.checkpoint()));
   }
-  remove(code) {
+  remove(code: string) {
     this.del.run(code);
   }
-  load(catalog, options = {}, now = Date.now()) {
+  load(catalog: CourseIndex, options: RoomOptions = {}, now = Date.now()): Map<string, Room> {
     this.db.query('DELETE FROM rooms WHERE updated<?').run(now - 1800000);
     const rooms = new Map();
-    for (const row of this.db.query('SELECT payload FROM rooms').all()) {
+    for (const row of this.db.query<{ payload: string }, []>('SELECT payload FROM rooms').all()) {
       try {
-        const data = JSON.parse(row.payload);
-        if (data.version !== 1) continue;
-        const room = new Room(data.code, catalog, { ...options, onChange: (r) => this.save(r) });
+        const data: RoomCheckpoint = JSON.parse(row.payload);
+        if (data.version !== 1) {
+          continue;
+        }
+        const room = new Room(data.code, catalog, {
+          ...options,
+          onChange: (changedRoom) => this.save(changedRoom),
+        });
         room.restore(data);
         rooms.set(room.code, room);
         this.save(room);
-      } catch (e) {
-        console.error('Could not recover a stored room:', e.message);
+      } catch (error) {
+        console.error('Could not recover a stored room:', errorMessage(error));
       }
     }
     return rooms;
