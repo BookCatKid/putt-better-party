@@ -4,42 +4,16 @@
 <title>Better Party</title>
 <link rel="icon" href="/favicon.ico" type="image/x-icon">
 <link rel="stylesheet" href="/assets/styles-S28F_fms.css">
-<style>
-:root{color-scheme:dark}
-body{margin:0;background:radial-gradient(ellipse at 50% 18%,#193b32 0%,#112820 44%,#0e201b 100%);color:#e4eee9;min-height:100vh}
-.bp-home{min-height:100dvh;display:grid;place-items:center;padding:40px 24px;box-sizing:border-box}
-.bp-entry{width:100%;min-width:0;max-width:400px;margin:0 auto;text-align:center}
-.bp-entry h1{margin:0 0 44px;font-size:clamp(34px,10vw,58px);line-height:1.1;letter-spacing:-.065em;font-weight:900}
-.bp-entry h1 span{color:#34d399}
-.bp-entry button,.bp-entry input{font-family:inherit;font-size:15px;line-height:1.25;border-radius:12px;box-sizing:border-box}
-.bp-entry button{cursor:pointer;font-weight:650;transition:background-color .15s,border-color .15s}
-.bp-entry button:focus-visible,.bp-entry input:focus-visible{outline:2px solid #6ee7b7;outline-offset:3px}
-.bp-create{display:flex;align-items:center;justify-content:center;gap:8px;background:#10b981;color:#052e22;width:100%;min-height:56px;padding:14px 18px;border:1px solid transparent}
-.bp-create:hover{background:#34d399}
-.bp-separator{display:flex;align-items:center;gap:14px;margin:24px 0;color:#99aaa1;font-size:12px;font-weight:500}
-.bp-separator::before,.bp-separator::after{content:"";height:1px;background:#ffffff17;flex:1}
-.bp-home form{display:flex;align-items:stretch;gap:10px;margin:0}
-.bp-home form input{flex:1;min-width:0;height:54px;padding:12px 16px;background:#ffffff06;border:1px solid #ffffff25;color:#f0fdf4;text-transform:uppercase;text-align:center;font-size:17px;letter-spacing:.2em;font-weight:600}
-.bp-home form input::placeholder{color:#8b9d95;font-weight:500}
-.bp-home form input:hover{border-color:#ffffff40}
-.bp-home form input:focus{border-color:#34d399}
-.bp-home form button{flex-shrink:0;min-width:76px;background:#ffffff14;border:1px solid #ffffff09;color:#e4eee9;padding:12px 20px}
-.bp-home form button:hover,.bp-resume:hover{background:#ffffff20}
-.bp-home button:disabled{opacity:.5;cursor:default}
-.bp-home .bp-resume{display:flex;align-items:center;justify-content:center;min-height:50px;width:100%;margin-top:20px;padding:12px 16px;background:#ffffff08;border:1px solid #ffffff19;color:#dce9e1;font-size:14px;font-weight:600}
-.bp-home .bp-resume:hover{border-color:#ffffff35}
-.bp-home [hidden],#error:empty{display:none!important}
-#error{margin:16px 0 0;font-size:13px;color:#fca5a5}
-@media(max-width:480px){.bp-home{padding:28px 24px}.bp-entry h1{margin-bottom:36px}.bp-separator{margin:22px 0}}
-</style>
+<body class="bp-page">
+
 <main class="bp-home">
  <section class="bp-entry">
- <h1>better<span>.party</span></h1>
+ <h1 class="bp-wordmark">better<span>.party</span></h1>
  <button id="create" class="bp-create" type="button">Create a party</button>
  <div class="bp-separator">or join one</div>
  <form id="join"><input id="code" aria-label="Party code" placeholder="CODE" maxlength="5" required><button>Join</button></form>
  <button id="resume" class="bp-resume" hidden type="button"></button>
- <p id="error" role="alert"></p>
+ <p id="error" class="bp-entry-error" role="alert"></p>
  </section>
 </main>
 <script>
@@ -50,4 +24,5 @@ q('join').onsubmit=e=>{e.preventDefault();join(q('code').value)};
 const recent=sessionStorage.getItem('bp.lastRoom');
 if(recent&&/^[A-Z2-9]{5}$/.test(recent))fetch('/api/room/'+recent).then(r=>{if(r.ok){q('resume').hidden=false;q('resume').textContent='Return to '+recent;q('resume').onclick=()=>join(recent)}}).catch(()=>{});
 </script>
+</body>
 </html>

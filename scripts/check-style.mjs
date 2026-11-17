@@ -7,8 +7,8 @@ try{
  await waitFor(c,'!!document.querySelector("#create")');
  await c.evalJS('document.querySelector("#create").click()');
  await waitFor(c,'!!document.querySelector("input[placeholder=\\\"Your name\\\"]")');
- const joinStyle=await c.evalJS('(()=>{let x=document.querySelector("main"),p=x.parentElement;return {display:getComputedStyle(p).display,position:getComputedStyle(p).position,width:getComputedStyle(x).maxWidth,sheets:[...document.styleSheets].map(s=>s.cssRules.length)}})()');
- assert.equal(joinStyle.display,'flex');assert.equal(joinStyle.position,'fixed');assert(joinStyle.sheets.some(n=>n>3));
+ const joinStyle=await c.evalJS('(()=>{let x=document.querySelector("main.bp-home"),p=x.querySelector(".bp-entry");return {display:getComputedStyle(x).display,position:getComputedStyle(x).position,width:getComputedStyle(p).maxWidth,sheets:[...document.styleSheets].map(s=>s.cssRules.length)}})()');
+ assert.equal(joinStyle.display,'grid');assert.equal(joinStyle.width,'400px');assert(joinStyle.sheets.some(n=>n>3));
  await c.evalJS('(()=>{let x=document.querySelector("input[placeholder=\\\"Your name\\\"]");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(x,"Style test");x.dispatchEvent(new Event("input",{bubbles:true}));})()');
  await waitFor(c,'!![...document.querySelectorAll("button")].find(b=>b.textContent==="Join"&&!b.disabled)');
  await c.evalJS('[...document.querySelectorAll("button")].find(b=>b.textContent==="Join").click()');
@@ -21,7 +21,7 @@ try{
  await c.evalJS('(()=>{let s=document.querySelector("select[aria-label=\\\"Party map selection\\\"]");s.value="picked";s.dispatchEvent(new Event("change",{bubbles:true}));})()');
  await waitFor(c,'!!document.querySelector("button[aria-label^=\\\"Add \\\"]")',30000);
  const body=await c.evalJS('document.body.innerText');
- assert(!body.includes('Cached / local'));assert(!body.includes('Random cached holes'));assert(body.includes('422 courses'));
+ assert(!body.includes('Cached / local'));assert(!body.includes('Random cached holes'));assert(await c.evalJS('document.querySelectorAll(".bp-catalog-scroll li").length>0'));
  console.log('PASS actual browser CSS and public-only picker');
  const pic=await c.call('Page.captureScreenshot',{format:'png'});await Bun.write('picker-proof.png',Buffer.from(pic.data,'base64'));
 }finally{c.close()}

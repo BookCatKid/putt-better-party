@@ -15,7 +15,7 @@ const response=(data,status=200)=>Response.json(data,{status});
 const csp="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://127.0.0.1:"+port+"; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
 const page=(s)=>new Response(s,{headers:{'content-type':'text/html; charset=utf-8','content-security-policy':csp,'referrer-policy':'no-referrer','cache-control':'no-store'}});
 const jsonBody=async r=>{if(Number(r.headers.get('content-length'))>1000000)throw Error('Request too large');return await r.json()};
-const html='<!doctype html><html lang="en" class="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Party · Better Party</title><link rel="icon" href="/favicon.ico" type="image/x-icon"><link rel="stylesheet" href="/assets/styles-S28F_fms.css"><body style="margin:0;background:#1c2b29;color:white"><div id="app"></div><script type="module" src="/assets/index-DFMxt6BL.js"></script></body></html>';
+const html='<!doctype html><html lang="en" class="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Party · Better Party</title><link rel="icon" href="/favicon.ico" type="image/x-icon"><link rel="stylesheet" href="/assets/styles-S28F_fms.css"><body class="bp-page"><div id="app"></div><script type="module" src="/assets/index-DFMxt6BL.js"></script></body></html>';
 const origin='http://127.0.0.1:'+port;
 const server=Bun.serve({hostname:'127.0.0.1',port,maxRequestBodySize:1024*1024,
  async fetch(req,s){
