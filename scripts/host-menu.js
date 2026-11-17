@@ -8,6 +8,8 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
     betterPartyStore,
     (partyState) => partyState.awaitingPlayers,
   );
+  const roster = useBetterPartyState(betterPartyStore, (partyState) => partyState.roster);
+  const selfUid = useBetterPartyState(betterPartyStore, (partyState) => partyState.self?.uid);
   const [open, setOpen] = BetterPartyReact.useState(false);
   const [confirm, setConfirm] = BetterPartyReact.useState(null);
   const [pending, setPending] = BetterPartyReact.useState(false);
@@ -40,14 +42,14 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
   }
   const createElement = BetterPartyReact.createElement;
   const live = phase === 'playing' || phase === 'countdown';
-  const run = async (action, seconds) => {
+  const run = async (action, argument) => {
     if (pending) {
       return;
     }
     setPending(true);
     setError('');
     try {
-      await bpHostAction(action, seconds);
+      await bpHostAction(action, argument);
       setOpen(false);
       setConfirm(null);
     } catch (commandError) {
@@ -67,6 +69,14 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
       },
       label,
     );
+  // Connected people who could host right now. A spectator is offered only when
+  // nobody else is left, matching how the server picks an involuntary successor:
+  // handing the party to a watcher beats leaving it without a host.
+  const connectedOthers = (roster || []).filter(
+    (member) => member.uid !== selfUid && member.connected,
+  );
+  const presentPlayers = connectedOthers.filter((member) => member.role !== 'spectator');
+  const successors = presentPlayers.length > 0 ? presentPlayers : connectedOthers;
   const confirmationMessages = {
     end: 'End the party now?',
     skip: 'Skip this hole for everyone?',
@@ -152,6 +162,19 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
                 btn('Restart level', () => setConfirm('restart'), !live),
                 nextError && btn('Retry next hole', () => run('retry-next')),
                 nextError && btn('Skip unloaded hole', () => setConfirm('skip-next')),
+                successors.length > 0 &&
+                  createElement('div', { className: 'bp-host-transfer' }, [
+                    createElement(
+                      'p',
+                      { className: 'text-xs text-white/70' },
+                      'Make someone else host',
+                    ),
+                    successors.map((member) =>
+                      btn(member.name + (member.ready ? ' ✅' : ''), () =>
+                        run('transfer-host', member.uid),
+                      ),
+                    ),
+                  ]),
                 btn('End party', () => setConfirm('end'), false, 'bp-danger'),
               ],
         ],

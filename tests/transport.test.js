@@ -116,6 +116,8 @@ function fakeWebSocketFactory() {
 /** Recording fakes for the upstream store bindings and a matching bindings object. */
 function fakeEnvironment(clockOptions = {}) {
   const clock = clockOptions.clock || fakeClock();
+  // Mirrors the upstream party store's initial shape, including the roster
+  // count the host-authority frames must preserve.
   const partyStore = fakeStore({
     matchId: null,
     holeIndex: 0,
@@ -123,11 +125,13 @@ function fakeEnvironment(clockOptions = {}) {
     phase: 'lobby',
     mapReady: false,
     selfRole: 'player',
+    count: 0,
+    roster: [],
   });
   const gameStore = fakeStore({ strokes: 0, phase: 'aiming', level: null });
   const settingsStore = fakeStore({ ghosts: true });
   const scene = { ballPos: { x: 1, y: 0, z: 2 }, pointer: { x: 0, z: 0, active: false } };
-  const log = { connection: [], identity: [], errors: [], finals: [], acks: [] };
+  const log = { connection: [], identity: [], errors: [], finals: [], acks: [], hostTokens: [] };
   // The route records the prepared level ID; tests set it directly.
   let sceneReadyLevelId = null;
   let registeredSender = null;
@@ -148,7 +152,16 @@ function fakeEnvironment(clockOptions = {}) {
     registerSender: (sender) => {
       registeredSender = sender;
     },
-    setIdentity: (isHost, count, role) => log.identity.push({ isHost, count, role }),
+    // Mirrors the upstream identity binding, which writes the crown and count
+    // into the party store as well as the roster.
+    setIdentity: (isHost, count, role) => {
+      log.identity.push({ isHost, count, role });
+      partyStore.setState({
+        isHost,
+        count: count ?? partyStore.state.count,
+        selfRole: role ?? partyStore.state.selfRole,
+      });
+    },
     updateParty: (message) => {
       const { t, ...rest } = message;
       partyStore.setState(rest);
@@ -158,6 +171,8 @@ function fakeEnvironment(clockOptions = {}) {
     setBoard: () => {},
     setFinal: (final) => log.finals.push(final),
     sceneReadyLevelId: () => sceneReadyLevelId,
+    capturedHostToken: (token) => log.hostTokens.push(['captured', token]),
+    dropHostToken: () => log.hostTokens.push(['dropped']),
     removeGhost: () => {},
     showCompletion: () => {},
     ghostHue: () => 0,
@@ -615,5 +630,69 @@ test('readiness is never announced from a prepared level of a different course',
   env.setSceneReadyLevelId('previous-course');
   env.gameStore.setState({ strokes: 0 });
   expect(socket.sent.some((frame) => frame.t === 'scene')).toBe(false);
+  dispose();
+});
+
+test('a granted crown adopts the rotated capability; a revoked one drops it', () => {
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const socket = env.WebSocket.sockets[0];
+  socket.open();
+  socket.message({ t: 'hello', id: 'conn-1', isHost: false, count: 2, role: 'player' });
+  socket.message({ t: 'roster', players: [] });
+  socket.message({ t: 'board', standings: [], alive: 1, holed: 0 });
+
+  // The server rotates the capability whenever authority moves, so the frame
+  // that grants the crown must also carry the new token.
+  socket.message({ t: 'host-granted', fromUid: 'previous-host', token: 'capability-2' });
+  expect(env.log.hostTokens).toEqual([['captured', 'capability-2']]);
+  expect(env.log.identity.at(-1)).toMatchObject({ isHost: true });
+  expect(env.log.identity.at(-1).count).toBe(2);
+  expect(env.partyStore.state.isHost).toBe(true);
+
+  // Losing the crown must not leave a stale capability that could still import
+  // courses or re-claim authority.
+  socket.message({ t: 'host-revoked', uid: 'new-host' });
+  expect(env.log.hostTokens.at(-1)).toEqual(['dropped']);
+  expect(env.partyStore.state.isHost).toBe(false);
+  expect(env.log.identity.at(-1).count).toBe(2);
+
+  // A frame without a token never invents one.
+  socket.message({ t: 'host-granted', fromUid: 'previous-host' });
+  expect(env.log.hostTokens.filter((entry) => entry[0] === 'captured').length).toBe(1);
+  dispose();
+});
+
+test('a hand-over is what a reconnect claims with', () => {
+  // The adapter caches the capability for its join frame, so a moved crown has
+  // to update the cache as well as the stored copy.
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, {
+    bindings: env.bindings,
+    hostToken: 'capability-1',
+  });
+  const first = env.WebSocket.sockets[0];
+  first.open();
+  expect(first.sent[0]).toMatchObject({ host: 'capability-1' });
+  first.message({ t: 'hello', id: 'conn-1', isHost: true, count: 1, role: 'player' });
+  first.message({ t: 'roster', players: [] });
+  first.message({ t: 'board', standings: [], alive: 1, holed: 0 });
+  first.message({ t: 'host-revoked', uid: 'new-host' });
+  first.close(1006, 'network');
+  env.clock.advance(1000);
+  const second = env.WebSocket.sockets[1];
+  second.open();
+  // Without the crown the reconnect must not claim authority with the stale one.
+  expect(second.sent[0].host).toBe(undefined);
+
+  second.message({ t: 'hello', id: 'conn-2', isHost: false, count: 1, role: 'player' });
+  second.message({ t: 'roster', players: [] });
+  second.message({ t: 'board', standings: [], alive: 1, holed: 0 });
+  second.message({ t: 'host-granted', fromUid: 'previous-host', token: 'capability-3' });
+  second.close(1006, 'network');
+  env.clock.advance(4000);
+  const third = env.WebSocket.sockets[2];
+  third.open();
+  expect(third.sent[0]).toMatchObject({ host: 'capability-3' });
   dispose();
 });

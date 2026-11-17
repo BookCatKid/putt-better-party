@@ -76,6 +76,12 @@ export interface RoomCheckpoint {
   starting: boolean;
   lastActivity: number;
   recoveryNotice: boolean;
+  /** Host authority handed over by the previous host, never its capability token. */
+  hostTransfer?: {
+    fromUid: string;
+    toUid: string;
+    at: number;
+  } | null;
 }
 
 /** The original protocol uses abbreviated coordinate and completion keys. */

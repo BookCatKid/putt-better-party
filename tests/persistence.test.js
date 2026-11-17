@@ -208,3 +208,30 @@ test('a failed checkpoint keeps the room usable instead of terminating the servi
   room.dispose();
   store.close();
 });
+
+test('host ownership and the hand-over record survive a restart', () => {
+  const store = new RoomStore(':memory:');
+  const room = new Room('ABCDE', new Map(), { onChange: (changedRoom) => store.save(changedRoom) });
+  const host = room.issue('Host');
+  const guest = room.issue('Guest');
+  join(room, guest);
+  join(room, host, true);
+  room.handle(room.players.get(host.uid).ws, {
+    t: 'host-action',
+    action: 'transfer-host',
+    uid: guest.uid,
+    matchId: room.matchId,
+    holeIndex: 0,
+    requestId: 'xfer',
+  });
+  expect(room.hostUid).toBe(guest.uid);
+  const token = room.hostToken;
+  const restored = store.load(new Map(), {}).get('ABCDE');
+  // A restart cannot resume the match, but it must not resurrect the old host
+  // or hand its capability back.
+  expect(restored.hostUid).toBe(guest.uid);
+  expect(restored.hostToken).toBe(token);
+  expect(restored.hostTransfer).toMatchObject({ fromUid: host.uid, toUid: guest.uid });
+  room.dispose();
+  store.close();
+});

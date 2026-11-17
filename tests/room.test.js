@@ -982,3 +982,183 @@ test('readiness can extend the approved countdown but never shorten it', async (
   expect(playNotBefore - Date.now()).toBeGreaterThan(30_000);
   room.dispose();
 });
+
+test('host authority transfers in one step and the old token stops working', () => {
+  const room = new Room('ABCDE', maps);
+  const host = enter(room, 'Host', true);
+  const guest = enter(room, 'Guest');
+  const previousToken = room.hostToken;
+  room.handle(host.ws, {
+    t: 'host-action',
+    action: 'transfer-host',
+    uid: guest.identity.uid,
+    matchId: room.matchId,
+    holeIndex: 0,
+    requestId: 'xfer',
+  });
+  expect(host.ws.frames.at(-1)).toMatchObject({ t: 'host-ack', requestId: 'xfer', ok: true });
+  // Authority moved, the roster says so, and both sides were told.
+  expect(room.hostUid).toBe(guest.identity.uid);
+  expect(room.roster().map((player) => player.isHost)).toEqual([false, true]);
+  expect(host.ws.frames.some((frame) => frame.t === 'host-revoked')).toBe(true);
+  expect(guest.ws.frames.find((frame) => frame.t === 'host-granted')).toMatchObject({
+    fromUid: host.identity.uid,
+  });
+  // The capability was rotated and delivered to the new host over its socket.
+  expect(room.hostToken).not.toBe(previousToken);
+  expect(guest.ws.frames.find((frame) => frame.t === 'host-granted').token).toBe(room.hostToken);
+  // The previous host cannot act any more, and its old capability is worthless.
+  room.handle(host.ws, { t: 'config', config: { holes: 9 } });
+  expect(room.config.holes).toBe(3);
+  const staleClaim = socket();
+  room.handle(staleClaim, {
+    t: 'join',
+    ...host.identity,
+    protocol: 2,
+    host: previousToken,
+    instance: 'again',
+  });
+  expect(room.hostUid).toBe(guest.identity.uid);
+  // The new host can act immediately.
+  room.handle(guest.ws, { t: 'config', config: { holes: 9 } });
+  expect(room.config.holes).toBe(9);
+  expect(room.hostTransfer).toMatchObject({
+    fromUid: host.identity.uid,
+    toUid: guest.identity.uid,
+  });
+  room.dispose();
+});
+
+test('a host hand-over to nobody, or to a disconnected player, is refused', () => {
+  const room = new Room('ABCDE', maps);
+  const host = enter(room, 'Host', true);
+  const guest = enter(room, 'Guest');
+  room.close(guest.ws);
+  const attempts = [
+    { uid: 'missing-uid' },
+    { uid: guest.identity.uid },
+    { uid: host.identity.uid },
+  ];
+  for (const [index, attempt] of attempts.entries()) {
+    room.handle(host.ws, {
+      t: 'host-action',
+      action: 'transfer-host',
+      ...attempt,
+      matchId: room.matchId,
+      holeIndex: 0,
+      requestId: 'xfer-' + index,
+    });
+    expect(host.ws.frames.at(-1)).toMatchObject({ t: 'host-ack', ok: false });
+  }
+  expect(room.hostUid).toBe(host.identity.uid);
+  room.dispose();
+});
+
+test('a deliberate departure hands the crown to the longest-present player at once', () => {
+  const room = new Room('ABCDE', maps);
+  const host = enter(room, 'Host', true);
+  const first = enter(room, 'First Guest');
+  const second = enter(room, 'Second Guest');
+  expect(room.hostSuccessionTimer).toBeUndefined();
+  room.handle(host.ws, { t: 'leave' });
+  expect(host.ws.closed).toBe(true);
+  // No grace period: the remaining players are not left without a host.
+  expect(room.hostUid).toBe(first.identity.uid);
+  expect(room.hostSuccessionTimer).toBeUndefined();
+  expect(first.ws.frames.find((frame) => frame.t === 'host-granted')).toBeDefined();
+  expect(room.roster().find((player) => player.uid === first.identity.uid).isHost).toBe(true);
+  expect(room.roster().some((player) => player.uid === host.identity.uid)).toBe(false);
+  expect(room.hostCandidates(room.hostUid).map((player) => player.uid)).toEqual([
+    second.identity.uid,
+  ]);
+  room.dispose();
+});
+
+test('an outage waits for the host before the crown moves', () => {
+  const room = new Room('ABCDE', maps);
+  const host = enter(room, 'Host', true);
+  enter(room, 'Guest');
+  room.close(host.ws);
+  // A dropped connection may be coming back, so authority is held and a timer
+  // is armed rather than handed over immediately.
+  expect(room.hostUid).toBe(host.identity.uid);
+  expect(room.hostSuccessionTimer).toBeDefined();
+  room.dispose();
+});
+
+test('a host who returns inside the grace period keeps the party', () => {
+  const room = new Room('ABCDE', maps);
+  const host = enter(room, 'Host', true);
+  const guest = enter(room, 'Guest');
+  room.close(host.ws);
+  expect(room.hostSuccessionTimer).toBeDefined();
+  const returning = socket();
+  room.handle(returning, {
+    t: 'join',
+    ...host.identity,
+    protocol: 2,
+    host: room.hostToken,
+    instance: 'again',
+  });
+  expect(room.hostUid).toBe(host.identity.uid);
+  expect(room.hostSuccessionTimer).toBeUndefined();
+  expect(guest.ws.frames.some((frame) => frame.t === 'host-granted')).toBe(false);
+  room.dispose();
+});
+
+test('promotion after the grace period picks the longest-present connected player', () => {
+  const room = new Room('ABCDE', maps);
+  const host = enter(room, 'Host', true);
+  const first = enter(room, 'First Guest');
+  const second = enter(room, 'Second Guest');
+  room.close(host.ws);
+  // The successor is chosen from connected, non-spectating players in join order.
+  expect(room.promoteSuccessor()).toBe(first.identity.uid);
+  expect(room.hostUid).toBe(first.identity.uid);
+  expect(room.hostTransfer).toMatchObject({ toUid: first.identity.uid });
+  // The promoted host receives a fresh capability, not the departed one.
+  expect(first.ws.frames.find((frame) => frame.t === 'host-granted')).toMatchObject({
+    fromUid: host.identity.uid,
+    token: room.hostToken,
+  });
+  room.handle(first.ws, { t: 'config', config: { holes: 7 } });
+  expect(room.config.holes).toBe(7);
+  expect(room.hostCandidates(room.hostUid).map((player) => player.uid)).toEqual([
+    second.identity.uid,
+  ]);
+  room.dispose();
+});
+
+test('a hand-over does not need a round identity and works between rounds', async () => {
+  // Host controls are round-scoped, but handing the party over is not: the host
+  // must be able to do it in the lobby and on the results screen, where the
+  // client has no round to quote.
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const host = enter(room, 'Host', true);
+  const guest = enter(room, 'Guest');
+  room.handle(host.ws, { t: 'host-action', action: 'transfer-host', uid: guest.identity.uid });
+  expect(room.hostUid).toBe(guest.identity.uid);
+  room.dispose();
+});
+
+test('a player is preferred to a spectator, who is a last resort rather than nobody', () => {
+  // Losing the last player in an elimination round must not leave the party
+  // hostless, but a watching player must never outrank a playing one.
+  const room = new Room('ABCDE', maps);
+  const host = enter(room, 'Host', true);
+  const guest = enter(room, 'Guest');
+  const spectator = enter(room, 'Watcher');
+  room.players.get(spectator.identity.uid).role = 'spectator';
+  expect(room.hostCandidates(host.identity.uid).map((player) => player.uid)).toEqual([
+    guest.identity.uid,
+  ]);
+  // With no players left the spectator is the only candidate, so the party
+  // still has somebody who can hand the crown on.
+  room.close(guest.ws);
+  expect(room.hostCandidates(host.identity.uid).map((player) => player.uid)).toEqual([
+    spectator.identity.uid,
+  ]);
+  room.handle(host.ws, { t: 'leave' });
+  expect(room.hostUid).toBe(spectator.identity.uid);
+  room.dispose();
+});

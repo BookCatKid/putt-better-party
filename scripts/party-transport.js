@@ -29,6 +29,8 @@ function resolveTransportBindings(injected) {
     connection: provided.connection ?? bpConnection,
     registerSender: provided.registerSender ?? registerTransportSender,
     setIdentity: provided.setIdentity ?? setTransportIdentity,
+    capturedHostToken: provided.capturedHostToken ?? receiveTransportHostToken,
+    dropHostToken: provided.dropHostToken ?? clearTransportHostToken,
     updateParty: provided.updateParty ?? updateTransportParty,
     setFlyCamera: provided.setFlyCamera ?? setTransportFlyCamera,
     setRoster: provided.setRoster ?? setTransportRoster,
@@ -47,7 +49,10 @@ function resolveTransportBindings(injected) {
 
 function connectBetterParty(code, identity, options = {}) {
   const bind = resolveTransportBindings(options.bindings);
-  const { hostToken, onError } = options;
+  const { onError } = options;
+  // The capability is not fixed for the life of the connection: authority can
+  // move, and a reconnect has to claim with whatever the current host holds.
+  let hostToken = options.hostToken;
   const initialRetryDelay = 1000;
   let socket = null;
   let disposed = false;
@@ -222,6 +227,24 @@ function connectBetterParty(code, identity, options = {}) {
     completeHandshake();
   }
 
+  /**
+   * Follow a server-side hand-over. Only the crown and, for the new host, the
+   * capability change here; the roster arrives in its own frame.
+   */
+  function adoptHostAuthority(message, isHost) {
+    if (isHost) {
+      if (typeof message.token === 'string') {
+        hostToken = message.token;
+        bind.capturedHostToken(message.token);
+      }
+    } else {
+      hostToken = undefined;
+      bind.dropHostToken();
+    }
+    const party = bind.partyStore.state;
+    bind.setIdentity(isHost, party.count, party.selfRole);
+  }
+
   function receive(event) {
     let message;
     try {
@@ -283,6 +306,15 @@ function connectBetterParty(code, identity, options = {}) {
             bind.updateGhost(position);
           }
         }
+        return;
+      case 'host-granted':
+        // The server rotates the capability token whenever authority moves, so
+        // the new host has to adopt it together with the crown. The lobby count
+        // is untouched because this frame does not change who is present.
+        adoptHostAuthority(message, true);
+        return;
+      case 'host-revoked':
+        adoptHostAuthority(message, false);
         return;
       case 'host-ack':
         bind.ack(message);

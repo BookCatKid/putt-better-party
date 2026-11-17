@@ -47,6 +47,14 @@
 .bp-host-item.bp-danger {
   color: #fca5a5;
 }
+.bp-host-transfer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  padding-top: 8px;
+}
+
 .bp-host-confirm p {
   font-size: 13px;
   margin: 8px 0;

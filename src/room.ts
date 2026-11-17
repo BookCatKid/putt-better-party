@@ -31,6 +31,12 @@ const token = () => randomBytes(24).toString('base64url');
  * without the bound one stalled or half-open client could hold the match.
  */
 const READY_GRACE_MS = 10_000;
+/**
+ * A host whose connection drops keeps authority for this long, so a tunnel, a
+ * refresh or a brief network blip does not hand the party to somebody else.
+ * Deliberately leaving hands it over at once.
+ */
+const HOST_SUCCESSION_GRACE_MS = 30_000;
 export const defaults: Readonly<RoomConfig> = Object.freeze({
   holes: 3,
   timerMs: 60000,
@@ -70,6 +76,8 @@ export class Room {
   lastCheckpoint = 0;
   hostToken = token();
   hostUid: string | null = null;
+  hostTransfer: { fromUid: string; toUid: string; at: number } | null = null;
+  hostSuccessionTimer: ReturnType<typeof setTimeout> | undefined;
   issued = new Map<string, Identity>();
   players = new Map<string, Player>();
   phase: RoomPhase = 'lobby';
@@ -272,6 +280,8 @@ export class Room {
     }
     if (claimsHost) {
       this.hostUid = identity.uid;
+      // The host came back inside the grace period, so keep the party theirs.
+      this.clearHostSuccession();
     }
     if (!player) {
       player = {
@@ -339,6 +349,109 @@ export class Room {
       this.send(ws, { t: 'final', podium: standings.slice(0, 3), standings });
     }
   }
+  /**
+   * Hand host authority to another connected player. Authority moves in one
+   * step: the new host can act immediately and the old host cannot act at all,
+   * including through the connection it still holds. The capability token is
+   * rotated and delivered to the new host over its own authenticated socket,
+   * so the previous host's copy stops authorising anything.
+   */
+  transferHost(fromUid: string, toUid: string): boolean {
+    const next = this.players.get(toUid);
+    if (fromUid !== this.hostUid || !next || !next.ws || next.uid === fromUid) {
+      return false;
+    }
+    const previous = this.players.get(fromUid);
+    this.hostUid = toUid;
+    this.hostTransfer = { fromUid, toUid, at: Date.now() };
+    this.clearHostSuccession();
+    // Rotate the capability so the previous host's token cannot import maps or
+    // re-claim authority after it has given the party away.
+    this.hostToken = token();
+    if (previous?.ws) {
+      this.send(previous.ws, { t: 'host-revoked', uid: toUid });
+    }
+    // The new capability travels over the new host's own authenticated socket.
+    this.send(next.ws, { t: 'host-granted', fromUid, token: this.hostToken });
+    // Everybody sees the moved crown in the same snapshot and roster.
+    this.state();
+    return true;
+  }
+  /**
+   * Connected candidates in join order, excluding `exceptUid`. Players are
+   * preferred to spectators, who are only considered when nobody else is left:
+   * a hostless party is worse than a spectator holding the crown, because that
+   * spectator can then hand it on.
+   */
+  hostCandidates(exceptUid: string | null) {
+    const eligible = [...this.players.values()].filter(
+      (player) => player.ws && player.uid !== exceptUid,
+    );
+    const players = eligible.filter((player) => player.role !== 'spectator');
+    return players.length > 0 ? players : eligible;
+  }
+  /**
+   * A host that disconnected may legitimately be coming back, so succession
+   * waits out a grace period. Deliberate departure skips the wait entirely.
+   */
+  scheduleHostSuccession() {
+    this.clearHostSuccession();
+    if (this.hostCandidates(this.hostUid).length === 0) {
+      return;
+    }
+    this.hostSuccessionTimer = setTimeout(() => {
+      this.hostSuccessionTimer = undefined;
+      if (!this.closed && !this.players.get(this.hostUid ?? '')?.ws) {
+        this.promoteSuccessor();
+      }
+    }, HOST_SUCCESSION_GRACE_MS);
+  }
+  clearHostSuccession() {
+    clearTimeout(this.hostSuccessionTimer);
+    this.hostSuccessionTimer = undefined;
+  }
+  /**
+   * Move authority to the longest-present eligible player. The room calls this
+   * only after the grace period, so a returning host always wins a race against
+   * a slow reconnect. The promoted player inherits an identity, not the token.
+   */
+  promoteSuccessor(): string | null {
+    const successor = this.hostCandidates(this.hostUid)[0];
+    if (!successor) {
+      return null;
+    }
+    const previousUid = this.hostUid;
+    this.hostUid = successor.uid;
+    this.hostTransfer = { fromUid: previousUid ?? '', toUid: successor.uid, at: Date.now() };
+    // Nobody can recover the departed host's capability, so rotate it instead.
+    this.hostToken = token();
+    this.send(successor.ws as RoomSocket, {
+      t: 'host-granted',
+      fromUid: previousUid,
+      token: this.hostToken,
+    });
+    this.state();
+    return successor.uid;
+  }
+  /**
+   * Remove a player who explicitly left. The host hand-over is immediate because
+   * the departure is unambiguous, unlike a dropped connection.
+   */
+  leave(ws: RoomSocket, player: Player) {
+    const wasHost = player.uid === this.hostUid;
+    this.players.delete(player.uid);
+    this.positions.delete(player.id);
+    ws.data.uid = null;
+    this.broadcast({ t: 'bye', id: player.id });
+    ws.close(1000, 'Left party');
+    if (wasHost) {
+      this.clearHostSuccession();
+      this.promoteSuccessor();
+    }
+    this.rosterBroadcast();
+    this.changed();
+    this.onIdle(this);
+  }
   close(ws: RoomSocket) {
     const player = this.players.get(ws.data.uid ?? '');
     if (!player || player.ws !== ws) {
@@ -353,6 +466,10 @@ export class Room {
     }
     this.rosterBroadcast();
     this.changed();
+    if (player.uid === this.hostUid) {
+      // An outage may be temporary, so the crown waits rather than moving at once.
+      this.scheduleHostSuccession();
+    }
     this.onIdle(this);
   }
   handle(ws: RoomSocket, message: unknown) {
@@ -417,7 +534,13 @@ export class Room {
           this.error(ws, 'not-host', 'Only the host can manage the party.');
           return ack(false, 'Only the host can manage the party.');
         }
-        if (message.matchId !== this.matchId || message.holeIndex !== this.holeIndex) {
+        // A hand-over is a party-level action, not a round action: it stays
+        // meaningful between rounds and in the lobby, where there is no round
+        // identity to match.
+        if (
+          message.action !== 'transfer-host' &&
+          (message.matchId !== this.matchId || message.holeIndex !== this.holeIndex)
+        ) {
           return ack(false, 'The round changed. Try again.');
         }
         const ok = this.hostAction(ws, message);
@@ -430,6 +553,11 @@ export class Room {
         if (host && this.phase === 'final') {
           this.reset();
         }
+        return;
+      case 'leave':
+        // A deliberate departure is not an outage: hand the crown on at once
+        // rather than making the remaining players wait out the grace period.
+        this.leave(ws, player);
         return;
       case 'prog':
         if (this.playable(player) && isIntegerInRange(message.st, 0, 200)) {
@@ -843,6 +971,13 @@ export class Room {
     }
   }
   hostAction(ws: RoomSocket, message: Record<string, unknown>) {
+    if (message.action === 'transfer-host') {
+      // Deliberate hand-over: the named player must be connected right now.
+      return this.transferHost(
+        ws.data.uid ?? '',
+        typeof message.uid === 'string' ? message.uid : '',
+      );
+    }
     if (message.action === 'end' && ['countdown', 'playing', 'hole-results'].includes(this.phase)) {
       // Close the match with scores from completed rounds. Do not penalize an interrupted round.
       if (this.phase === 'playing' || this.phase === 'countdown') {
@@ -1074,6 +1209,7 @@ export class Room {
       code: this.code,
       hostToken: this.hostToken,
       hostUid: this.hostUid,
+      hostTransfer: this.hostTransfer ? { ...this.hostTransfer } : null,
       issued: [...this.issued.values()],
       config: structuredClone(this.config),
       titles,
@@ -1087,6 +1223,11 @@ export class Room {
   restore(data: RoomCheckpoint) {
     this.hostToken = data.hostToken;
     this.hostUid = data.hostUid;
+    const transfer = data.hostTransfer;
+    this.hostTransfer =
+      transfer && typeof transfer.toUid === 'string' && typeof transfer.fromUid === 'string'
+        ? { fromUid: transfer.fromUid, toUid: transfer.toUid, at: Number(transfer.at) || 0 }
+        : null;
     this.issued = new Map(data.issued.map((identity) => [identity.uid, identity]));
     this.config = {
       ...defaults,
@@ -1110,5 +1251,6 @@ export class Room {
   dispose() {
     this.closed = true;
     clearTimeout(this.timer);
+    this.clearHostSuccession();
   }
 }

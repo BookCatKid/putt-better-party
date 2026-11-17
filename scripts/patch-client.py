@@ -97,8 +97,8 @@ const isTransportSpectator = _e;
         "ne=(0,J.useCallback)(()=>{bpScenePrepared(l.id);window.setTimeout(()=>j(!0),2500)},[l.id])",
     )
     return (
-        "import{bpConnection,bpAck,bpScenePrepared,transportSceneReadyLevelId}"
-        'from"./runtime-DL2fiDAQ.js";' + source
+        "import{bpConnection,bpAck,bpScenePrepared,transportSceneReadyLevelId,"
+        'receiveTransportHostToken,clearTransportHostToken}from"./runtime-DL2fiDAQ.js";' + source
     )
 
 
@@ -138,7 +138,7 @@ patch("runtime-DL2fiDAQ.js", runtime_patch)
 
 
 def game_patch(s):
-    s = 'import{bpHostAction,bpPickerBusy}from"./runtime-DL2fiDAQ.js";' + s
+    s = 'import{bpHostAction,bpPickerBusy,bpLeaveParty}from"./runtime-DL2fiDAQ.js";' + s
     a = s.index("function At(")
     b = s.index("function jt(", a)
     s = (
@@ -204,6 +204,13 @@ def game_patch(s):
     )
     s = replace_once(
         s, "children:`Start party`", "children:bpPreparing?`Loading courses…`:`Start party`"
+    )
+    # Leaving on purpose tells the server so, which hands host authority on at
+    # once instead of waiting out the reconnect grace period.
+    s = replace_once(
+        s,
+        "{href:`/party`,className:`mt-3 block text-xs font-semibold text-white/40 no-underline hover:text-white/70`,children:`Leave party`}",
+        "{href:`/party`,onClick:()=>bpLeaveParty(),className:`mt-3 block text-xs font-semibold text-white/40 no-underline hover:text-white/70`,children:`Leave party`}",
     )
     s = replace_once(
         s,

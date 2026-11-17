@@ -103,6 +103,63 @@ try {
   );
   await guest.wait((message) => message.t === 'party' && message.phase === 'lobby');
   console.log('PASS rematch retains selected playlist');
+
+  // Handing the party over rotates the capability, so privileged calls follow
+  // the crown instead of whoever created the room.
+  host.frames.length = 0;
+  guest.frames.length = 0;
+  const previousToken = room.hostToken;
+  host.send({
+    t: 'host-action',
+    action: 'transfer-host',
+    uid: guest.j.uid,
+    requestId: 'lifecycle-xfer',
+  });
+  await host.wait(
+    (message) =>
+      message.t === 'host-ack' && message.requestId === 'lifecycle-xfer' && message.ok === true,
+  );
+  const granted = await guest.wait((message) => message.t === 'host-granted');
+  assert.equal(typeof granted.token, 'string');
+  assert.notEqual(granted.token, previousToken);
+  await host.wait(
+    (message) =>
+      message.t === 'roster' &&
+      message.players.find((player) => player.uid === guest.j.uid)?.isHost,
+  );
+  // The old capability is worthless and the new one authorises an import.
+  const staleImport = await fetch(base + '/api/import', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      code: room.code,
+      uid: host.j.uid,
+      session: host.j.session,
+      host: previousToken,
+      id,
+    }),
+  });
+  assert.equal(staleImport.status, 403);
+  await post('/api/import', {
+    code: room.code,
+    uid: guest.j.uid,
+    session: guest.j.session,
+    host: granted.token,
+    id,
+  });
+  // The previous host has no authority left to reclaim it with.
+  host.send({
+    t: 'host-action',
+    action: 'end',
+    matchId: undefined,
+    holeIndex: 0,
+    requestId: 'lifecycle-stale',
+  });
+  await host.wait(
+    (message) =>
+      message.t === 'host-ack' && message.requestId === 'lifecycle-stale' && message.ok === false,
+  );
+  console.log('PASS host hand-over rotates capability and import authority');
 } catch (event) {
   console.error(event);
   process.exitCode = 1;

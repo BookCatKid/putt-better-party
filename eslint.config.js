@@ -193,6 +193,8 @@ export default [
         setTransportError: 'readonly',
         updateTransportGhost: 'readonly',
         transportSceneReadyLevelId: 'readonly',
+        receiveTransportHostToken: 'readonly',
+        clearTransportHostToken: 'readonly',
         isTransportSpectator: 'readonly',
         bpConnection: 'readonly',
         bpAck: 'readonly',

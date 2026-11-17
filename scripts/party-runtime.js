@@ -29,7 +29,11 @@ export function bpAck(message) {
     ? pendingAction.resolve()
     : pendingAction.reject(Error(message.msg || 'Host command rejected'));
 }
-export function bpHostAction(action, seconds) {
+/**
+ * Run a host command. `argument` carries the command's own parameter: a number
+ * of seconds for time extensions, a player UID for a host hand-over.
+ */
+export function bpHostAction(action, argument) {
   const partyState = partyRuntimeStore.state;
   if (!partyState.isHost || !partyState.bpConnected || !u) {
     return Promise.reject(Error('Party is disconnected. Reconnect or create a new party.'));
@@ -45,7 +49,8 @@ export function bpHostAction(action, seconds) {
       sendPartyCommand({
         t: 'host-action',
         action,
-        seconds,
+        seconds: typeof argument === 'number' ? argument : undefined,
+        uid: typeof argument === 'string' ? argument : undefined,
         matchId: partyState.matchId,
         holeIndex: partyState.holeIndex,
         requestId,
@@ -56,6 +61,38 @@ export function bpHostAction(action, seconds) {
       reject(Error('Party connection lost.'));
     }
   });
+}
+
+/**
+ * Leave on purpose. This is different from closing the tab: the server hands
+ * host authority on at once instead of waiting out the reconnect grace period.
+ * Only the explicit departure control calls it, because an adapter teardown
+ * also happens when the route merely re-subscribes.
+ */
+export function bpLeaveParty() {
+  sendPartyCommand({ t: 'leave' });
+}
+
+/**
+ * Adopt a capability token the server handed over with host authority. The
+ * token is what authorises privileged HTTP calls such as importing courses.
+ */
+export function receiveTransportHostToken(token) {
+  if (typeof token !== 'string' || !token) {
+    return;
+  }
+  const code = partyRuntimeStore.state.code;
+  if (code) {
+    sessionStorage.setItem('bp.host.' + code, token);
+  }
+}
+
+/** Give up the capability token when authority is revoked. */
+export function clearTransportHostToken() {
+  const code = partyRuntimeStore.state.code;
+  if (code) {
+    sessionStorage.removeItem('bp.host.' + code);
+  }
 }
 
 /** Level ID the route has prepared, or null while it is still preparing. */
