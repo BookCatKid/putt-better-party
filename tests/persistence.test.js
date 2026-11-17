@@ -174,3 +174,37 @@ test('daily exclusion refreshes every match, covers every daily page, and allows
   });
   expect(third.ids).toEqual(['hole0', 'hole1', 'hole2']);
 });
+
+test('a failed checkpoint keeps the room usable instead of terminating the service', () => {
+  const store = new RoomStore(':memory:');
+  const room = new Room('ABCDE', new Map(), { onChange: (changedRoom) => store.save(changedRoom) });
+  const host = room.issue('Host');
+  const hostSocket = join(room, host, true);
+  const messages = [];
+  const originalError = console.error;
+  console.error = (message) => messages.push(String(message));
+  try {
+    // A full disk or read-only database makes every write fail. The save path
+    // must absorb that: previously the throw escaped through the room's change
+    // callback and took the whole process down mid-match.
+    store.db.exec('PRAGMA query_only=ON');
+    expect(() => room.handle(hostSocket, { t: 'config', config: { locked: true } })).not.toThrow();
+    expect(room.config.locked).toBe(true);
+    expect(() => store.remove('ABCDE')).not.toThrow();
+    expect(messages.length).toBe(1);
+    expect(messages[0]).toContain('Could not save room state');
+    // Repeated failures are coalesced instead of flooding the log.
+    store.save(room);
+    expect(messages.length).toBe(1);
+  } finally {
+    console.error = originalError;
+    store.db.exec('PRAGMA query_only=OFF');
+  }
+  // Once writes work again the row is rewritten, so restart recovery resumes.
+  store.save(room);
+  expect(store.db.query('SELECT payload FROM rooms WHERE code=?').get('ABCDE').payload).toContain(
+    '"locked":true',
+  );
+  room.dispose();
+  store.close();
+});
