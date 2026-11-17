@@ -113,6 +113,9 @@ function connectBetterParty(code, identity, options = {}) {
     if (synchronized || awaitingSnapshot || !receivedRoster || !receivedBoard) {
       return;
     }
+    // The handshake deadline only guards the opening exchange; a synchronized
+    // connection must not be closed by its own timeout.
+    bind.clearTimeout(handshakeTimer);
     synchronized = true;
     retryDelay = initialRetryDelay;
     bind.connection(true);

@@ -299,6 +299,18 @@ test('handshake timeout closes a silent socket and schedules a reconnect', () =>
   dispose();
 });
 
+test('a completed handshake disarms the 12 second connection deadline', () => {
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const socket = env.WebSocket.sockets[0];
+  handshake(env, socket);
+  env.clock.advance(60_000);
+  expect(socket.readyState).toBe(1);
+  expect(env.WebSocket.sockets.length).toBe(1);
+  expect(env.log.connection.filter((entry) => entry.connected === false).length).toBe(1);
+  dispose();
+});
+
 test('a partial handshake times out when the board never arrives', () => {
   const env = fakeEnvironment();
   const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
