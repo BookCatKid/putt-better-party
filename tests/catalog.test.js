@@ -278,3 +278,221 @@ test('a random match resolves every hole through the same boundary', async () =>
   expect(prepared.specs).toHaveLength(2);
   expect(upstream.requests.detail).toHaveLength(2);
 });
+
+/**
+ * Public course identity.
+ *
+ * A course has two identifiers: the catalog id that lists it and the id inside
+ * its specification. They coincide for some courses and differ for most, and
+ * the renderer, the readiness report and the room all see the second form. The
+ * catalog is also mutable - a course can be renamed, re-saved into a new
+ * revision, forked, or withdrawn - so identity has to survive re-asking without
+ * letting a stale or foreign answer stand in for the course that was requested.
+ */
+test('a catalog id and the specification id inside it are separate identities', async () => {
+  const catalog = await catalogWith({
+    // Upstream knows the catalog id only; the specification id is not a course
+    // of its own and answers with an empty envelope.
+    detail: async (id) =>
+      id === '44468fa2753b4cf6bb91901a7ab3959c'
+        ? { id, public: true, title: 'Do it try it', spec: courseSpec({ id: 'editor-abc123' }) }
+        : {},
+  });
+  const course = await catalog.fetchPublicMap('44468fa2753b4cf6bb91901a7ab3959c', { saved: true });
+
+  // The course is keyed by the id it was requested with, and the specification
+  // keeps the id it was authored with. Neither is rewritten into the other.
+  expect(course.id).toBe('44468fa2753b4cf6bb91901a7ab3959c');
+  expect(course.spec.id).toBe('editor-abc123');
+  expect(catalog.courseIndex.has('44468fa2753b4cf6bb91901a7ab3959c')).toBe(true);
+  // The specification id is not a catalog key: asking for it is a different
+  // course request and upstream has no such public course.
+  expect(catalog.courseIndex.has('editor-abc123')).toBe(false);
+  let refusal = null;
+  try {
+    await catalog.fetchPublicMap('editor-abc123', { saved: true });
+  } catch (error) {
+    refusal = error;
+  }
+  expect(refusal?.message).toBe('Map is unavailable or not public');
+});
+
+test('an answer describing a different course is refused even when it is public', async () => {
+  // A cache, a proxy or an upstream bug that returns the wrong course must not
+  // silently replace the one that was asked for.
+  const catalog = await catalogWith({
+    detail: async (id) => ({
+      id: 'a-different-course',
+      public: true,
+      title: 'Other',
+      spec: courseSpec(),
+    }),
+  });
+  let refusal = null;
+  try {
+    await catalog.fetchPublicMap('requested-course', { saved: true });
+  } catch (error) {
+    refusal = error;
+  }
+  expect(refusal?.message).toBe('Map is unavailable or not public');
+  expect(catalog.courseIndex.has('requested-course')).toBe(false);
+  expect(catalog.courseIndex.has('a-different-course')).toBe(false);
+});
+
+test('a non-public answer is refused whatever its status says', async () => {
+  // The listing and the detail disagree on lifecycle status: pending and
+  // approved courses are both publicly playable, so status is not the gate.
+  // Visibility is, and only `public: true` grants it.
+  for (const status of ['pending', 'approved', 'rejected', 'hidden']) {
+    const catalog = await catalogWith({
+      detail: async (id) => ({ id, status, public: false, title: 'Hidden', spec: courseSpec() }),
+    });
+    let refusal = null;
+    try {
+      await catalog.fetchPublicMap('hidden-course', { saved: true });
+    } catch (error) {
+      refusal = error;
+    }
+    expect(`${status}: ${refusal?.message}`).toBe(`${status}: Map is unavailable or not public`);
+  }
+  // A pending course that is public is playable: new courses start pending.
+  const catalog = await catalogWith({
+    detail: async (id) => ({
+      id,
+      status: 'pending',
+      public: true,
+      title: 'New',
+      spec: courseSpec(),
+    }),
+  });
+  const course = await catalog.fetchPublicMap('new-course', { saved: true });
+  expect(course.title).toBe('New');
+});
+
+test('a renamed course is served under its current name, not a remembered one', async () => {
+  let title = 'First name';
+  const catalog = await catalogWith({
+    detail: async (id) => ({ id, public: true, title, spec: courseSpec() }),
+  });
+  expect((await catalog.fetchPublicMap('renamed-course', { saved: true })).title).toBe(
+    'First name',
+  );
+  title = 'Second name';
+  const updated = await catalog.fetchPublicMap('renamed-course', { saved: true });
+  expect(updated.title).toBe('Second name');
+  // The listing cache follows the newest detail answer rather than pinning the
+  // first one, so the playlist shows the name the course has now.
+  expect(catalog.courseIndex.get('renamed-course')?.title).toBe('Second name');
+});
+
+test('a re-saved course yields the newest geometry, not the first copy', async () => {
+  // Editing a course produces a new revision of the same public id. A match
+  // must play the current revision, so nothing may short-circuit the fetch.
+  let revision = 1;
+  const catalog = await catalogWith({
+    detail: async (id) => ({
+      id,
+      public: true,
+      title: 'Revisited',
+      spec: courseSpec({ par: revision === 1 ? 3 : 5 }),
+    }),
+  });
+  expect((await catalog.fetchPublicMap('revised-course', { saved: true })).par).toBe(3);
+  revision = 2;
+  const current = await catalog.fetchPublicMap('revised-course', { saved: true });
+  expect(current.par).toBe(5);
+  expect(upstream.requests.detail).toEqual(['revised-course', 'revised-course']);
+});
+
+test('two courses may share a specification id without colliding', async () => {
+  // Forking copies a course, and its specification may keep the original id.
+  // Identity has to be the catalog id, or one fork would overwrite the other.
+  const catalog = await catalogWith({
+    detail: async (id) => ({
+      id,
+      public: true,
+      title: id === 'fork-one' ? 'Original' : 'Fork',
+      spec: courseSpec({ id: 'editor-shared', par: id === 'fork-one' ? 3 : 6 }),
+    }),
+  });
+  const original = await catalog.fetchPublicMap('fork-one', { saved: true });
+  const fork = await catalog.fetchPublicMap('fork-two', { saved: true });
+  expect(original.spec.id).toBe('editor-shared');
+  expect(fork.spec.id).toBe('editor-shared');
+  expect(catalog.courseIndex.get('fork-one')?.par).toBe(3);
+  expect(catalog.courseIndex.get('fork-two')?.par).toBe(6);
+  expect(catalog.courseIndex.get('fork-one')?.title).toBe('Original');
+  expect(catalog.courseIndex.get('fork-two')?.title).toBe('Fork');
+});
+
+test('a duplicate in a playlist keeps its position and is fetched once', async () => {
+  // Duplicates are a supported manual playlist: the same course twice means the
+  // same hole played twice. Loading has to preserve both positions while not
+  // asking upstream for the same course twice in one preparation.
+  const catalog = await catalogWith({
+    detail: async (id) => ({ id, public: true, title: 'Twice', spec: courseSpec() }),
+  });
+  const duplicated = ['public-1', 'public-2', 'public-1'];
+  const repeated = ['public-1', 'public-1', 'public-1'];
+  // Import registers both courses before a playlist can name them, exactly as
+  // the import endpoint does for a real saved playlist.
+  await catalog.fetchPublicMap('public-1', { saved: true });
+  await catalog.fetchPublicMap('public-2', { saved: true });
+  upstream.requests.detail.length = 0;
+  const prepared = await catalog.prepareMatch(pickedConfig(duplicated), []);
+  expect(prepared.ids).toEqual(duplicated);
+  // Only the first hole is loaded up front for a manual playlist.
+  expect(upstream.requests.detail).toEqual(['public-1']);
+  expect(prepared.specs).toHaveLength(1);
+
+  // The room keeps every position, including the repeat.
+  const { Room } = await import(path.join(root, 'src/room.ts'));
+  const room = new Room('ABCDE', catalog.courseIndex, {
+    countdown: 5,
+    results: 5,
+    prepareMatch: catalog.prepareMatch,
+    loadMap: (id) => catalog.fetchPublicMap(id, { saved: true }),
+  });
+  const ws = {
+    data: {},
+    frames: [],
+    send(serialized) {
+      this.frames.push(JSON.parse(serialized));
+    },
+    close() {},
+  };
+  room.handle(ws, { t: 'join', ...room.issue('Host'), protocol: 2, host: room.hostToken });
+  room.handle(ws, { t: 'config', config: pickedConfig(duplicated) });
+  room.handle(ws, { t: 'start' });
+  for (let attempt = 0; attempt < 200 && room.holeIds.length === 0; attempt++) {
+    await Bun.sleep(5);
+  }
+  expect(room.holeIds).toEqual(duplicated);
+  room.dispose();
+
+  // An all-duplicate playlist is one course: however many times it repeats, the
+  // start fetches it once and keeps every position.
+  upstream.requests.detail.length = 0;
+  const sameCourse = await catalog.prepareMatch(pickedConfig(repeated), []);
+  expect(sameCourse.ids).toEqual(repeated);
+  expect(upstream.requests.detail).toEqual(['public-1']);
+  expect(sameCourse.specs).toHaveLength(1);
+});
+
+test('a blank or whitespace title is a missing identity, refused at the boundary', async () => {
+  for (const title of ['', '   ', undefined]) {
+    const catalog = await catalogWith({
+      detail: async (id) => ({ id, public: true, title, spec: courseSpec() }),
+    });
+    let refusal = null;
+    try {
+      await catalog.fetchPublicMap('untitled-course', { saved: true });
+    } catch (error) {
+      refusal = error;
+    }
+    expect(`${JSON.stringify(title)}: ${refusal?.message}`).toBe(
+      `${JSON.stringify(title)}: Missing public course title`,
+    );
+    expect(catalog.courseIndex.has('untitled-course')).toBe(false);
+  }
+});

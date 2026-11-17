@@ -80,6 +80,52 @@ try {
 } finally {
   manualParty.ws.close();
 }
+// Catalog ids and specification ids are different namespaces. The room needs
+// both: the catalog id keys the playlist, while the renderer and the readiness
+// report see the id inside the specification.
+const identityParty = await connectRoom();
+try {
+  const course = page.holes[0];
+  const imported = await post('/api/import', {
+    code: identityParty.r.code,
+    uid: identityParty.j.uid,
+    session: identityParty.j.session,
+    host: identityParty.r.hostToken,
+    id: course.id,
+  });
+  assert.equal(imported.id, course.id);
+  assert.equal(imported.title, course.title);
+  const map = await get('/api/map/' + encodeURIComponent(course.id));
+  assert.equal(map.id, course.id);
+  assert.equal(map.title, course.title);
+  assert.equal(typeof map.spec.id, 'string');
+  // A specification id is not a catalog id, so it names no course on its own.
+  if (map.spec.id !== course.id) {
+    const bySpec = await fetch(base + '/api/import', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        code: identityParty.r.code,
+        uid: identityParty.j.uid,
+        session: identityParty.j.session,
+        host: identityParty.r.hostToken,
+        id: map.spec.id,
+        saved: true,
+      }),
+    });
+    assert.equal(bySpec.status, 400);
+  }
+  console.log(
+    'PASS catalog identity',
+    course.id,
+    '->',
+    map.spec.id,
+    course.id === map.spec.id ? '(same)' : '(specification id differs)',
+  );
+} finally {
+  identityParty.ws.close();
+}
+
 // Only a course the live public detail vouches for may become playable. The
 // bundled research maps under maps/ are deliberately not reachable this way, and
 // a made-up id must not be served from disk or from a stale cache.

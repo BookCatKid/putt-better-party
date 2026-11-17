@@ -185,7 +185,10 @@ export function parsePublicCourseDetail(
     throw new Error('Map is unavailable or not public');
   }
   const metadata = { ...listed, ...result };
-  if (typeof metadata.title !== 'string') {
+  // The title is the course's user-facing identity and the value the validator
+  // writes over `spec.name`, so a blank one is a missing identity rather than a
+  // later validation surprise.
+  if (typeof metadata.title !== 'string' || !metadata.title.trim()) {
     throw new Error('Missing public course title');
   }
   return {
