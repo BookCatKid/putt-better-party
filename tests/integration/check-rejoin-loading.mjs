@@ -96,12 +96,41 @@ try {
     window.bpOriginalHome = document.querySelector('.bp-loading-action[href="/home"]');
     void 0;
   `);
+  const layout = await client.evalJS(`
+    (() => {
+      const screen = document.querySelector('.bp-party-loading');
+      const panel = screen.querySelector('.bp-entry');
+      const status = panel.querySelector('.bp-resume-status');
+      const heading = panel.querySelector('.bp-wordmark');
+      const home = panel.querySelector('.bp-back');
+      return {
+        code: panel.querySelector('.bp-join-code strong').textContent,
+        panelWidth: panel.getBoundingClientRect().width,
+        headingSize: getComputedStyle(heading).fontSize,
+        statusHeight: status.getBoundingClientRect().height,
+        statusDirection: getComputedStyle(status).flexDirection,
+        homeWidth: home.getBoundingClientRect().width,
+        homeHeight: home.getBoundingClientRect().height,
+        homeRadius: getComputedStyle(home).borderRadius,
+        background: getComputedStyle(screen).backgroundImage,
+      };
+    })()
+  `);
+  assert.equal(layout.code, originalIdentity.code);
+  assert.equal(layout.panelWidth, 400);
+  assert.equal(layout.headingSize, '58px');
+  assert.equal(layout.statusHeight, 56);
+  assert.equal(layout.statusDirection, 'row');
+  assert.equal(layout.homeWidth, layout.panelWidth);
+  assert.equal(layout.homeHeight, 50);
+  assert.equal(layout.homeRadius, '12px');
+  assert(layout.background.includes('radial-gradient'));
   const initialGeometry = await client.evalJS(`
     (() => {
       const [heading, spinner, message, home] = [
-        '.bp-loading-wordmark', '.bp-loading-spinner-slot', '.bp-loading-message', '.bp-loading-action[href="/home"]'
+        '.bp-wordmark', '.bp-loading-spinner', '.bp-loading-message', '.bp-loading-action[href="/home"]'
       ].map(selector => document.querySelector(selector).getBoundingClientRect());
-      return [heading.y, spinner.x, spinner.y, message.y, home.y];
+      return [heading.y, spinner.x + spinner.width / 2, spinner.y + spinner.height / 2, message.y, home.y].map(value => Math.round(value * 100) / 100);
     })()
   `);
 
@@ -131,9 +160,9 @@ try {
   const loadingGeometry = await client.evalJS(`
     (() => {
       const [heading, spinner, message, home] = [
-        '.bp-loading-wordmark', '.bp-loading-spinner-slot', '.bp-loading-message', '.bp-loading-action[href="/home"]'
+        '.bp-wordmark', '.bp-loading-spinner', '.bp-loading-message', '.bp-loading-action[href="/home"]'
       ].map(selector => document.querySelector(selector).getBoundingClientRect());
-      return [heading.y, spinner.x, spinner.y, message.y, home.y];
+      return [heading.y, spinner.x + spinner.width / 2, spinner.y + spinner.height / 2, message.y, home.y].map(value => Math.round(value * 100) / 100);
     })()
   `);
   assert.deepEqual(loadingGeometry, initialGeometry);

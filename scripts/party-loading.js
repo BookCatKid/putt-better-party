@@ -1,57 +1,64 @@
-/** Shared by identity admission and the original game's initialization. */
-function PartyLoadingScreen({ message, error, onRetry, onEnterName, onReload }) {
+/** Preserve the original rejoin layout while the game initializes. */
+function PartyLoadingScreen({ code, message, error, onRetry, onEnterName, onReload }) {
   const jsx = partyRouteJsx;
 
-  return jsx.jsxs('main', {
-    className: 'bp-party-loading',
-    children: [
-      jsx.jsxs('h1', {
-        className: 'bp-loading-wordmark',
-        children: ['better', jsx.jsx('span', { children: '.party' })],
-      }),
-      jsx.jsx('div', {
-        className: 'bp-loading-spinner-slot',
-        'aria-hidden': true,
-        children: !error && jsx.jsx('div', { className: 'bp-loading-spinner' }),
-      }),
-      jsx.jsx('p', {
-        className: 'bp-loading-message',
-        role: error ? 'alert' : 'status',
-        children: error || message,
-      }),
-      jsx.jsxs('div', {
-        className: 'bp-loading-actions',
-        children: [
-          error &&
-            onRetry &&
-            jsx.jsx('button', {
-              className: 'bp-loading-action',
-              type: 'button',
-              onClick: onRetry,
-              children: 'Retry',
+  return jsx.jsx('main', {
+    className: 'bp-home bp-party-loading',
+    children: jsx.jsxs('section', {
+      className: 'bp-entry',
+      children: [
+        jsx.jsxs('h1', {
+          className: 'bp-wordmark',
+          children: ['better', jsx.jsx('span', { children: '.party' })],
+        }),
+        jsx.jsxs('p', {
+          className: 'bp-join-code',
+          children: ['Party ', jsx.jsx('strong', { children: code })],
+        }),
+        jsx.jsxs('p', {
+          className: 'bp-resume-status',
+          children: [
+            !error &&
+              jsx.jsx('span', {
+                className: 'bp-loading-spinner',
+                'aria-hidden': true,
+              }),
+            jsx.jsx('span', {
+              className: 'bp-loading-message',
+              role: error ? 'alert' : 'status',
+              children: jsx.jsx('span', { children: error || message }),
             }),
-          error &&
-            onEnterName &&
-            jsx.jsx('button', {
-              className: 'bp-loading-action',
-              type: 'button',
-              onClick: onEnterName,
-              children: 'Join again',
-            }),
-          onReload &&
-            jsx.jsx('button', {
-              className: 'bp-loading-action',
-              type: 'button',
-              onClick: onReload,
-              children: 'Reload',
-            }),
-          jsx.jsx('a', {
-            href: '/home',
-            className: 'bp-loading-action',
-            children: 'Back to home',
+          ],
+        }),
+        error &&
+          onRetry &&
+          jsx.jsx('button', {
+            className: 'bp-create bp-loading-action',
+            type: 'button',
+            onClick: onRetry,
+            children: 'Retry',
           }),
-        ],
-      }),
-    ],
+        error &&
+          onEnterName &&
+          jsx.jsx('button', {
+            className: 'bp-create bp-loading-action',
+            type: 'button',
+            onClick: onEnterName,
+            children: 'Join again',
+          }),
+        onReload &&
+          jsx.jsx('button', {
+            className: 'bp-create bp-loading-action',
+            type: 'button',
+            onClick: onReload,
+            children: 'Reload',
+          }),
+        jsx.jsx('a', {
+          href: '/home',
+          className: 'bp-resume bp-back bp-loading-action',
+          children: 'Back to home',
+        }),
+      ],
+    }),
   });
 }

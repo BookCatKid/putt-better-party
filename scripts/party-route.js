@@ -107,6 +107,7 @@ function PartyRoute() {
   let loadingOverlay = null;
   if (!active && admission.resume) {
     loadingOverlay = jsx.jsx(PartyLoadingScreen, {
+      code,
       message: 'Rejoining party…',
       error: admission.error,
       onRetry: admission.sessionExpired ? undefined : admission.join,
@@ -114,6 +115,7 @@ function PartyRoute() {
     });
   } else if (active && !ready) {
     loadingOverlay = jsx.jsx(PartyLoadingScreen, {
+      code,
       message: 'Loading party…',
       error: mapError || error,
       onRetry: mapError ? () => setRetry((previous) => previous + 1) : undefined,
