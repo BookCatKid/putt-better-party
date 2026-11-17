@@ -1,0 +1,11 @@
+{
+  "name": "putt-better-party",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun src/server.js",
+    "test": "bun test",
+    "prepare:client": "python3 scripts/prepare-client.py",
+    "capture:client": "python3 scripts/capture-client.py"
+  }
+}

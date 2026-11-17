@@ -1,0 +1,69 @@
+/* Party HUD is below the original top control strip; menus sit above standings. */
+.bp-party-status{top:72px;right:16px}
+.bp-toolbar{position:relative;z-index:12}
+.bp-host-control>button{height:44px;display:grid;place-items:center}
+.bp-host-panel{width:256px;z-index:30;text-align:left}
+.bp-host-time{display:flex;gap:6px;margin:6px 0 12px}
+.bp-host-time .bp-host-item{flex:1}
+.bp-host-item{display:block;width:100%;border-radius:8px;padding:8px 10px;text-align:left;font-size:13px;font-weight:600;background:#ffffff0b;margin-top:4px;cursor:pointer}
+.bp-host-item:hover{background:#ffffff20}
+.bp-host-item:disabled{opacity:.35;cursor:default}
+.bp-host-item.bp-danger{color:#fca5a5}
+.bp-host-confirm p{font-size:13px;margin:8px 0}
+.bp-community{--sea-ink:#1c2b29;--sea-ink-soft:#5d716d;--line:#1c2b291f;color:var(--sea-ink);background:#fff;border-radius:16px;padding:16px;text-align:left}
+.bp-catalog-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(174px, 26%);gap:16px;align-items:start}
+.bp-catalog-scroll{max-height:50vh;overflow-y:auto;overscroll-behavior:contain;padding-right:4px}
+.bp-catalog-scroll img{display:block;aspect-ratio:1200/630;width:100%;object-fit:cover;background:#eef3f1}
+.bp-catalog-scroll button,.bp-community button{cursor:pointer}
+.bp-community button:disabled{cursor:default}
+.bp-playlist-item{display:grid;grid-template-columns:62px minmax(0,1fr);gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.bp-playlist-item img{width:62px;aspect-ratio:1200/630;object-fit:cover;border-radius:6px;background:#eef3f1}
+.bp-playlist-actions{display:flex;gap:6px;font-size:12px}
+.bp-playlist-actions button{padding:2px 5px}
+.bp-playlist-actions button:disabled{opacity:.3}
+.bp-community input,.bp-community select{color:var(--sea-ink)}
+@media(max-width:640px){.bp-catalog-layout{grid-template-columns:1fr}.bp-catalog-scroll{max-height:45vh}.bp-party-status{top:68px;right:8px;width:190px}.bp-host-panel{width:230px}.bp-toolbar{gap:4px}.bp-toolbar>div:first-child{padding-inline:8px}.bp-host-control>button{padding-inline:8px}}
+
+.bp-disconnected{position:absolute;z-index:60;bottom:16px;left:50%;transform:translateX(-50%);max-width:90vw;width:max-content;padding:12px;background:#7f1d1d;color:white;border-radius:10px;pointer-events:auto;font-size:13px}.bp-disconnected a{text-decoration:underline}
+.bp-guest-course-list{display:grid;gap:6px;max-height:180px;overflow:auto}
+.bp-guest-course-list li{display:flex;gap:8px;align-items:center;font-size:12px}
+.bp-guest-course-list img{width:64px;aspect-ratio:1200/630;border-radius:5px;object-fit:cover}
+.bp-scorecard{margin:0 0 14px}
+.bp-scorecard-scroll{overflow-x:auto;max-height:220px;margin-top:8px}
+.bp-scorecard table{border-collapse:collapse;min-width:100%;font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.bp-scorecard td,.bp-scorecard th{padding:6px;text-align:center;border-bottom:1px solid #ffffff18}
+.bp-scorecard tr>:first-child{text-align:left;position:sticky;left:0;background:#11272b}
+.bp-holed{color:#a7f3d0}
+.bp-saved-playlists{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.bp-saved-playlists input,.bp-saved-playlists select{min-width:0;max-width:100%;border:1px solid var(--line);padding:6px;border-radius:8px;font-size:12px}
+
+.bp-playlist-item[draggable=true]{cursor:grab}.bp-playlist-item.bp-dragging{opacity:.45}
+.bp-lobby-options{display:grid;gap:8px;border-top:1px solid #ffffff15;padding-top:10px;font-size:12px}
+.bp-lobby-options label{display:flex;justify-content:space-between;align-items:center}
+.bp-lobby-options select{background:#0a1c21;padding:5px 8px;border-radius:6px;color:white}
+.bp-lobby-options input{accent-color:#34d399;width:16px;height:16px}
+.bp-upcoming{border-top:1px solid #ffffff15;padding-top:5px;margin:0 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#a7f3d0;font-size:10px}
+.bp-lobby:not(:has(.bp-community)){max-width:440px}
+.bp-number-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:500;color:#ffffffd9}
+.bp-number-wrap{display:flex;align-items:center;gap:6px}
+.bp-number-row input[type=number]{width:72px;max-width:100%;background:#0a1c21;border:1px solid #ffffff20;border-radius:6px;padding:6px 8px;text-align:right;font:inherit;font-variant-numeric:tabular-nums;color:white}
+.bp-number-row input[type=checkbox]{accent-color:#34d399;width:16px;height:16px}
+.bp-catalog-layout aside{max-height:55vh;overflow-y:auto;padding-right:4px}
+
+.bp-lobby{position:relative}
+.bp-number-wrap{gap:12px}
+.bp-number-slider{width:128px;max-width:32vw;accent-color:#34d399;cursor:pointer}
+.bp-number-box{display:flex;align-items:center;gap:2px;width:72px;border:1px solid #ffffff26;background:#091e22;border-radius:9px;padding:0 8px;transition:border-color .15s,box-shadow .15s;height:32px}
+.bp-number-box:focus-within{border-color:#34d399;box-shadow:0 0 0 2px #34d39922}
+.bp-number-row .bp-number-box input[type=number]{appearance:textfield;-moz-appearance:textfield;width:100%;min-width:0;padding:0;background:transparent;border:0;outline:none;font-size:13px;font-weight:600;text-align:center}
+.bp-number-box input::-webkit-inner-spin-button,.bp-number-box input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.bp-number-unit{color:#ffffff70;font-size:11px}
+.bp-number-wrap :disabled{opacity:.5;cursor:default}
+.bp-toolbar-home{position:relative;z-index:12;cursor:pointer}
+
+.bp-guest-starting{display:flex;align-items:center;justify-content:center;gap:12px;color:#a7f3d0;background:#10b98112;border:1px solid #34d39930;border-radius:12px;padding:14px;margin-bottom:12px;text-align:left}
+.bp-starting-title{font-size:13px;font-weight:700}
+.bp-starting-detail{font-size:12px;color:#ffffff99;margin-top:3px}
+.bp-loading-spinner{flex:none;width:18px;height:18px;border:2px solid #34d39935;border-top-color:#34d399;border-radius:50%;animation:bp-spin .8s linear infinite}
+@keyframes bp-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.bp-loading-spinner{animation:none;border-color:#34d399}}
