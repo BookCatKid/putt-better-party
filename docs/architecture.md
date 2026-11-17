@@ -10,6 +10,8 @@ Manual playlists contain public course IDs. Maps are fetched and validated from 
 
 SQLite retains room settings, public playlist metadata, random history and private session credentials. On restart, interrupted matches recover to their lobbies because browser-local physics state cannot be reconstructed. Unoccupied rooms expire after 30 minutes. A same-document reconnect retains progress; a full reload during an active unfinished round forfeits that hole. The server’s round timer continues during connection interruptions. The original server-side session replacement close reason is handled explicitly: when another tab claims the same identity, the displaced tab stops reconnecting and offers a return home or manual reload.
 
+Admission capacity is checked both when a credential is issued and again when its socket joins, so a credential issued before the room filled is still rejected at admission. Spectators count toward the maximum-player limit. Returning connected players keep their slot when the host reduces the limit, and no one is evicted; the host token by itself does not grant a slot — it only matters when the joining identity actually claims or retains host authority.
+
 ## Scoring and host controls
 
 Non-finishers are eliminated in elimination mode. Without elimination, unfinished holes incur a penalty of at least par plus five strokes. Exact upstream ranking and penalty parity is not established.

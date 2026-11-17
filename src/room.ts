@@ -236,17 +236,19 @@ export class Room {
     let player = this.players.get(identity.uid);
     const reload =
       !!player && player.instance !== undefined && player.instance !== message.instance;
+    const claimsHost =
+      message.host === this.hostToken && (!this.hostUid || this.hostUid === identity.uid);
     if (
       !player &&
       identity.uid !== this.hostUid &&
-      message.host !== this.hostToken &&
+      !claimsHost &&
       [...this.players.values()].filter((member) => member.ws).length >= this.config.maxPlayers
     ) {
       this.error(ws, 'full', 'Room is full');
       ws.close(1008);
       return;
     }
-    if (message.host === this.hostToken && (!this.hostUid || this.hostUid === identity.uid)) {
+    if (claimsHost) {
       this.hostUid = identity.uid;
     }
     if (!player) {

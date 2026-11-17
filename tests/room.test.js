@@ -479,3 +479,68 @@ test('lazy manual map preparation reaches later rounds and can be interrupted sa
   expect(room.holeIndex).toBe(1);
   room.dispose();
 });
+
+test('admission capacity rejects full rooms consistently, including host-token holders', () => {
+  const room = new Room('ABCDE', maps);
+  enter(room, 'Host', true);
+  enter(room, 'Guest One');
+  // A credential issued while the room still has room, then the room fills
+  // before the socket joins: admission must still reject it.
+  const tokenHolder = room.issue('Token Holder');
+  enter(room, 'Guest Two');
+  room.handle(
+    [...room.players.values()].find((player) => player.uid === room.hostUid)?.ws ?? socket(),
+    { t: 'config', config: { maxPlayers: 3 } },
+  );
+  // The host token alone must not claim a slot in a full room because this
+  // identity does not claim host authority.
+  const tokenSocket = socket();
+  room.handle(tokenSocket, {
+    t: 'join',
+    ...tokenHolder,
+    protocol: 2,
+    host: room.hostToken,
+  });
+  expect(tokenSocket.closed).toBe(true);
+  expect(tokenSocket.frames.some((frame) => frame.t === 'error' && frame.code === 'full')).toBe(
+    true,
+  );
+  // A returning connected player keeps the slot after maxPlayers is reduced.
+  const returning = [...room.players.values()].find((player) => player.uid !== room.hostUid);
+  const rejoin = socket();
+  room.handle(rejoin, {
+    t: 'join',
+    uid: returning.uid,
+    session: room.issued.get(returning.uid).session,
+    protocol: 2,
+    instance: 'again',
+  });
+  expect(rejoin.closed).toBeUndefined();
+  expect(rejoin.frames.some((frame) => frame.t === 'hello')).toBe(true);
+  room.dispose();
+});
+
+test('spectators count toward capacity and late joiners become spectators', () => {
+  const room = new Room('ABCDE', maps, { countdown: 1 });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p'], maxPlayers: 2 },
+  });
+  // A credential issued in the lobby before the room fills.
+  const third = room.issue('Third Guest');
+  room.handle(host.ws, { t: 'start' });
+  return waitForRoom(() => room.phase === 'playing').then(() => {
+    const late = enter(room, 'Late Guest');
+    expect(late.player.role).toBe('spectator');
+    // The spectator occupies the last of two slots; the earlier-issued
+    // credential is then rejected at socket admission.
+    const thirdSocket = socket();
+    room.handle(thirdSocket, { t: 'join', ...third, protocol: 2 });
+    expect(thirdSocket.closed).toBe(true);
+    expect(thirdSocket.frames.some((frame) => frame.t === 'error' && frame.code === 'full')).toBe(
+      true,
+    );
+    room.dispose();
+  });
+});
