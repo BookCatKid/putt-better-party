@@ -544,3 +544,49 @@ test('spectators count toward capacity and late joiners become spectators', () =
     room.dispose();
   });
 });
+
+test('match preparation survives a host reconnect and reports failure to the new socket', async () => {
+  let resolvePreparation;
+  const room = new Room('ABCDE', maps, {
+    prepareMatch: () => new Promise((resolve) => (resolvePreparation = resolve)),
+  });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, { t: 'start' });
+  await delay(1);
+  expect(room.snapshot().preparing).toBe(true);
+  // The original host socket disconnects and the identity reconnects with a
+  // new socket while preparation is still in flight.
+  room.close(host.ws);
+  const reconnected = socket();
+  room.handle(reconnected, { t: 'join', ...host.identity, protocol: 2, instance: 'again' });
+  expect(reconnected.frames.some((frame) => frame.t === 'hello')).toBe(true);
+  resolvePreparation({ ids: ['p'], specs: [maps.get('p').spec], seen: undefined });
+  await delay(1);
+  expect(room.phase).toBe('countdown');
+  expect(room.snapshot().preparing).toBe(false);
+  expect(reconnected.frames.some((frame) => frame.t === 'party' && frame.phase !== 'lobby')).toBe(
+    true,
+  );
+  room.dispose();
+});
+
+test('failed preparation reports to the reconnected host socket', async () => {
+  let rejectPreparation;
+  const room = new Room('ABCDE', maps, {
+    prepareMatch: () => new Promise((unused, reject) => (rejectPreparation = reject)),
+  });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, { t: 'start' });
+  await delay(1);
+  room.close(host.ws);
+  const reconnected = socket();
+  room.handle(reconnected, { t: 'join', ...host.identity, protocol: 2, instance: 'again' });
+  rejectPreparation(Error('upstream unavailable'));
+  await delay(1);
+  expect(room.phase).toBe('lobby');
+  expect(room.snapshot().preparing).toBe(false);
+  expect(
+    reconnected.frames.some((frame) => frame.t === 'error' && frame.code === 'map-load-failed'),
+  ).toBe(true);
+  room.dispose();
+});

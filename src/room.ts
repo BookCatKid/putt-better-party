@@ -521,17 +521,18 @@ export class Room {
     }
     const prepareMatch = this.prepareMatch;
     if (prepareMatch) {
+      // Preparation is bound to the authenticated host identity, not the
+      // original socket: a reconnect during preparation must not cancel it.
+      const hostUid = this.hostUid;
+      const configuration = structuredClone(this.config);
+      const previousSeen = [...this.randomSeen];
       this.starting = true;
       this.changed();
       this.broadcast(this.snapshot());
       Promise.resolve()
-        .then(() => prepareMatch(structuredClone(this.config), [...this.randomSeen]))
+        .then(() => prepareMatch(configuration, previousSeen))
         .then(({ ids, specs, seen }) => {
-          if (
-            !this.closed &&
-            this.phase === 'lobby' &&
-            this.players.get(this.hostUid ?? '')?.ws === ws
-          ) {
+          if (!this.closed && this.phase === 'lobby' && this.starting && this.hostUid === hostUid) {
             this.holeIds = ids;
             this.specs = specs;
             if (Array.isArray(seen)) {
@@ -540,7 +541,12 @@ export class Room {
             this.startPrepared();
           }
         })
-        .catch((error) => this.error(ws, 'map-load-failed', errorMessage(error)))
+        .catch((error) => {
+          const hostSocket = this.players.get(this.hostUid ?? '')?.ws;
+          if (hostSocket) {
+            this.error(hostSocket, 'map-load-failed', errorMessage(error));
+          }
+        })
         .finally(() => {
           this.starting = false;
           if (!this.closed) {
