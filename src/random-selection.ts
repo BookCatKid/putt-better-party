@@ -109,8 +109,13 @@ export async function chooseRandom({
   }
 
   if (selectedIds.length < count) {
-    // Exhausted the old pool. Begin another cycle without repeating within this match.
+    // Exhausted the old pool. Begin another cycle: the old history is reset,
+    // but every course played in this match counts toward the new cycle so a
+    // follow-up match cannot immediately repeat it.
     history.clear();
+    for (const id of selectedIds) {
+      history.add(id);
+    }
     for (const id of deferredIds) {
       if (selectedIds.length >= count) {
         break;

@@ -87,8 +87,41 @@ test('random assignments avoid history until pool exhaustion, then wrap without 
   const third = await chooseRandom({ browse, count: 9, seen: second.seen, pick: () => 0 });
   expect(third.ids.slice(0, 8).every((id) => !second.seen.includes(id))).toBe(true);
   expect(new Set(third.ids).size).toBe(9);
-  expect(third.seen.length).toBe(1);
+  // The rollover match played eight unseen courses plus one repeated course;
+  // all nine count toward the new cycle instead of only the repeated one.
+  expect(third.seen.length).toBe(9);
   expect(calls).toContain(24);
+  const fourth = await chooseRandom({ browse, count: 9, seen: third.seen, pick: () => 0 });
+  expect(fourth.ids.every((id) => !third.ids.includes(id))).toBe(true);
+  expect(fourth.seen.length).toBe(18);
+});
+
+test('random rollover tolerates deleted history entries and duplicate catalog IDs', async () => {
+  const holes = [
+    ...Array.from({ length: 12 }, (unused, index) => ({ id: 'hole' + index })),
+    { id: 'hole0' },
+    { id: 'hole1' },
+  ];
+  const browse = async ({ offset }) => ({
+    total: holes.length,
+    holes: holes.slice(offset, offset + 24),
+  });
+  // History references courses that no longer exist in the catalog.
+  const first = await chooseRandom({
+    browse,
+    count: 12,
+    seen: ['deleted-a', 'hole0', 'deleted-b'],
+    pick: () => 0,
+  });
+  expect(first.ids.filter((id) => id.startsWith('hole')).length).toBe(12);
+  expect(new Set(first.ids).size).toBe(12);
+  expect(first.seen.length).toBe(12);
+  // A follow-up match rolls over into the duplicated remainder; with the
+  // whole unique pool already played it must still return distinct IDs and
+  // track exactly what it played.
+  const second = await chooseRandom({ browse, count: 2, seen: first.seen, pick: () => 0 });
+  expect(new Set(second.ids).size).toBe(2);
+  expect(second.seen).toEqual(second.ids);
 });
 
 test('daily exclusion refreshes every match, covers every daily page, and allows future scheduled holes', async () => {
