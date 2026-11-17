@@ -5,7 +5,7 @@ const target = (await fetch('http://127.0.0.1:9239/json/list').then((r) => r.jso
 );
 const c = await connect(target);
 try {
-  await c.call('Page.navigate', { url: 'http://127.0.0.1:8789/home' });
+  await c.call('Page.navigate', { url: (process.env.BASE || 'http://127.0.0.1:8789') + '/home' });
   await waitFor(c, '!!document.querySelector("#create")');
   await c.evalJS('document.querySelector("#create").click()');
   await waitFor(c, '!!document.querySelector("input[placeholder=\\"Your name\\"]")');

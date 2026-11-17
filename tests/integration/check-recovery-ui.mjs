@@ -1,6 +1,6 @@
 import { connect, waitFor } from './cdp.mjs';
 import assert from 'node:assert/strict';
-const base = process.env.BASE || 'http://127.0.0.1:8790',
+const base = process.env.BASE || 'http://127.0.0.1:8789',
   debug = 'http://127.0.0.1:9239';
 const c = await connect(
   (await fetch(debug + '/json/list').then((r) => r.json())).find((t) => t.type === 'page'),
@@ -30,6 +30,8 @@ const click = async (label) => {
 try {
   await c.call('Page.navigate', { url: base + '/home' });
   await waitFor(c, '!!document.querySelector("#create")');
+  assert.equal(await c.evalJS('!!document.querySelector("#catalog")'), false);
+  console.log('PASS simplified home');
   await c.evalJS('document.querySelector("#create").click()');
   await waitFor(c, '[...document.querySelectorAll("input")].some(x=>x.placeholder==="Your name")');
   await c.evalJS(
@@ -41,6 +43,20 @@ try {
   );
   await click('Join');
   await expect('s.isHost&&s.mapReady');
+  await c.evalJS(
+    '(()=>{const x=[...document.querySelectorAll("select")].find(x=>x.getAttribute("aria-label")==="Maximum players");x.value="4";x.dispatchEvent(new Event("change",{bubbles:true}));})()',
+  );
+  await expect('s.config.maxPlayers===4');
+  await c.evalJS(
+    '[...document.querySelectorAll("input")].find(x=>x.getAttribute("aria-label")==="Lock party").click()',
+  );
+  await expect('s.config.locked');
+  await c.evalJS(
+    '[...document.querySelectorAll("input")].find(x=>x.getAttribute("aria-label")==="Lock party").click()',
+  );
+  await expect('!s.config.locked');
+  console.log('PASS lobby maximum players and lock');
+
   await c.evalJS(
     '(()=>{let x=document.querySelector("[aria-label=\\"Party map selection\\"]");x.value="picked";x.dispatchEvent(new Event("change",{bubbles:true}));})()',
   );

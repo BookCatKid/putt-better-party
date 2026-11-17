@@ -1,6 +1,6 @@
 import { connect, waitFor } from './cdp.mjs';
 import assert from 'node:assert/strict';
-const base = process.env.BASE || 'http://127.0.0.1:8790',
+const base = process.env.BASE || 'http://127.0.0.1:8789',
   debug = 'http://127.0.0.1:9239';
 const c = await connect(
   (await fetch(debug + '/json/list').then((r) => r.json())).find((t) => t.type === 'page'),
@@ -27,6 +27,11 @@ const click = async (label) => {
     clickCount: 1,
   });
 };
+const game = '(await import("/assets/runtime-DL2fiDAQ.js")).m.state';
+const read = () =>
+  c.evalJS(
+    `(async()=>{let s=${state},g=${game};return {matchId:s.matchId,holeIndex:s.holeIndex,name:g.level?.name,attempt:g.attemptSeq,strokes:g.strokes,ends:s.timerEndsAt,connected:s.bpConnected,phase:s.phase,levelId:g.level?.id}})()`,
+  );
 try {
   await c.call('Page.navigate', { url: base + '/home' });
   await waitFor(c, '!!document.querySelector("#create")');
@@ -59,20 +64,58 @@ try {
   );
   await expect('s.config.selectedHoleIds.length===1');
   await waitFor(c, '!!document.querySelector(".bp-playlist-item img")');
-  assert.match(await c.evalJS('document.title'), /^Party [A-Z2-9]{5} · Better Party$/);
+  await c.evalJS(
+    '[...document.querySelectorAll("button")].filter(b=>b.getAttribute("aria-label")?.startsWith("Add "))[1].click()',
+  );
+  await expect('s.config.selectedHoleIds.length===2');
+  await c.evalJS(
+    '(async()=>{(await import("/assets/runtime-DL2fiDAQ.js")).D({timerMs:60000,elimination:false})})()',
+  );
+  await expect('!s.config.elimination');
   await click('Start party');
   await expect('s.phase==="playing"&&s.mapReady');
-  const title = await c.evalJS('document.title');
-  console.log('PASS gameplay title:', title);
-  assert(title.includes('Hole 1/1 · Better Party'));
-  assert(!title.includes('Local'));
+  const rect = await c.evalJS(
+    '(()=>{let a=document.querySelector(".bp-toolbar").getBoundingClientRect(),b=document.querySelector(".bp-party-status").getBoundingClientRect();return {toolbarBottom:a.bottom,statusTop:b.top}})()',
+  );
+  console.log('HUD bounds', rect);
+  assert(rect.statusTop >= rect.toolbarBottom);
+  const before = await read();
+  await click('Party controls');
+  await waitFor(c, '!!document.querySelector(".bp-host-panel")');
+  await click('+30s');
+  await expect('s.timerEndsAt-s.startAt===90000');
+  const added = await read();
+  assert(added.ends - before.ends >= 29500);
+  console.log('PASS pointer-based add time', before.ends, added.ends);
+  await click('Party controls');
+  await click('Restart level');
+  await click('Confirm');
+  await expect(
+    's.matchId!==' + JSON.stringify(before.matchId) + '&&s.phase==="playing"&&s.mapReady',
+  );
+  const restarted = await read();
+  assert.equal(restarted.holeIndex, before.holeIndex);
+  assert.equal(restarted.name, before.name);
+  assert(restarted.attempt > before.attempt);
+  assert.equal(restarted.strokes, 0);
+  console.log('PASS pointer-based restart with real game attempt reset', before, restarted);
+  await click('Party controls');
+  await click('Skip level');
+  await click('Confirm');
+  await expect('s.holeIndex===1&&s.phase==="playing"&&s.mapReady');
+  const skipped = await read();
+  assert.notEqual(skipped.name, before.name);
+  assert(skipped.attempt > restarted.attempt);
+  console.log('PASS pointer-based skip loaded different map', skipped);
   await click('Party controls');
   await click('End party');
   await click('Confirm');
   await expect('s.phase==="final"');
-  await waitFor(c, 'document.title==="Results · Better Party"');
-  console.log('PASS results title');
+  console.log('PASS pointer-based end');
 } finally {
-  console.log('Browser errors', JSON.stringify(c.events.filter((e) => e.type === 'exception')));
+  console.log(
+    'Browser errors',
+    JSON.stringify(c.events.filter((e) => e.type === 'exception' || e.type === 'http').slice(-10)),
+  );
   c.close();
 }

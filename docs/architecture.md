@@ -1,0 +1,21 @@
+# Architecture and operation
+
+The HTTP service exposes room creation, session issuance, catalog browsing and course retrieval. The independent WebSocket room state machine owns admission, host permissions, round timing, progression, elimination and standings. The original client handles rendering and simulation.
+
+## Course selection
+
+Manual playlists contain public course IDs. Maps are fetched and validated from the public API as needed; no playable map is stored permanently. Random selection tracks per-room history and avoids repeats until the available pool is exhausted. The daily exclusion option refreshes the public featured-hole metadata at the beginning of each random match.
+
+## Room lifecycle
+
+SQLite retains room settings, public playlist metadata, random history and private session credentials. On restart, interrupted matches recover to their lobbies because browser-local physics state cannot be reconstructed. Unoccupied rooms expire after 30 minutes. A same-document reconnect retains progress; a full reload during an active unfinished round forfeits that hole.
+
+## Scoring and host controls
+
+Non-finishers are eliminated in elimination mode. Without elimination, unfinished holes incur a penalty of at least par plus five strokes. Exact upstream ranking and penalty parity is not established.
+
+Hosts can extend the current round by 15, 30 or 60 seconds up to 15 minutes. Skipping voids the hole; restarting resets its attempt and preserves previous scores. Ending retains completed scores without penalizing unfinished players. All commands are checked by the backend.
+
+## Deployment considerations
+
+The service is intended to operate independently of putt.day's official party servers. Public course availability depends on the pinned upstream read protocol. Before exposing a service publicly, obtain any needed asset redistribution permission and review authentication, abuse prevention, rate limits and deployment security. Client-reported scores are not server-verified physics.

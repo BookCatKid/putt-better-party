@@ -1,6 +1,6 @@
 import { connect, waitFor } from './cdp.mjs';
 import assert from 'node:assert/strict';
-const base = process.env.BASE || 'http://127.0.0.1:8790',
+const base = process.env.BASE || 'http://127.0.0.1:8789',
   headers = { origin: base, 'content-type': 'application/json' };
 const post = async (path, data) => {
   const r = await fetch(base + path, { method: 'POST', headers, body: JSON.stringify(data) }),

@@ -45,14 +45,11 @@ try {
   await host.evalJS(
     `(()=>{let x=document.querySelector("select[aria-label='Party map selection']");x.value="picked";x.dispatchEvent(new Event("change",{bubbles:true}));})()`,
   );
-  await waitFor(
-    host,
-    '!!document.querySelector("button[aria-label=\\"Add Titling At Windmills\\"]")',
-    25000,
-  );
-  await host.evalJS(
-    'document.querySelector("button[aria-label=\\"Add Titling At Windmills\\"]").click()',
-  );
+  const addFirst =
+    '[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add "))';
+  await waitFor(host, '!!' + addFirst, 25000);
+  const firstTitle = await host.evalJS(addFirst + '.getAttribute("aria-label").slice(4)');
+  await host.evalJS(addFirst + '.click()');
   await expect(host, 's.config.selectedHoleIds?.length===1');
   await host.evalJS(
     '[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add ")).click()',
@@ -69,17 +66,21 @@ try {
   await host.evalJS(
     '[...document.querySelectorAll("button")].find(x=>x.textContent==="Start party").click()',
   );
-  await expect(host, 's.phase==="countdown" && s.currentMap?.name==="Titling At Windmills"');
+  await expect(host, 's.phase==="countdown" && s.currentMap?.name===' + JSON.stringify(firstTitle));
   await expect(guest, 's.phase==="countdown"||s.phase==="playing"');
   console.log('Countdown', await read(host), await read(guest));
   await expect(
     guest,
-    's.phase==="playing"&&s.mapReady&&g.level?.name==="Titling At Windmills"&&document.querySelectorAll("canvas").length>0',
+    's.phase==="playing"&&s.mapReady&&g.level?.name===' +
+      JSON.stringify(firstTitle) +
+      '&&document.querySelectorAll("canvas").length>0',
     30000,
   );
   await expect(
     host,
-    's.phase==="playing"&&s.mapReady&&g.level?.name==="Titling At Windmills"&&document.querySelectorAll("canvas").length>0',
+    's.phase==="playing"&&s.mapReady&&g.level?.name===' +
+      JSON.stringify(firstTitle) +
+      '&&document.querySelectorAll("canvas").length>0',
     30000,
   );
   console.log(

@@ -1,6 +1,6 @@
 import { connect, waitFor } from './cdp.mjs';
 import assert from 'node:assert/strict';
-const base = process.env.BASE || 'http://127.0.0.1:8790',
+const base = process.env.BASE || 'http://127.0.0.1:8789',
   debug = 'http://127.0.0.1:9239';
 const c = await connect(
   (await fetch(debug + '/json/list').then((r) => r.json())).find((t) => t.type === 'page'),
@@ -9,7 +9,7 @@ const state = '(await import("/assets/runtime-DL2fiDAQ.js")).E.state';
 const expect = (cond) => waitFor(c, `(async()=>{const s=${state};return (${cond})})()`, 25000);
 const click = async (label) => {
   const r = await c.evalJS(
-    `(()=>{const b=[...document.querySelectorAll("button")].find(b=>b.textContent===${JSON.stringify(label)}||b.getAttribute("aria-label")===${JSON.stringify(label)});if(!b||b.disabled)return null;b.scrollIntoView({block:"nearest"});const r=b.getBoundingClientRect();const x=r.x+r.width/2,y=r.y+r.height/2;return {x,y,hit:b.contains(document.elementFromPoint(x,y))}})()`,
+    `(()=>{const b=[...document.querySelectorAll("button,a")].find(b=>b.textContent===${JSON.stringify(label)}||b.getAttribute("aria-label")===${JSON.stringify(label)});if(!b||b.disabled)return null;b.scrollIntoView({block:"nearest"});const r=b.getBoundingClientRect();const x=r.x+r.width/2,y=r.y+r.height/2;return {x,y,hit:b.contains(document.elementFromPoint(x,y))}})()`,
   );
   assert(r?.hit, 'Not pointer-clickable: ' + label + ' ' + JSON.stringify(r));
   await c.call('Input.dispatchMouseEvent', {
@@ -29,9 +29,9 @@ const click = async (label) => {
 };
 try {
   await c.call('Page.navigate', { url: base + '/home' });
-  await waitFor(c, '!!document.querySelector("#create")');
+  await waitFor(c, 'typeof document.querySelector("#create")?.onclick==="function"');
   assert.equal(await c.evalJS('!!document.querySelector("#catalog")'), false);
-  console.log('PASS simplified home');
+  console.log('PASS home has no community catalog');
   await c.evalJS('document.querySelector("#create").click()');
   await waitFor(c, '[...document.querySelectorAll("input")].some(x=>x.placeholder==="Your name")');
   await c.evalJS(
@@ -43,20 +43,91 @@ try {
   );
   await click('Join');
   await expect('s.isHost&&s.mapReady');
+  async function setNumber(label, value) {
+    await c.evalJS(
+      `(()=>{const x=[...document.querySelectorAll("input")].find(x=>x.getAttribute("aria-label")===${JSON.stringify(label)});if(x.type!=="number")throw Error("not a number input");x.focus();Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(x,${JSON.stringify(String(value))});x.dispatchEvent(new Event("input",{bubbles:true}));})()`,
+    );
+    await c.call('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'Enter',
+      code: 'Enter',
+      windowsVirtualKeyCode: 13,
+    });
+    await c.call('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key: 'Enter',
+      code: 'Enter',
+      windowsVirtualKeyCode: 13,
+    });
+  }
+  await setNumber('Holes', 7);
+  await expect('s.config.holes===7');
+  await setNumber('Timer', 127);
+  await expect('s.config.timerMs===127000');
   await c.evalJS(
-    '(()=>{const x=[...document.querySelectorAll("select")].find(x=>x.getAttribute("aria-label")==="Maximum players");x.value="4";x.dispatchEvent(new Event("change",{bubbles:true}));})()',
+    '[...document.querySelectorAll("input")].find(x=>x.getAttribute("aria-label")==="Exclude daily holes").click()',
   );
-  await expect('s.config.maxPlayers===4');
+  await expect('s.config.excludeDaily');
+  await waitFor(
+    c,
+    '[...document.querySelectorAll("input")].filter(x=>x.type==="range"&&["Holes slider","Timer slider"].includes(x.getAttribute("aria-label"))).length===2',
+  );
+  assert.equal(
+    await c.evalJS(
+      '[...document.querySelectorAll("input")].find(x=>x.getAttribute("aria-label")==="Timer slider").value',
+    ),
+    '127',
+  );
   await c.evalJS(
-    '[...document.querySelectorAll("input")].find(x=>x.getAttribute("aria-label")==="Lock party").click()',
+    '[...document.querySelectorAll("input")].find(x=>x.getAttribute("aria-label")==="Holes slider").focus()',
   );
-  await expect('s.config.locked');
-  await c.evalJS(
-    '[...document.querySelectorAll("input")].find(x=>x.getAttribute("aria-label")==="Lock party").click()',
+  await c.call('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'ArrowLeft',
+    code: 'ArrowLeft',
+    windowsVirtualKeyCode: 37,
+  });
+  await c.call('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'ArrowLeft',
+    code: 'ArrowLeft',
+    windowsVirtualKeyCode: 37,
+  });
+  await expect('s.config.holes===6');
+  assert.equal(
+    await c.evalJS(
+      '[...document.querySelectorAll("input")].find(x=>x.getAttribute("aria-label")==="Holes").value',
+    ),
+    '6',
   );
-  await expect('!s.config.locked');
-  console.log('PASS lobby maximum players and lock');
-
+  await setNumber('Holes', 7);
+  await expect('s.config.holes===7');
+  const code = await c.evalJS(`(async()=>${state}.code)()`);
+  assert.equal(
+    await c.evalJS(
+      '[...document.querySelectorAll("a,button")].filter(x=>x.getAttribute("aria-label")==="Back to home").length',
+    ),
+    1,
+  );
+  await click('Back to home');
+  await waitFor(
+    c,
+    'location.pathname==="/home"&&typeof document.querySelector("#create")?.onclick==="function"',
+  );
+  await waitFor(c, '!document.querySelector("#resume").hidden');
+  assert.equal(
+    await c.evalJS('document.querySelector("#resume").textContent'),
+    'Return to ' + code,
+  );
+  const uid = await c.evalJS('sessionStorage.getItem(' + JSON.stringify('bp.uid.' + code) + ')');
+  await click('Return to ' + code);
+  await expect('s.isHost&&s.mapReady&&s.config.holes===7&&s.config.timerMs===127000');
+  assert.equal(await c.evalJS(`(async()=>${state}.self.uid)()`), uid);
+  assert.equal(
+    await c.evalJS('[...document.querySelectorAll("input")].some(x=>x.placeholder==="Your name")'),
+    false,
+  );
+  console.log('PASS automatic return with same identity and settings');
   await c.evalJS(
     '(()=>{let x=document.querySelector("[aria-label=\\"Party map selection\\"]");x.value="picked";x.dispatchEvent(new Event("change",{bubbles:true}));})()',
   );
@@ -79,6 +150,23 @@ try {
     '[...document.querySelectorAll("button")].filter(b=>b.getAttribute("aria-label")?.startsWith("Add "))[1].click()',
   );
   await expect('s.config.selectedHoleIds.length===2');
+  for (let i = 3; i <= 11; i++) {
+    await waitFor(
+      c,
+      '[...document.querySelectorAll("button")].some(b=>b.getAttribute("aria-label")?.startsWith("Add ")&&!b.disabled)',
+    );
+    await c.evalJS(
+      '[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add ")&&!b.disabled).click()',
+    );
+    await expect('s.config.selectedHoleIds.length===' + i);
+  }
+  console.log('PASS eleven manual playlist entries');
+  assert.equal(
+    await c.evalJS(
+      '[...document.querySelectorAll("input")].some(x=>x.getAttribute("aria-label")==="Exclude daily holes")',
+    ),
+    false,
+  );
   await c.evalJS(
     '(()=>{let x=[...document.querySelectorAll("input")].find(x=>x.getAttribute("aria-label")==="Playlist name");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(x,"Test playlist");x.dispatchEvent(new Event("input",{bubbles:true}));})()',
   );
@@ -91,10 +179,18 @@ try {
   await click('Clear');
   await expect('s.config.selectedHoleIds.length===0');
   await click('Load saved playlist');
-  await expect('s.config.selectedHoleIds.length===2');
+  await expect('s.config.selectedHoleIds.length===11');
   const restored = await c.evalJS(`(async()=>${state}.config.selectedHoleIds)()`);
   assert.deepEqual(restored, original);
   console.log('PASS save, clear, reload playlist', restored.length);
+  const mode = async (v) =>
+    c.evalJS(
+      `(()=>{const x=[...document.querySelectorAll("select")].find(x=>x.getAttribute("aria-label")==="Party map selection");x.value=${JSON.stringify(v)};x.dispatchEvent(new Event("change",{bubbles:true}));})()`,
+    );
+  await mode('random');
+  await expect('s.config.holes===7&&s.config.excludeDaily');
+  await mode('picked');
+  await expect('s.config.holes===11');
   await c.evalJS(
     '(async()=>{(await import("/assets/runtime-DL2fiDAQ.js")).D({timerMs:60000,elimination:false})})()',
   );

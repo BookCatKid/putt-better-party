@@ -1,6 +1,6 @@
 import { connect, waitFor } from './cdp.mjs';
 import assert from 'node:assert/strict';
-const base = process.env.BASE || 'http://127.0.0.1:8790',
+const base = process.env.BASE || 'http://127.0.0.1:8789',
   debug = 'http://127.0.0.1:9239';
 const c = await connect(
   (await fetch(debug + '/json/list').then((r) => r.json())).find((t) => t.type === 'page'),

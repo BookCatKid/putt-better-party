@@ -1,6 +1,6 @@
 import { connect, waitFor } from './cdp.mjs';
 import assert from 'node:assert/strict';
-const base = process.env.BASE || 'http://127.0.0.1:8790',
+const base = process.env.BASE || 'http://127.0.0.1:8789',
   debug = 'http://127.0.0.1:9239';
 const c = await connect(
   (await fetch(debug + '/json/list').then((r) => r.json())).find((t) => t.type === 'page'),
@@ -27,11 +27,6 @@ const click = async (label) => {
     clickCount: 1,
   });
 };
-const game = '(await import("/assets/runtime-DL2fiDAQ.js")).m.state';
-const read = () =>
-  c.evalJS(
-    `(async()=>{let s=${state},g=${game};return {matchId:s.matchId,holeIndex:s.holeIndex,name:g.level?.name,attempt:g.attemptSeq,strokes:g.strokes,ends:s.timerEndsAt,connected:s.bpConnected,phase:s.phase,levelId:g.level?.id}})()`,
-  );
 try {
   await c.call('Page.navigate', { url: base + '/home' });
   await waitFor(c, '!!document.querySelector("#create")');
@@ -69,49 +64,46 @@ try {
   );
   await expect('s.config.selectedHoleIds.length===2');
   await c.evalJS(
+    '(()=>{let x=[...document.querySelectorAll("input")].find(x=>x.getAttribute("aria-label")==="Playlist name");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(x,"Test playlist");x.dispatchEvent(new Event("input",{bubbles:true}));})()',
+  );
+  await click('Save playlist');
+  await waitFor(
+    c,
+    '[...document.querySelectorAll("select")].find(x=>x.getAttribute("aria-label")==="Saved playlists").options.length>1',
+  );
+  const original = await c.evalJS(`(async()=>${state}.config.selectedHoleIds)()`);
+  await click('Clear');
+  await expect('s.config.selectedHoleIds.length===0');
+  await click('Load saved playlist');
+  await expect('s.config.selectedHoleIds.length===2');
+  const restored = await c.evalJS(`(async()=>${state}.config.selectedHoleIds)()`);
+  assert.deepEqual(restored, original);
+  console.log('PASS save, clear, reload playlist', restored.length);
+  await c.evalJS(
     '(async()=>{(await import("/assets/runtime-DL2fiDAQ.js")).D({timerMs:60000,elimination:false})})()',
   );
   await expect('!s.config.elimination');
   await click('Start party');
   await expect('s.phase==="playing"&&s.mapReady');
-  const rect = await c.evalJS(
-    '(()=>{let a=document.querySelector(".bp-toolbar").getBoundingClientRect(),b=document.querySelector(".bp-party-status").getBoundingClientRect();return {toolbarBottom:a.bottom,statusTop:b.top}})()',
-  );
-  console.log('HUD bounds', rect);
-  assert(rect.statusTop >= rect.toolbarBottom);
-  const before = await read();
-  await click('Party controls');
-  await waitFor(c, '!!document.querySelector(".bp-host-panel")');
-  await click('+30s');
-  await expect('s.timerEndsAt-s.startAt===90000');
-  const added = await read();
-  assert(added.ends - before.ends >= 29500);
-  console.log('PASS pointer-based add time', before.ends, added.ends);
-  await click('Party controls');
-  await click('Restart level');
-  await click('Confirm');
-  await expect(
-    's.matchId!==' + JSON.stringify(before.matchId) + '&&s.phase==="playing"&&s.mapReady',
-  );
-  const restarted = await read();
-  assert.equal(restarted.holeIndex, before.holeIndex);
-  assert.equal(restarted.name, before.name);
-  assert(restarted.attempt > before.attempt);
-  assert.equal(restarted.strokes, 0);
-  console.log('PASS pointer-based restart with real game attempt reset', before, restarted);
   await click('Party controls');
   await click('Skip level');
   await click('Confirm');
   await expect('s.holeIndex===1&&s.phase==="playing"&&s.mapReady');
-  const skipped = await read();
-  assert.notEqual(skipped.name, before.name);
-  assert(skipped.attempt > restarted.attempt);
-  console.log('PASS pointer-based skip loaded different map', skipped);
   await click('Party controls');
   await click('End party');
   await click('Confirm');
-  await expect('s.phase==="final"');
-  console.log('PASS pointer-based end');
+  await expect('s.phase==="final"&&s.final?.standings?.length===1');
+  await click('Scorecard');
+  await waitFor(c, '!!document.querySelector(".bp-scorecard table")');
+  const table = await c.evalJS('document.querySelector(".bp-scorecard table").innerText');
+  assert(table.includes('Skip'));
+  assert(table.includes('UI Test'));
+  console.log('PASS visible scorecard', table);
+  assert.equal(
+    c.events.filter((e) => e.type === 'exception').length,
+    0,
+    'Browser runtime exceptions',
+  );
 } finally {
   console.log(
     'Browser errors',
