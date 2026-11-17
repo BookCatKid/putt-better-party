@@ -1,8 +1,51 @@
 /**
  * Party WebSocket adapter for the original game's state stores and presence API.
  * Wire fields and the 100ms ghost update loop follow the pinned GameCanvas bundle.
+ * Every environment touchpoint (socket constructor, timers, location, document and
+ * the upstream state-store bindings) resolves through an injectable bindings object
+ * so the adapter can be exercised offline; production falls back to the bundle globals.
  */
+// Chromium rejects timer globals invoked with a foreign receiver, so production
+// bindings call them without one. Injected test bindings are used as given.
+const globalSetTimeout = (...timerArgs) => setTimeout(...timerArgs);
+const globalClearTimeout = (handle) => clearTimeout(handle);
+const globalSetInterval = (...timerArgs) => setInterval(...timerArgs);
+const globalClearInterval = (handle) => clearInterval(handle);
+
+function resolveTransportBindings(injected) {
+  const provided = injected || {};
+  return {
+    WebSocket: provided.WebSocket ?? WebSocket,
+    location: provided.location ?? location,
+    document: provided.document ?? document,
+    setTimeout: provided.setTimeout ?? globalSetTimeout,
+    clearTimeout: provided.clearTimeout ?? globalClearTimeout,
+    setInterval: provided.setInterval ?? globalSetInterval,
+    clearInterval: provided.clearInterval ?? globalClearInterval,
+    partyStore: provided.partyStore ?? transportPartyStore,
+    gameStore: provided.gameStore ?? transportGameStore,
+    settingsStore: provided.settingsStore ?? transportSettings,
+    scene: provided.scene ?? transportScene,
+    connection: provided.connection ?? bpConnection,
+    registerSender: provided.registerSender ?? registerTransportSender,
+    setIdentity: provided.setIdentity ?? setTransportIdentity,
+    updateParty: provided.updateParty ?? updateTransportParty,
+    setFlyCamera: provided.setFlyCamera ?? setTransportFlyCamera,
+    setRoster: provided.setRoster ?? setTransportRoster,
+    setBoard: provided.setBoard ?? setTransportBoard,
+    setFinal: provided.setFinal ?? setTransportFinal,
+    removeGhost: provided.removeGhost ?? removeTransportGhost,
+    showCompletion: provided.showCompletion ?? showTransportCompletion,
+    ghostHue: provided.ghostHue ?? transportGhostHue,
+    setError: provided.setError ?? setTransportError,
+    updateGhost: provided.updateGhost ?? updateTransportGhost,
+    isSpectator: provided.isSpectator ?? isTransportSpectator,
+    ack: provided.ack ?? bpAck,
+  };
+}
+
 function connectBetterParty(code, identity, options = {}) {
+  const bind = resolveTransportBindings(options.bindings);
   const { hostToken, onError } = options;
   const initialRetryDelay = 1000;
   let socket = null;
@@ -20,9 +63,11 @@ function connectBetterParty(code, identity, options = {}) {
   let lastStrokeCount = -1;
   let completionSent = false;
   let forfeitSent = false;
+  let roundChangePending = false;
+  let sawMapReadyFalse = false;
 
   function socketOpen() {
-    return socket?.readyState === WebSocket.OPEN;
+    return socket?.readyState === bind.WebSocket.OPEN;
   }
 
   function send(message, requireSynchronization = true) {
@@ -31,7 +76,7 @@ function connectBetterParty(code, identity, options = {}) {
     }
     let packet = message;
     if (message.t === 'prog' || message.t === 'forfeit' || message.f === 1) {
-      const { matchId, holeIndex } = transportPartyStore.state;
+      const { matchId, holeIndex } = bind.partyStore.state;
       packet = { ...message, matchId, holeIndex };
     }
     socket.send(JSON.stringify(packet));
@@ -39,16 +84,18 @@ function connectBetterParty(code, identity, options = {}) {
   }
 
   function reportProgress() {
-    const party = transportPartyStore.state;
+    observePartyState();
+    const party = bind.partyStore.state;
     if (
       !synchronized ||
+      roundChangePending ||
       party.phase !== 'playing' ||
       !party.mapReady ||
       party.selfRole === 'spectator'
     ) {
       return;
     }
-    const game = transportGameStore.state;
+    const game = bind.gameStore.state;
     if (game.strokes !== lastStrokeCount && game.phase !== 'holed') {
       if (send({ t: 'prog', st: game.strokes })) {
         lastStrokeCount = game.strokes;
@@ -66,15 +113,46 @@ function connectBetterParty(code, identity, options = {}) {
     if (synchronized || awaitingSnapshot || !receivedRoster || !receivedBoard) {
       return;
     }
-    clearTimeout(handshakeTimer);
     synchronized = true;
     retryDelay = initialRetryDelay;
-    bpConnection(true);
+    bind.connection(true);
     reportProgress();
   }
 
+  /**
+   * After the round changes, the local game state is stale until the route
+   * reloads the level. Progress, forfeit and completion messages must not be
+   * sent from a stale game state because they would be scoped to the new round.
+   * The route signals a reload by clearing map readiness and confirms the fresh
+   * attempt by restoring it; the game store then updates with the new level.
+   * This is observed from the game-store subscription to avoid cross-store
+   * reads inside the party store's reactive subscription.
+   */
+  function freshAttemptConfirmed() {
+    const party = bind.partyStore.state;
+    const game = bind.gameStore.state;
+    return (
+      !!party.currentMap?.id && party.mapReady === true && game.level?.id === party.currentMap.id
+    );
+  }
+
+  function observePartyState() {
+    if (!roundChangePending) {
+      return;
+    }
+    const mapReady = bind.partyStore.state.mapReady === true;
+    if (!mapReady) {
+      sawMapReadyFalse = true;
+      return;
+    }
+    if (sawMapReadyFalse && freshAttemptConfirmed()) {
+      roundChangePending = false;
+      sawMapReadyFalse = false;
+    }
+  }
+
   function receiveSnapshot(message) {
-    const previous = transportPartyStore.state;
+    const previous = bind.partyStore.state;
     const sameRound =
       previous.matchId === message.matchId &&
       previous.holeIndex === message.holeIndex &&
@@ -91,10 +169,23 @@ function connectBetterParty(code, identity, options = {}) {
       forfeitSent = false;
       lastStrokeCount = -1;
     }
+    // A snapshot only describes a round change when this connection already
+    // knew a round. The very first snapshot introduces the round instead: the
+    // route has either preloaded this level in the lobby or loads it now and
+    // raises map readiness before play, so no staleness latch is needed.
+    const hadRound = previous.matchId != null;
+    const roundChanged =
+      hadRound && (!sameRound || (message.phase === 'lobby' && previous.phase !== 'lobby'));
+    if (roundChanged) {
+      roundChangePending = true;
+      if (bind.partyStore.state.mapReady !== true) {
+        sawMapReadyFalse = true;
+      }
+    }
 
-    updateTransportParty(message);
+    bind.updateParty(message);
     if (message.phase === 'countdown' || message.phase === 'playing') {
-      setTransportFlyCamera(false);
+      bind.setFlyCamera(false);
     }
     awaitingSnapshot = false;
     completeHandshake();
@@ -114,18 +205,18 @@ function connectBetterParty(code, identity, options = {}) {
     switch (message.t) {
       case 'hello':
         connectionId = message.id;
-        setTransportIdentity(message.isHost, message.count, message.role);
+        bind.setIdentity(message.isHost, message.count, message.role);
         return;
       case 'party':
         receiveSnapshot(message);
         return;
       case 'roster':
-        setTransportRoster(message.players);
+        bind.setRoster(message.players);
         receivedRoster = true;
         completeHandshake();
         return;
       case 'board':
-        setTransportBoard({
+        bind.setBoard({
           standings: message.standings,
           alive: message.alive,
           holed: message.holed,
@@ -134,22 +225,22 @@ function connectBetterParty(code, identity, options = {}) {
         completeHandshake();
         return;
       case 'final':
-        setTransportFinal({ podium: message.podium, standings: message.standings });
+        bind.setFinal({ podium: message.podium, standings: message.standings });
         return;
       case 'bye':
-        removeTransportGhost(message.id);
+        bind.removeGhost(message.id);
         return;
       case 'f':
-        showTransportCompletion({
+        bind.showCompletion({
           id: message.id,
-          hue: transportGhostHue(message.id),
+          hue: bind.ghostHue(message.id),
           strokes: message.s,
           par: message.p,
           at: Date.now(),
         });
         return;
       case 'error':
-        setTransportError(message.msg ?? message.code);
+        bind.setError(message.msg ?? message.code);
         if (message.code === 'invalid-join' || message.code === 'full') {
           terminalError = message.msg || 'Could not join this party.';
         }
@@ -158,12 +249,12 @@ function connectBetterParty(code, identity, options = {}) {
       case 'b':
         for (const position of message.s) {
           if (position.id !== connectionId) {
-            updateTransportGhost(position);
+            bind.updateGhost(position);
           }
         }
         return;
       case 'host-ack':
-        bpAck(message);
+        bind.ack(message);
         return;
       default:
         return;
@@ -174,8 +265,8 @@ function connectBetterParty(code, identity, options = {}) {
     if (disposed || terminalError) {
       return;
     }
-    clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connect, retryDelay);
+    bind.clearTimeout(reconnectTimer);
+    reconnectTimer = bind.setTimeout(connect, retryDelay);
     retryDelay = Math.min(retryDelay * 2, 15_000);
   }
 
@@ -187,25 +278,18 @@ function connectBetterParty(code, identity, options = {}) {
     awaitingSnapshot = true;
     receivedRoster = false;
     receivedBoard = false;
-    // Re-arm completion and forfeit transmission on every connection: a
-    // prior send only proves the socket accepted the write, not that the
-    // server processed it. Retransmission is idempotent because the server
-    // ignores results from players it has already marked done.
-    completionSent = false;
-    forfeitSent = false;
-    lastStrokeCount = -1;
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const protocol = bind.location.protocol === 'https:' ? 'wss:' : 'ws:';
     let nextSocket;
     try {
-      nextSocket = new WebSocket(
-        protocol + '//' + location.host + '/ws/party/' + encodeURIComponent(code),
+      nextSocket = new bind.WebSocket(
+        protocol + '//' + bind.location.host + '/ws/party/' + encodeURIComponent(code),
       );
     } catch {
       scheduleReconnect();
       return;
     }
     socket = nextSocket;
-    handshakeTimer = setTimeout(() => nextSocket.close(), 12_000);
+    handshakeTimer = bind.setTimeout(() => nextSocket.close(), 12_000);
     nextSocket.onopen = () => {
       send(
         {
@@ -230,7 +314,7 @@ function connectBetterParty(code, identity, options = {}) {
       if (disposed || socket !== nextSocket) {
         return;
       }
-      clearTimeout(handshakeTimer);
+      bind.clearTimeout(handshakeTimer);
       socket = null;
       synchronized = false;
       // The backend explicitly replaces the previous connection using this close reason.
@@ -238,7 +322,7 @@ function connectBetterParty(code, identity, options = {}) {
       if (event.code === 1000 && event.reason === 'Reconnected') {
         terminalError = 'This party is open in another tab.';
       }
-      bpConnection(false, terminalError);
+      bind.connection(false, terminalError);
       scheduleReconnect();
     };
   }
@@ -249,21 +333,21 @@ function connectBetterParty(code, identity, options = {}) {
     if (
       !synchronized ||
       !socketOpen() ||
-      document.visibilityState === 'hidden' ||
-      !transportSettings.state.ghosts ||
-      isTransportSpectator()
+      bind.document.visibilityState === 'hidden' ||
+      !bind.settingsStore.state.ghosts ||
+      bind.isSpectator()
     ) {
       return;
     }
-    const { ballPos, pointer } = transportScene;
-    const cup = transportGameStore.state.level?.cup;
+    const { ballPos, pointer } = bind.scene;
+    const cup = bind.gameStore.state.level?.cup;
     const position = {
       x: Number(ballPos.x.toFixed(2)),
       y: Number(ballPos.y.toFixed(2)),
       z: Number(ballPos.z.toFixed(2)),
       px: Number(pointer.x.toFixed(2)),
       pz: Number(pointer.z.toFixed(2)),
-      c: Number(transportGameStore.state.phase === 'charging'),
+      c: Number(bind.gameStore.state.phase === 'charging'),
       m: Number(!!pointer.active),
     };
     if (cup) {
@@ -278,23 +362,27 @@ function connectBetterParty(code, identity, options = {}) {
     }
   }
 
-  bpConnection(false);
+  bind.connection(false);
   connect();
-  registerTransportSender(send);
-  const subscription = transportGameStore.subscribe(reportProgress);
-  const heartbeat = setInterval(() => send({ t: 'ping' }), 15_000);
-  const presenceTimer = setInterval(publishPosition, 100);
+  bind.registerSender(send);
+  const gameSubscription = bind.gameStore.subscribe(reportProgress);
+  const heartbeat = bind.setInterval(() => send({ t: 'ping' }), 15_000);
+  const presenceTimer = bind.setInterval(publishPosition, 100);
 
   return () => {
     disposed = true;
-    bpConnection(false);
-    registerTransportSender(null);
-    clearTimeout(handshakeTimer);
-    clearTimeout(reconnectTimer);
-    clearInterval(heartbeat);
-    clearInterval(presenceTimer);
-    subscription.unsubscribe();
+    bind.connection(false);
+    bind.registerSender(null);
+    bind.clearTimeout(handshakeTimer);
+    bind.clearTimeout(reconnectTimer);
+    bind.clearInterval(heartbeat);
+    bind.clearInterval(presenceTimer);
+    gameSubscription.unsubscribe();
     socket?.close();
     socket = null;
   };
 }
+
+// Test-only export: the patcher strips this line when inserting the adapter
+// into the pinned GameCanvas bundle.
+export { connectBetterParty };

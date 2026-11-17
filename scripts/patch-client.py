@@ -81,10 +81,13 @@ const setTransportError = N;
 const updateTransportGhost = Ne;
 const isTransportSpectator = _e;
 """
+    transport_source = (root / "scripts/party-transport.js").read_text()
+    # The test-only export is meaningless inside the bundle and is stripped here.
+    transport_source = transport_source.replace("export { connectBetterParty };\n", "")
     source = (
         source[:start]
         + bindings
-        + (root / "scripts/party-transport.js").read_text()
+        + transport_source
         + "\nfunction Zn(code,identity,options){return connectBetterParty(code,identity,options)}\n"
         + source[end:]
     )
