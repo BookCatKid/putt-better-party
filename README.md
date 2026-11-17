@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.svg" alt="Better Party" width="480">
+  <img src="docs/logo.png" alt="Better Party" width="400">
 </p>
 
 <p align="center">
