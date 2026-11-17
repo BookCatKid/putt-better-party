@@ -34,6 +34,8 @@ BROWSER_SCRIPT=tests/integration/check-entry-style.mjs bun run test:browser
 
 The loading regression (`check-party-loading.mjs`) delays the initial roster and scoreboard messages while the engine loads to verify that the incomplete HUD remains hidden.
 
+The next-course failure regression (`check-next-failure.mjs`) starts its own service with `BP_TEST_FAIL_MAP_FETCH_CALL` set to a comma list of lazy course-load call numbers that must fail. The room's `loadNext` is the only caller of that loader, so call 1 is exactly the first next-course load; the regression drives the host retry through the real UI.
+
 Recovery tests start an isolated process with a temporary database. A browser debugging disconnection is a test failure, not a successful result.
 
 ## Updating the upstream client

@@ -12,7 +12,23 @@ const root = path.resolve(import.meta.dir, '../web');
 const store = new RoomStore(
   process.env.BP_DB || path.resolve(import.meta.dir, '../state/rooms.sqlite'),
 );
-const loadMap = (id: string) => fetchPublicMap(id, { saved: true });
+// Test-only fault injection: browser regressions set BP_TEST_FAIL_MAP_FETCH_CALL
+// to a comma list of lazy course-load call numbers that must fail. The room's
+// loadNext is the only caller, so call 1 is exactly the first next-course load.
+const failingMapFetchCalls = new Set(
+  (process.env.BP_TEST_FAIL_MAP_FETCH_CALL ?? '')
+    .split(',')
+    .map(Number)
+    .filter((call) => Number.isInteger(call) && call > 0),
+);
+let mapFetchCalls = 0;
+const loadMap = (id: string) => {
+  mapFetchCalls += 1;
+  if (failingMapFetchCalls.has(mapFetchCalls)) {
+    return Promise.reject(new Error('Injected next-course fetch failure'));
+  }
+  return fetchPublicMap(id, { saved: true });
+};
 const rooms = store.load(courseIndex, { prepareMatch, loadMap });
 for (const id of courseIndex.keys()) {
   rememberPublicMetadata(id, courseIndex.get(id)?.title);
