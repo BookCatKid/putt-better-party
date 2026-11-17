@@ -172,6 +172,39 @@ export default [
     },
   },
   {
+    files: ['scripts/party-transport.js'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        transportPartyStore: 'readonly',
+        transportGameStore: 'readonly',
+        transportSettings: 'readonly',
+        transportScene: 'readonly',
+        registerTransportSender: 'readonly',
+        setTransportIdentity: 'readonly',
+        updateTransportParty: 'readonly',
+        setTransportFlyCamera: 'readonly',
+        setTransportRoster: 'readonly',
+        setTransportBoard: 'readonly',
+        setTransportFinal: 'readonly',
+        removeTransportGhost: 'readonly',
+        showTransportCompletion: 'readonly',
+        transportGhostHue: 'readonly',
+        setTransportError: 'readonly',
+        updateTransportGhost: 'readonly',
+        isTransportSpectator: 'readonly',
+        bpConnection: 'readonly',
+        bpAck: 'readonly',
+      },
+    },
+    rules: {
+      'no-unused-vars': [
+        'error',
+        { varsIgnorePattern: '^connectBetterParty$', args: 'none', caughtErrors: 'none' },
+      ],
+    },
+  },
+  {
     files: ['scripts/party-runtime.js'],
     languageOptions: {
       globals: { ...globals.browser, partyRuntimeStore: 'readonly', u: 'readonly' },

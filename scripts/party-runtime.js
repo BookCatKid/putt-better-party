@@ -3,8 +3,13 @@ const sendPartyCommand = (message) => u?.(message);
 export function bpPickerBusy(value) {
   partyRuntimeStore.setState((partyState) => ({ ...partyState, bpPickerBusy: !!value }));
 }
-export function bpConnection(connected) {
-  partyRuntimeStore.setState((partyState) => ({ ...partyState, bpConnected: connected }));
+export function bpConnection(connected, failure = '') {
+  partyRuntimeStore.setState((partyState) => ({
+    ...partyState,
+    bpConnected: connected,
+    bpEverConnected: connected || !!partyState.bpEverConnected,
+    bpConnectionError: failure || null,
+  }));
   if (!connected) {
     for (const [id, pendingAction] of bpPending) {
       clearTimeout(pendingAction.timer);

@@ -57,54 +57,37 @@ const setPartyMapReady = d, sanitizePartyLevel = g, validatePartyLevel = h, Part
 patch("party._code-D3a-IB4-.js", route_patch)
 
 
-def transport_patch(s):
-    s = replace_once(
-        s,
-        "host:n.hostToken,protocol:2",
-        "host:n.hostToken,session:t.session,instance:t.instance,protocol:2",
+def transport_patch(source):
+    # The original Zn adapter owns only the party socket and state-store bindings.
+    # Leave the surrounding rendering, input and simulation functions untouched.
+    start = source.index("function Zn(")
+    end = source.index("function Qn(", start)
+    bindings = """
+const transportPartyStore = M;
+const transportGameStore = B;
+const transportSettings = E;
+const transportScene = V;
+const registerTransportSender = ie;
+const setTransportIdentity = re;
+const updateTransportParty = P;
+const setTransportFlyCamera = ne;
+const setTransportRoster = ve;
+const setTransportBoard = ue;
+const setTransportFinal = F;
+const removeTransportGhost = Me;
+const showTransportCompletion = Fe;
+const transportGhostHue = je;
+const setTransportError = N;
+const updateTransportGhost = Ne;
+const isTransportSpectator = _e;
+"""
+    source = (
+        source[:start]
+        + bindings
+        + (root / "scripts/party-transport.js").read_text()
+        + "\nfunction Zn(code,identity,options){return connectBetterParty(code,identity,options)}\n"
+        + source[end:]
     )
-    s = replace_once(
-        s,
-        "P({phase:t.phase,holeIndex:t.holeIndex",
-        "P({recoveryNotice:t.recoveryNotice,randomHistoryCount:t.randomHistoryCount,preparing:t.preparing,playlistTitles:t.playlistTitles,roundHistory:t.roundHistory,initialPlayers:t.initialPlayers,phase:t.phase,holeIndex:t.holeIndex",
-    )
-    # Resend current stroke/finish state after reconnect once the same hole's authoritative state arrives.
-    a = s.index("function Zn(")
-    b = s.index("function Qn(", a)
-    part = s[a:b]
-    part = replace_once(
-        part,
-        "case`hello`:c=t.id,re(t.isHost,t.count,t.role);return;",
-        "case`hello`:c=t.id,bpConnection(true),re(t.isHost,t.count,t.role);return;case`host-ack`:bpAck(t);return;case`pong`:return;",
-    )
-    part = replace_once(
-        part, "r.onclose=()=>{if(r=null,!i)", "r.onclose=()=>{bpConnection(false);if(r=null,!i)"
-    )
-    part = replace_once(
-        part,
-        "p();let m=e=>{r&&r.readyState===WebSocket.OPEN&&r.send(JSON.stringify(e))};",
-        "p();let m=e=>{if(!r||r.readyState!==WebSocket.OPEN)return false;if(e.t===`prog`||e.t===`forfeit`||e.f===1)e={...e,matchId:M.state.matchId,holeIndex:M.state.holeIndex};r.send(JSON.stringify(e));return true};const bpHeartbeat=setInterval(()=>m({t:`ping`}),15000);",
-    )
-    part = replace_once(
-        part,
-        "i=!0,ie(null),clearInterval(v)",
-        "i=!0,bpConnection(false),ie(null),clearInterval(bpHeartbeat),clearInterval(v)",
-    )
-    # Keep the existing match-aware subscribe logic; ensure completion/progress are resent only
-    # when the connection returns to the same current map and hole.
-    part = replace_once(
-        part,
-        "case`party`:(t.holeIndex!==f",
-        "case`party`:let bpSame=M.state.matchId===t.matchId&&M.state.holeIndex===t.holeIndex&&M.state.mapReady;(t.matchId!==M.state.matchId||t.holeIndex!==f",
-    )
-    part = replace_once(
-        part,
-        "&&ne(!1);return;case`roster`",
-        "&&ne(!1);if(bpSame&&t.phase===`playing`&&M.state.selfRole!==`spectator`&&r?.readyState===WebSocket.OPEN){let g=B.state;if(g.phase===`holed`&&g.result)r.send(JSON.stringify({f:1,s:g.result.strokes,p:g.result.par,matchId:t.matchId,holeIndex:t.holeIndex}));else if(g.phase===`forfeit`)r.send(JSON.stringify({t:`forfeit`,matchId:t.matchId,holeIndex:t.holeIndex}));else r.send(JSON.stringify({t:`prog`,st:g.strokes,matchId:t.matchId,holeIndex:t.holeIndex}))}return;case`roster`",
-    )
-    # It invokes onReady after the original scene's shader/texture preparation.
-    # Retain the original quality timer and report the actual prepared level ID.
-    source = s[:a] + part + s[b:]
     source = replace_once(
         source,
         "ne=(0,J.useCallback)(()=>{window.setTimeout(()=>j(!0),2500)},[])",
@@ -120,12 +103,12 @@ def runtime_patch(s):
     s = replace_once(
         s,
         "active:!0,code:e,hostToken:n,self:t,selfRole:",
-        "active:!0,bpInitialSnapshot:false,bpSceneReady:null,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
+        "active:!0,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
     )
     s = replace_once(
         s,
         "active:!1,selfRole:",
-        "active:!1,bpInitialSnapshot:false,bpSceneReady:null,selfRole:",
+        "active:!1,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,selfRole:",
     )
     s = replace_once(
         s,

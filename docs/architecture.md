@@ -8,7 +8,7 @@ Manual playlists contain public course IDs. Maps are fetched and validated from 
 
 ## Room lifecycle
 
-SQLite retains room settings, public playlist metadata, random history and private session credentials. On restart, interrupted matches recover to their lobbies because browser-local physics state cannot be reconstructed. Unoccupied rooms expire after 30 minutes. A same-document reconnect retains progress; a full reload during an active unfinished round forfeits that hole.
+SQLite retains room settings, public playlist metadata, random history and private session credentials. On restart, interrupted matches recover to their lobbies because browser-local physics state cannot be reconstructed. Unoccupied rooms expire after 30 minutes. A same-document reconnect retains progress; a full reload during an active unfinished round forfeits that hole. The server’s round timer continues during connection interruptions. The original server-side session replacement close reason is handled explicitly: when another tab claims the same identity, the displaced tab stops reconnecting and offers a return home or manual reload.
 
 ## Scoring and host controls
 
@@ -23,3 +23,5 @@ The service is intended to operate independently of putt.day's official party se
 ## Client initialization
 
 The original game component must mount before its WebSocket connects. The party route keeps that component mounted but suppresses its incomplete HUD until the authoritative snapshot, local player roster entry, scoreboard, accepted map and original scene preparation callback are available. Final results also require the final standings message. The original scene preparation includes its upstream fallback timeout; this is not a guarantee that every GPU or asset has loaded successfully.
+
+The party socket adapter lives in `scripts/party-transport.js`, with its original bundle bindings in the patcher. It waits for a synchronized snapshot, roster and board before enabling commands, retries interrupted connections with bounded exponential backoff, and cleans up its timers and subscriptions on exit.

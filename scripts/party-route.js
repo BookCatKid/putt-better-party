@@ -14,6 +14,9 @@ function PartyRoute() {
   const matchId = usePartyState((state) => state.matchId);
   const phase = usePartyState((state) => state.phase);
   const error = usePartyState((state) => state.error);
+  const connected = usePartyState((state) => state.bpConnected);
+  const previouslyConnected = usePartyState((state) => state.bpEverConnected);
+  const connectionError = usePartyState((state) => state.bpConnectionError);
   const initialSnapshot = usePartyState((state) => state.bpInitialSnapshot);
   const roster = usePartyState((state) => state.roster);
   const selfUid = usePartyState((state) => state.self?.uid);
@@ -86,6 +89,7 @@ function PartyRoute() {
   }, [code, active, phase, currentMap, holeIndex, holeIds.length]);
 
   const stateReady =
+    connected &&
     initialSnapshot &&
     roster.some((player) => player.uid === selfUid) &&
     board &&
@@ -116,10 +120,10 @@ function PartyRoute() {
   } else if (active && !ready) {
     loadingOverlay = jsx.jsx(PartyLoadingScreen, {
       code,
-      message: 'Loading party…',
-      error: mapError || error,
+      message: previouslyConnected && !connected ? 'Reconnecting party…' : 'Loading party…',
+      error: connectionError || mapError || error,
       onRetry: mapError ? () => setRetry((previous) => previous + 1) : undefined,
-      onReload: takingTooLong ? () => location.reload() : undefined,
+      onReload: takingTooLong || connectionError ? () => location.reload() : undefined,
     });
   }
 
