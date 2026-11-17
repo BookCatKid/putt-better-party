@@ -113,7 +113,7 @@ def runtime_patch(s):
     s = replace_once(
         s,
         "phase:e.phase,holeIndex:e.holeIndex",
-        "bpInitialSnapshot:true,recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
+        "bpInitialSnapshot:true,recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,nextError:e.nextError??null,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
     )
     s = replace_once(
         s,

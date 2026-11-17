@@ -590,3 +590,137 @@ test('failed preparation reports to the reconnected host socket', async () => {
   ).toBe(true);
   room.dispose();
 });
+
+test('next-course load failure is recoverable by retry, skip or end', async () => {
+  let failNext = true;
+  const loads = [];
+  const room = new Room('ABCDE', maps, {
+    countdown: 1,
+    prepareMatch: async (connection) => ({
+      ids: connection.selectedHoleIds,
+      specs: [maps.get('p').spec],
+    }),
+    loadMap: (id) => {
+      loads.push(id);
+      return failNext
+        ? Promise.reject(Error('upstream unavailable'))
+        : Promise.resolve(maps.get(id));
+    },
+  });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p', 'q'], elimination: false },
+  });
+  room.handle(host.ws, { t: 'start' });
+  await waitForRoom(() => room.phase === 'playing');
+  room.handle(host.ws, { t: 'host-action', action: 'skip', matchId: room.matchId, holeIndex: 0 });
+  await waitForRoom(() => room.snapshot().nextError !== null);
+  // The match no longer terminates automatically; completed scores persist.
+  expect(room.phase).toBe('hole-results');
+  expect(room.snapshot().preparing).toBe(false);
+  expect(room.roundHistory[0].status).toBe('skipped');
+  expect(room.snapshot().nextError).toContain('Could not load the next public hole');
+  // A duplicate retry while one is in flight is rejected.
+  room.handle(host.ws, {
+    t: 'host-action',
+    action: 'retry-next',
+    matchId: room.matchId,
+    holeIndex: room.holeIndex,
+    requestId: 'retry-one',
+  });
+  room.handle(host.ws, {
+    t: 'host-action',
+    action: 'retry-next',
+    matchId: room.matchId,
+    holeIndex: room.holeIndex,
+    requestId: 'retry-two',
+  });
+  await delay(1);
+  const acks = host.ws.frames.filter((frame) => frame.t === 'host-ack');
+  expect(acks.find((frame) => frame.requestId === 'retry-one').ok).toBe(true);
+  expect(acks.find((frame) => frame.requestId === 'retry-two').ok).toBe(false);
+  // The first retry already failed; a further retry succeeds once upstream recovers.
+  await waitForRoom(() => room.snapshot().nextError !== null && !room.snapshot().preparing);
+  failNext = false;
+  room.handle(host.ws, {
+    t: 'host-action',
+    action: 'retry-next',
+    matchId: room.matchId,
+    holeIndex: room.holeIndex,
+    requestId: 'retry-three',
+  });
+  await waitForRoom(() => room.phase === 'playing' && room.holeIndex === 1);
+  expect(room.snapshot().nextError).toBe(null);
+  room.dispose();
+});
+
+test('skipping the unloaded hole voids it and continues or finalizes', async () => {
+  let failFirst = true;
+  const loads = [];
+  const room = new Room('ABCDE', maps, {
+    countdown: 1,
+    prepareMatch: async (connection) => ({
+      ids: connection.selectedHoleIds,
+      specs: [maps.get('p').spec],
+    }),
+    loadMap: (id) => {
+      loads.push(id);
+      return failFirst
+        ? Promise.reject(Error('upstream unavailable'))
+        : Promise.resolve(maps.get(id));
+    },
+  });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p', 'q', 'p'], elimination: false },
+  });
+  room.handle(host.ws, { t: 'start' });
+  await waitForRoom(() => room.phase === 'playing');
+  room.handle(host.ws, { t: 'host-action', action: 'skip', matchId: room.matchId, holeIndex: 0 });
+  await waitForRoom(() => room.snapshot().nextError !== null);
+  failFirst = false;
+  room.handle(host.ws, {
+    t: 'host-action',
+    action: 'skip-next',
+    matchId: room.matchId,
+    holeIndex: room.holeIndex,
+    requestId: 'skip-next',
+  });
+  await delay(1);
+  // The failed hole is recorded as skipped and the following hole loads.
+  expect(room.roundHistory.some((round) => round.index === 1 && round.status === 'skipped')).toBe(
+    true,
+  );
+  expect(loads).toEqual(['q', 'p']);
+  await waitForRoom(() => room.phase === 'playing' && room.holeIndex === 2);
+  expect(room.snapshot().nextError).toBe(null);
+  room.dispose();
+});
+test('ending the party from a next-course failure keeps completed scores', async () => {
+  const room = new Room('ABCDE', maps, {
+    countdown: 1,
+    results: 5,
+    prepareMatch: async (connection) => ({
+      ids: connection.selectedHoleIds,
+      specs: [maps.get('p').spec],
+    }),
+    loadMap: () => Promise.reject(Error('upstream unavailable')),
+  });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p', 'q'], elimination: false },
+  });
+  room.handle(host.ws, { t: 'start' });
+  await waitForRoom(() => room.phase === 'playing');
+  room.handle(host.ws, { f: 1, s: 2, p: 3 });
+  // The results period passes, then the next course fails to load.
+  await waitForRoom(() => room.snapshot().nextError !== null, 3000);
+  room.handle(host.ws, { t: 'host-action', action: 'end', matchId: room.matchId, holeIndex: 0 });
+  await delay(1);
+  expect(room.phase).toBe('final');
+  expect(room.standings()[0].totalStrokes).toBe(2);
+  room.dispose();
+});

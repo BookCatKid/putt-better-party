@@ -14,6 +14,7 @@ function PartyRoute() {
   const matchId = usePartyState((state) => state.matchId);
   const phase = usePartyState((state) => state.phase);
   const error = usePartyState((state) => state.error);
+  const nextError = usePartyState((state) => state.nextError);
   const connected = usePartyState((state) => state.bpConnected);
   const previouslyConnected = usePartyState((state) => state.bpEverConnected);
   const connectionError = usePartyState((state) => state.bpConnectionError);
@@ -143,12 +144,12 @@ function PartyRoute() {
       content,
       loadingOverlay,
       ready &&
-        error &&
+        (error || nextError) &&
         jsx.jsx('p', {
           role: 'alert',
           className:
             'fixed inset-x-6 bottom-4 z-50 rounded-xl bg-red-950 p-3 text-center text-sm text-white',
-          children: error,
+          children: nextError || error,
         }),
     ],
   });

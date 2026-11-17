@@ -54,6 +54,9 @@ export class Room {
   readonly loadMap: LoadCourse | null;
   starting = false;
   loadingNext = false;
+  nextLoadError: string | null = null;
+  retryingNext = false;
+  nextLoadGeneration = 0;
   recoveryNotice = false;
   randomSeen: string[] = [];
   lastActivity = Date.now();
@@ -144,17 +147,18 @@ export class Room {
   error(ws: RoomSocket, code: string, msg: string) {
     this.send(ws, { t: 'error', code, msg });
   }
+  playlistTitle(id: string) {
+    return this.catalog.get(id)?.title || id;
+  }
   snapshot(): PartySnapshot {
     return {
       t: 'party',
       recoveryNotice: this.recoveryNotice,
       randomHistoryCount: this.randomSeen.length,
       preparing: this.starting || this.loadingNext,
+      nextError: this.nextLoadError,
       playlistTitles: Object.fromEntries(
-        [...this.config.selectedHoleIds, ...this.holeIds].map((id) => [
-          id,
-          this.catalog.get(id)?.title || id,
-        ]),
+        [...this.config.selectedHoleIds, ...this.holeIds].map((id) => [id, this.playlistTitle(id)]),
       ),
       roundHistory: this.roundHistory,
       initialPlayers: this.initialPlayers,
@@ -584,6 +588,8 @@ export class Room {
     this.matchId = randomUUID();
     this.holeIndex = 0;
     this.roundHistory = [];
+    this.nextLoadError = null;
+    this.retryingNext = false;
     this.recoveryNotice = false;
     for (const [uid, player] of this.players) {
       if (!player.ws) {
@@ -649,6 +655,14 @@ export class Room {
       this.begin();
       return;
     }
+    this.loadNext(next);
+  }
+  /**
+   * Load the course at `target` while the room stays on the completed hole's
+   * results. A failure is recoverable: the host can retry, skip the unloaded
+   * hole or end the party instead of the match terminating automatically.
+   */
+  loadNext(target: number) {
     const loadMap = this.loadMap;
     if (!loadMap) {
       this.finalize();
@@ -659,44 +673,36 @@ export class Room {
     this.phase = 'hole-results';
     this.state();
     const match = this.matchId;
-    const old = this.holeIndex;
-    const id = this.holeIds[next];
+    const completed = this.holeIndex;
+    const generation = ++this.nextLoadGeneration;
+    const id = this.holeIds[target];
+    const stale = () =>
+      this.closed ||
+      this.matchId !== match ||
+      this.holeIndex !== completed ||
+      this.phase !== 'hole-results' ||
+      this.nextLoadGeneration !== generation;
     Promise.resolve()
       .then(() => loadMap(id))
       .then((item) => {
-        if (
-          this.closed ||
-          this.matchId !== match ||
-          this.holeIndex !== old ||
-          this.phase !== 'hole-results'
-        ) {
+        if (stale()) {
           return;
         }
-        this.specs[next] = structuredClone(item.spec);
+        this.specs[target] = structuredClone(item.spec);
         this.loadingNext = false;
-        this.holeIndex = next;
+        this.retryingNext = false;
+        this.nextLoadError = null;
+        this.holeIndex = target;
         this.begin();
       })
       .catch((error) => {
-        if (
-          this.closed ||
-          this.matchId !== match ||
-          this.holeIndex !== old ||
-          this.phase !== 'hole-results'
-        ) {
+        if (stale()) {
           return;
         }
         this.loadingNext = false;
-        for (const player of this.players.values()) {
-          if (player.ws) {
-            this.error(
-              player.ws,
-              'map-load-failed',
-              'Could not load the next public hole: ' + errorMessage(error),
-            );
-          }
-        }
-        this.finalize();
+        this.retryingNext = false;
+        this.nextLoadError = 'Could not load the next public hole: ' + errorMessage(error);
+        this.state();
       });
   }
   playable(player: Player) {
@@ -787,6 +793,47 @@ export class Room {
       this.begin();
       return true;
     }
+    if (
+      message.action === 'retry-next' &&
+      this.phase === 'hole-results' &&
+      this.nextLoadError &&
+      !this.retryingNext
+    ) {
+      this.retryingNext = true;
+      this.loadNext(this.holeIndex + 1);
+      return true;
+    }
+    if (
+      message.action === 'skip-next' &&
+      this.phase === 'hole-results' &&
+      this.nextLoadError &&
+      !this.retryingNext
+    ) {
+      this.nextLoadError = null;
+      // Invalidate any in-flight retry for the hole being voided.
+      this.nextLoadGeneration++;
+      this.retryingNext = false;
+      const failed = this.holeIndex + 1;
+      this.roundHistory.push({
+        index: failed,
+        id: this.holeIds[failed],
+        title: this.playlistTitle(this.holeIds[failed]),
+        status: 'skipped',
+        rows: [],
+      });
+      if (failed + 1 >= this.holeIds.length) {
+        this.finalize();
+        return true;
+      }
+      const following = failed + 1;
+      if (this.specs[following]) {
+        this.holeIndex = following;
+        this.begin();
+        return true;
+      }
+      this.loadNext(following);
+      return true;
+    }
     this.error(ws, 'invalid-host-action', 'That action is not available right now.');
     return false;
   }
@@ -872,6 +919,8 @@ export class Room {
   reset() {
     clearTimeout(this.timer);
     this.loadingNext = false;
+    this.nextLoadError = null;
+    this.retryingNext = false;
     this.phase = 'lobby';
     this.recoveryNotice = false;
     this.roundHistory = [];

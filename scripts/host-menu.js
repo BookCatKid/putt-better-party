@@ -3,6 +3,7 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
   const host = useBetterPartyState(betterPartyStore, (partyState) => partyState.isHost);
   const phase = useBetterPartyState(betterPartyStore, (partyState) => partyState.phase);
   const hole = useBetterPartyState(betterPartyStore, (partyState) => partyState.holeIndex);
+  const nextError = useBetterPartyState(betterPartyStore, (partyState) => partyState.nextError);
   const [open, setOpen] = BetterPartyReact.useState(false);
   const [confirm, setConfirm] = BetterPartyReact.useState(null);
   const [pending, setPending] = BetterPartyReact.useState(false);
@@ -66,6 +67,7 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
     end: 'End the party now?',
     skip: 'Skip this hole for everyone?',
     restart: 'Restart this hole for everyone?',
+    'skip-next': 'Skip the unloaded hole for everyone?',
   };
   return createElement('div', { className: 'relative bp-host-control' }, [
     createElement(
@@ -108,6 +110,12 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
         },
         [
           createElement('h3', { className: 'mb-3 text-sm font-bold' }, 'Party controls'),
+          nextError &&
+            createElement(
+              'p',
+              { role: 'alert', className: 'mb-2 text-xs text-red-300' },
+              nextError,
+            ),
           error &&
             createElement('p', { role: 'alert', className: 'mb-2 text-xs text-red-300' }, error),
           pending && createElement('p', { role: 'status', className: 'text-xs' }, 'Applying…'),
@@ -130,6 +138,8 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
                 ),
                 btn('Skip level', () => setConfirm('skip'), !live),
                 btn('Restart level', () => setConfirm('restart'), !live),
+                nextError && btn('Retry next hole', () => run('retry-next')),
+                nextError && btn('Skip unloaded hole', () => setConfirm('skip-next')),
                 btn('End party', () => setConfirm('end'), false, 'bp-danger'),
               ],
         ],

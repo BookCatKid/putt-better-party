@@ -91,6 +91,7 @@ export interface PartySnapshot {
   recoveryNotice: boolean;
   randomHistoryCount: number;
   preparing: boolean;
+  nextError: string | null;
   playlistTitles: Record<string, string>;
   roundHistory: RoundRecord[];
   initialPlayers: number;
