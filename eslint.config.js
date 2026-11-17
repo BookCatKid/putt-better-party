@@ -192,6 +192,7 @@ export default [
         transportGhostHue: 'readonly',
         setTransportError: 'readonly',
         updateTransportGhost: 'readonly',
+        transportSceneReadyLevelId: 'readonly',
         isTransportSpectator: 'readonly',
         bpConnection: 'readonly',
         bpAck: 'readonly',

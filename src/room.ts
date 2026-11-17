@@ -24,6 +24,13 @@ import type {
 } from './room-types.js';
 
 const token = () => randomBytes(24).toString('base64url');
+/**
+ * Round start waits for connected players to report their scene as prepared,
+ * but never longer than this after the countdown elapses. Without the gate a
+ * slow client's loading time is silently deducted from everybody's round;
+ * without the bound one stalled or half-open client could hold the match.
+ */
+const READY_GRACE_MS = 10_000;
 export const defaults: Readonly<RoomConfig> = Object.freeze({
   holes: 3,
   timerMs: 60000,
@@ -75,6 +82,10 @@ export class Room {
   matchId: string | null = null;
   startsAt = 0;
   roundTimerMs = defaults.timerMs;
+  /** The approved countdown must finish before play may begin. */
+  playNotBefore = 0;
+  /** Latest instant the start may wait for a client to report its scene. */
+  readyDeadline = 0;
   positions = new Map<string, BallPosition>();
   timer: ReturnType<typeof setTimeout> | undefined;
   closed = false;
@@ -156,6 +167,7 @@ export class Room {
       recoveryNotice: this.recoveryNotice,
       randomHistoryCount: this.randomSeen.length,
       preparing: this.starting || this.loadingNext,
+      awaitingPlayers: this.phase === 'countdown' ? this.playersAwaitingScene() : 0,
       nextError: this.nextLoadError,
       playlistTitles: Object.fromEntries(
         [...this.config.selectedHoleIds, ...this.holeIds].map((id) => [id, this.playlistTitle(id)]),
@@ -175,6 +187,10 @@ export class Room {
       now: Date.now(),
     };
   }
+  /** Names of still-connected players the countdown gate is waiting for. */
+  playersAwaitingScene() {
+    return this.playersExpectedToLoad().filter((player) => !player.sceneReady).length;
+  }
   roster() {
     return [...this.players.values()]
       .filter((player) => player.ws || this.phase !== 'lobby')
@@ -187,6 +203,7 @@ export class Room {
         isHost: player.uid === this.hostUid,
         ready: player.ready,
         alive: player.alive,
+        connected: !!player.ws,
       }));
   }
   standings() {
@@ -238,6 +255,7 @@ export class Room {
     }
     this.lastActivity = Date.now();
     let player = this.players.get(identity.uid);
+    const reportsSceneReadiness = message.scene === true;
     const reload =
       !!player && player.instance !== undefined && player.instance !== message.instance;
     const claimsHost =
@@ -293,6 +311,11 @@ export class Room {
       player.roundSpectator = true;
       player.role = 'spectator';
     }
+    if (reload && this.phase === 'countdown') {
+      // The page reloaded, so the previous document's prepared scene is gone.
+      player.sceneReady = false;
+    }
+    player.reportsSceneReadiness = reportsSceneReadiness;
     player.instance = message.instance;
     player.id = randomUUID();
     player.ws = ws;
@@ -364,6 +387,10 @@ export class Room {
           this.rosterBroadcast();
         }
         return;
+      case 'scene':
+        // The original client's lobby ready flag and its renderer readiness are
+        // different signals, so they use different frames.
+        return this.acknowledgeScene(ws, message, player);
       case 'config':
         if (!host || this.phase !== 'lobby') {
           return this.error(ws, 'not-host', 'Only the host can configure the lobby.');
@@ -622,27 +649,104 @@ export class Room {
   begin() {
     this.roundTimerMs = this.config.timerMs;
     this.phase = 'countdown';
-    this.startsAt = Date.now() + this.countdown;
+    this.playNotBefore = Date.now() + this.countdown;
+    this.startsAt = this.playNotBefore;
+    this.readyDeadline = this.playNotBefore + READY_GRACE_MS;
     this.positions.clear();
     for (const player of this.players.values()) {
       player.strokes = 0;
       player.done = false;
       player.success = false;
       player.lastPosition = 0;
+      player.sceneReady = false;
       if (player.roundSpectator && player.alive) {
         player.role = 'player';
         player.roundSpectator = false;
       }
     }
     this.state();
-    this.schedule(() => {
-      this.phase = 'playing';
-      this.state();
-      this.schedule(
-        () => this.endHole(),
-        Math.max(0, this.startsAt + this.roundTimerMs - Date.now()),
-      );
-    }, this.countdown);
+    this.schedule(() => this.startPlay(), this.countdown);
+  }
+  /**
+   * Players the countdown waits for: connected, participating, and using a
+   * client that reports scene readiness. A client that never reports cannot be
+   * awaited without stalling every round, so its loading time stays its own.
+   */
+  playersExpectedToLoad() {
+    return [...this.players.values()].filter(
+      (player) =>
+        player.alive &&
+        player.participated &&
+        player.ws &&
+        !player.roundSpectator &&
+        player.reportsSceneReadiness,
+    );
+  }
+  /**
+   * Begin play once the countdown has elapsed and every client expected to load
+   * has its scene, or the grace deadline passes. Called by the countdown timer,
+   * the grace deadline and a scene report; all three paths converge here so the
+   * approval of the countdown and the wait for slow clients cannot conflict.
+   */
+  startPlay() {
+    if (this.phase !== 'countdown') {
+      return;
+    }
+    const untilCountdownElapsed = this.playNotBefore - Date.now();
+    if (untilCountdownElapsed > 0) {
+      // Readiness may only extend the approved countdown, never shorten it.
+      this.schedule(() => this.startPlay(), untilCountdownElapsed);
+      return;
+    }
+    const waiting = this.playersExpectedToLoad().filter((player) => !player.sceneReady);
+    if (waiting.length && Date.now() < this.readyDeadline) {
+      // Stay in countdown, which the original client already renders as "not
+      // playable": its input gate and timer both require the playing phase. An
+      // early report calls back in here through acknowledgeScene; otherwise the
+      // deadline re-checks, so the wait is bounded. Nobody is charged round time
+      // for the wait because the round clock starts with the playing phase.
+      this.schedule(() => this.startPlay(), Math.max(50, this.readyDeadline - Date.now()));
+      this.broadcast(this.snapshot());
+      return;
+    }
+    clearTimeout(this.timer);
+    // The round timer starts when play starts, so nobody loses time to loading.
+    this.startsAt = Date.now();
+    this.phase = 'playing';
+    this.state();
+    this.schedule(() => this.endHole(), this.roundTimerMs);
+  }
+  /**
+   * Every identity the current hole can legitimately be known by. The catalog
+   * addresses a course by its public ID, while the renderer and the desktop
+   * editor name the same course by the identifier inside its specification, so
+   * a readiness report may carry either one.
+   */
+  knownLevelIds() {
+    const specId = this.specs[this.holeIndex]?.id;
+    return [this.holeIds[this.holeIndex], typeof specId === 'string' ? specId : undefined].filter(
+      (id): id is string => typeof id === 'string' && id.length > 0,
+    );
+  }
+  /**
+   * A client reports that its level is prepared for the current round. The
+   * report is scoped to match and hole so a stale document cannot unblock a
+   * newer round.
+   */
+  acknowledgeScene(ws: RoomSocket, message: Record<string, unknown>, player: Player) {
+    if (message.matchId !== this.matchId || message.holeIndex !== this.holeIndex) {
+      return;
+    }
+    if (typeof message.levelId === 'string' && !this.knownLevelIds().includes(message.levelId)) {
+      return;
+    }
+    if (player.sceneReady || ws !== player.ws) {
+      return;
+    }
+    player.sceneReady = true;
+    if (this.phase === 'countdown') {
+      this.startPlay();
+    }
   }
   advance() {
     const next = this.holeIndex + 1;

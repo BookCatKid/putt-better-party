@@ -35,6 +35,10 @@ export interface Player {
   done: boolean;
   success?: boolean;
   roundSpectator?: boolean;
+  /** The client reported its level prepared for the current round. */
+  sceneReady?: boolean;
+  /** The connected client declares that it reports scene readiness each round. */
+  reportsSceneReadiness?: boolean;
   lastPosition?: number;
 }
 export interface RoundScore {
@@ -91,6 +95,8 @@ export interface PartySnapshot {
   recoveryNotice: boolean;
   randomHistoryCount: number;
   preparing: boolean;
+  /** Countdown only: connected players whose scene has not reported ready. */
+  awaitingPlayers: number;
   nextError: string | null;
   playlistTitles: Record<string, string>;
   roundHistory: RoundRecord[];

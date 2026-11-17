@@ -39,6 +39,7 @@ function resolveTransportBindings(injected) {
     ghostHue: provided.ghostHue ?? transportGhostHue,
     setError: provided.setError ?? setTransportError,
     updateGhost: provided.updateGhost ?? updateTransportGhost,
+    sceneReadyLevelId: provided.sceneReadyLevelId ?? transportSceneReadyLevelId,
     isSpectator: provided.isSpectator ?? isTransportSpectator,
     ack: provided.ack ?? bpAck,
   };
@@ -65,6 +66,7 @@ function connectBetterParty(code, identity, options = {}) {
   let forfeitSent = false;
   let roundChangePending = false;
   let sawMapReadyFalse = false;
+  let announcedSceneKey = '';
 
   function socketOpen() {
     return socket?.readyState === bind.WebSocket.OPEN;
@@ -83,8 +85,34 @@ function connectBetterParty(code, identity, options = {}) {
     return true;
   }
 
+  /**
+   * Tell the server this client's level is prepared for the current round. The
+   * server gates the round start on that report, so it must carry the round
+   * identity: a stale document's report cannot unblock a newer round.
+   */
+  function reportSceneReadiness() {
+    const party = bind.partyStore.state;
+    const levelId = bind.sceneReadyLevelId();
+    // The route may still hold the previous course while it reloads, so only a
+    // prepared level matching the round's map counts as ready.
+    if (!party.matchId || !levelId || levelId !== party.currentMap?.id) {
+      return;
+    }
+    if (party.phase !== 'countdown') {
+      return;
+    }
+    const key = party.matchId + ':' + party.holeIndex + ':' + levelId;
+    if (announcedSceneKey === key) {
+      return;
+    }
+    if (send({ t: 'scene', matchId: party.matchId, holeIndex: party.holeIndex, levelId })) {
+      announcedSceneKey = key;
+    }
+  }
+
   function reportProgress() {
     observePartyState();
+    reportSceneReadiness();
     const party = bind.partyStore.state;
     if (
       !synchronized ||
@@ -304,6 +332,9 @@ function connectBetterParty(code, identity, options = {}) {
           session: identity.session,
           instance: identity.instance,
           protocol: 2,
+          // Declares that this client reports scene readiness each round, so
+          // the server may wait for it before starting the round timer.
+          scene: true,
         },
         false,
       );

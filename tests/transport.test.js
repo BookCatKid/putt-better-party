@@ -128,6 +128,8 @@ function fakeEnvironment(clockOptions = {}) {
   const settingsStore = fakeStore({ ghosts: true });
   const scene = { ballPos: { x: 1, y: 0, z: 2 }, pointer: { x: 0, z: 0, active: false } };
   const log = { connection: [], identity: [], errors: [], finals: [], acks: [] };
+  // The route records the prepared level ID; tests set it directly.
+  let sceneReadyLevelId = null;
   let registeredSender = null;
   const WebSocket = fakeWebSocketFactory();
   const bindings = {
@@ -155,6 +157,7 @@ function fakeEnvironment(clockOptions = {}) {
     setRoster: () => {},
     setBoard: () => {},
     setFinal: (final) => log.finals.push(final),
+    sceneReadyLevelId: () => sceneReadyLevelId,
     removeGhost: () => {},
     showCompletion: () => {},
     ghostHue: () => 0,
@@ -173,6 +176,9 @@ function fakeEnvironment(clockOptions = {}) {
     WebSocket,
     bindings,
     sender: () => registeredSender,
+    setSceneReadyLevelId: (levelId) => {
+      sceneReadyLevelId = levelId;
+    },
   };
 }
 
@@ -542,5 +548,72 @@ test('ghost positions from other players are forwarded and self positions are dr
     ],
   });
   expect(seen).toEqual([{ id: 'other', x: 2 }]);
+  dispose();
+});
+
+test('a prepared scene announces readiness for the current round exactly once', () => {
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const socket = env.WebSocket.sockets[0];
+  socket.open();
+  expect(socket.sent[0]).toMatchObject({ t: 'join', scene: true });
+  socket.message({ t: 'hello', id: 'conn-1', isHost: false, count: 1, role: 'player' });
+  socket.message({
+    t: 'party',
+    matchId: 'm1',
+    holeIndex: 0,
+    phase: 'countdown',
+    holeIds: ['p'],
+    currentMap: { id: 'p' },
+  });
+  socket.message({ t: 'roster', players: [] });
+  socket.message({ t: 'board', standings: [], alive: 1, holed: 0 });
+  // The level is not prepared yet, so no readiness claim is possible.
+  expect(socket.sent.some((frame) => frame.t === 'scene')).toBe(false);
+  env.setSceneReadyLevelId('p');
+  env.gameStore.setState({ strokes: 0 });
+  const sceneFrames = socket.sent.filter((frame) => frame.t === 'scene');
+  expect(sceneFrames.length).toBe(1);
+  expect(sceneFrames[0]).toMatchObject({ matchId: 'm1', holeIndex: 0, levelId: 'p' });
+  // Repeated store updates do not repeat the announcement.
+  env.gameStore.setState({ strokes: 1 });
+  expect(socket.sent.filter((frame) => frame.t === 'scene').length).toBe(1);
+  // A new round with a new prepared level announces again.
+  socket.message({
+    t: 'party',
+    matchId: 'm1',
+    holeIndex: 1,
+    phase: 'countdown',
+    holeIds: ['p', 'q'],
+    currentMap: { id: 'q' },
+  });
+  env.setSceneReadyLevelId('q');
+  env.gameStore.setState({ strokes: 0 });
+  const roundTwo = socket.sent.filter((frame) => frame.t === 'scene').at(-1);
+  expect(roundTwo).toMatchObject({ matchId: 'm1', holeIndex: 1, levelId: 'q' });
+  expect(socket.sent.filter((frame) => frame.t === 'scene').length).toBe(2);
+  dispose();
+});
+
+test('readiness is never announced from a prepared level of a different course', () => {
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const socket = env.WebSocket.sockets[0];
+  socket.open();
+  socket.message({ t: 'hello', id: 'conn-1', isHost: false, count: 1, role: 'player' });
+  socket.message({
+    t: 'party',
+    matchId: 'm1',
+    holeIndex: 0,
+    phase: 'countdown',
+    holeIds: ['p'],
+    currentMap: { id: 'p' },
+  });
+  socket.message({ t: 'roster', players: [] });
+  socket.message({ t: 'board', standings: [], alive: 1, holed: 0 });
+  // The route still has the previous course prepared while it reloads.
+  env.setSceneReadyLevelId('previous-course');
+  env.gameStore.setState({ strokes: 0 });
+  expect(socket.sent.some((frame) => frame.t === 'scene')).toBe(false);
   dispose();
 });

@@ -724,3 +724,261 @@ test('ending the party from a next-course failure keeps completed scores', async
   expect(room.standings()[0].totalStrokes).toBe(2);
   room.dispose();
 });
+
+test('the round timer starts only once declared-ready clients have their scene', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const hostIdentity = room.issue('Host');
+  const guestIdentity = room.issue('Guest');
+  const hostSocket = socket();
+  const guestSocket = socket();
+  // Both clients declare that they report scene readiness.
+  room.handle(hostSocket, {
+    t: 'join',
+    ...hostIdentity,
+    protocol: 2,
+    host: room.hostToken,
+    scene: true,
+  });
+  room.handle(guestSocket, { t: 'join', ...guestIdentity, protocol: 2, scene: true });
+  room.handle(hostSocket, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p', 'q'], elimination: false },
+  });
+  room.handle(hostSocket, { t: 'start' });
+  const matchId = room.matchId;
+  room.handle(hostSocket, { t: 'scene', matchId, holeIndex: 0, levelId: 'p' });
+  await delay(20);
+  // The countdown elapsed but the guest's scene never reported: the round stays
+  // in countdown and, crucially, the timer has not started running.
+  expect(room.phase).toBe('countdown');
+  expect(room.snapshot().awaitingPlayers).toBe(1);
+  expect(room.snapshot().timerMs).toBe(60000);
+  room.handle(guestSocket, { t: 'scene', matchId, holeIndex: 0, levelId: 'p' });
+  await delay(5);
+  expect(room.phase).toBe('playing');
+  expect(room.snapshot().awaitingPlayers).toBe(0);
+  // Play starts now, so the guest's loading time was never charged to the round.
+  const startedAt = room.startsAt;
+  await delay(15);
+  expect(room.phase).toBe('playing');
+  expect(room.startsAt).toBe(startedAt);
+  room.dispose();
+});
+
+test('a stale or mismatched scene report cannot unblock a newer round', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const hostIdentity = room.issue('Host');
+  const guestIdentity = room.issue('Guest');
+  const hostSocket = socket();
+  const guestSocket = socket();
+  room.handle(hostSocket, {
+    t: 'join',
+    ...hostIdentity,
+    protocol: 2,
+    host: room.hostToken,
+    scene: true,
+  });
+  room.handle(guestSocket, { t: 'join', ...guestIdentity, protocol: 2, scene: true });
+  room.handle(hostSocket, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p'], elimination: false },
+  });
+  room.handle(hostSocket, { t: 'start' });
+  room.handle(hostSocket, { t: 'scene', matchId: room.matchId, holeIndex: 0, levelId: 'p' });
+  await delay(20);
+  expect(room.phase).toBe('countdown');
+  // Previous-round and wrong-level reports are both ignored.
+  room.handle(guestSocket, { t: 'scene', matchId: 'stale-match', holeIndex: 0, levelId: 'p' });
+  room.handle(guestSocket, { t: 'scene', matchId: room.matchId, holeIndex: 1, levelId: 'p' });
+  room.handle(guestSocket, { t: 'scene', matchId: room.matchId, holeIndex: 0, levelId: 'q' });
+  await delay(5);
+  expect(room.phase).toBe('countdown');
+  expect(room.snapshot().awaitingPlayers).toBe(1);
+  room.handle(guestSocket, { t: 'scene', matchId: room.matchId, holeIndex: 0, levelId: 'p' });
+  await delay(5);
+  expect(room.phase).toBe('playing');
+  room.dispose();
+});
+
+test('the readiness wait is bounded so one stalled client cannot hold the match', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const hostIdentity = room.issue('Host');
+  const guestIdentity = room.issue('Guest');
+  const hostSocket = socket();
+  const guestSocket = socket();
+  room.handle(hostSocket, {
+    t: 'join',
+    ...hostIdentity,
+    protocol: 2,
+    host: room.hostToken,
+    scene: true,
+  });
+  room.handle(guestSocket, { t: 'join', ...guestIdentity, protocol: 2, scene: true });
+  room.handle(hostSocket, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p'], elimination: false },
+  });
+  room.handle(hostSocket, { t: 'start' });
+  room.handle(hostSocket, { t: 'scene', matchId: room.matchId, holeIndex: 0, levelId: 'p' });
+  await delay(20);
+  expect(room.phase).toBe('countdown');
+  // The grace deadline is bounded rather than indefinite.
+  expect(room.readyDeadline).toBeGreaterThan(Date.now());
+  expect(room.readyDeadline - Date.now()).toBeLessThanOrEqual(10_000);
+  // Standing in for wall-clock passage: the gate releases at the deadline.
+  room.readyDeadline = Date.now() - 1;
+  room.startPlay();
+  expect(room.phase).toBe('playing');
+  expect(room.snapshot().awaitingPlayers).toBe(0);
+  room.dispose();
+});
+
+test('a bare claim to host authority cannot dodge the read-only mapping of readiness', async () => {
+  // Clients that do not announce scene reporting are never awaited, so the
+  // existing 5 second countdown behaviour is preserved for them.
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p'], elimination: false },
+  });
+  room.handle(host.ws, { t: 'start' });
+  await delay(15);
+  expect(room.phase).toBe('playing');
+  room.dispose();
+});
+
+test('a readiness report may name the course by its specification id', async () => {
+  // The catalog addresses a course by its public id while the renderer and the
+  // course specification name the same course by its own id. A real client
+  // reports the latter, so refusing it would leave every round waiting for the
+  // full grace period.
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const hostIdentity = room.issue('Host');
+  const guestIdentity = room.issue('Guest');
+  const hostSocket = socket();
+  const guestSocket = socket();
+  room.handle(hostSocket, {
+    t: 'join',
+    ...hostIdentity,
+    protocol: 2,
+    host: room.hostToken,
+    scene: true,
+  });
+  room.handle(guestSocket, { t: 'join', ...guestIdentity, protocol: 2, scene: true });
+  room.handle(hostSocket, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p'], elimination: false },
+  });
+  room.handle(hostSocket, { t: 'start' });
+  expect(room.holeIds[0]).toBe('p');
+  expect(room.specs[0].id).toBe('public-level');
+  room.handle(hostSocket, {
+    t: 'scene',
+    matchId: room.matchId,
+    holeIndex: 0,
+    levelId: room.specs[0].id,
+  });
+  room.handle(guestSocket, {
+    t: 'scene',
+    matchId: room.matchId,
+    holeIndex: 0,
+    levelId: room.specs[0].id,
+  });
+  await delay(5);
+  expect(room.phase).toBe('playing');
+  expect(room.snapshot().awaitingPlayers).toBe(0);
+  room.dispose();
+});
+
+test('a page reload during the countdown has to report its scene again', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const identities = [room.issue('Host'), room.issue('Guest'), room.issue('Third')];
+  const hostSocket = socket();
+  room.handle(hostSocket, {
+    t: 'join',
+    ...identities[0],
+    protocol: 2,
+    host: room.hostToken,
+    scene: true,
+    instance: 'host-page',
+  });
+  room.handle(socket(), {
+    t: 'join',
+    ...identities[1],
+    protocol: 2,
+    scene: true,
+    instance: 'guest-page',
+  });
+  room.handle(socket(), {
+    t: 'join',
+    ...identities[2],
+    protocol: 2,
+    scene: true,
+    instance: 'third-page',
+  });
+  room.handle(hostSocket, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p'], elimination: false },
+  });
+  room.handle(hostSocket, { t: 'start' });
+  const matchId = room.matchId;
+  // Two of three clients are loaded; the gate is waiting for the third.
+  room.handle(hostSocket, { t: 'scene', matchId, holeIndex: 0 });
+  room.handle(room.players.get(identities[1].uid).ws, { t: 'scene', matchId, holeIndex: 0 });
+  await delay(30);
+  expect(room.phase).toBe('countdown');
+  expect(room.snapshot().awaitingPlayers).toBe(1);
+
+  // The loaded second client reloads its page: the prepared scene is gone with
+  // the old document, so its fresh document must report again. Otherwise the
+  // gate would treat a reloading client as ready and start the round without it.
+  const reloaded = socket();
+  room.handle(reloaded, {
+    t: 'join',
+    ...identities[1],
+    protocol: 2,
+    scene: true,
+    instance: 'guest-page-reloaded',
+  });
+  expect(room.phase).toBe('countdown');
+  expect(room.players.get(identities[1].uid).sceneReady).toBe(false);
+  expect(room.snapshot().awaitingPlayers).toBe(2);
+
+  // Both fresh documents finish loading, so play starts.
+  room.handle(reloaded, { t: 'scene', matchId, holeIndex: 0 });
+  room.handle(room.players.get(identities[2].uid).ws, { t: 'scene', matchId, holeIndex: 0 });
+  await delay(30);
+  expect(room.phase).toBe('playing');
+  room.dispose();
+});
+
+test('readiness can extend the approved countdown but never shorten it', async () => {
+  // A fast client reports its scene before the countdown has elapsed. Play must
+  // still wait out the countdown: shortening it would make the visible,
+  // approved countdown lie about when input opens.
+  const room = new Room('ABCDE', maps, { countdown: 60_000, results: 5 });
+  const hostIdentity = room.issue('Host');
+  const hostSocket = socket();
+  room.handle(hostSocket, {
+    t: 'join',
+    ...hostIdentity,
+    protocol: 2,
+    host: room.hostToken,
+    scene: true,
+  });
+  room.handle(hostSocket, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p'], elimination: false },
+  });
+  room.handle(hostSocket, { t: 'start' });
+  const playNotBefore = room.playNotBefore;
+  room.handle(hostSocket, { t: 'scene', matchId: room.matchId, holeIndex: 0 });
+  await delay(20);
+  expect(room.phase).toBe('countdown');
+  expect(room.snapshot().awaitingPlayers).toBe(0);
+  // The start instant is still the end of the countdown, not the report time.
+  expect(room.startsAt).toBe(playNotBefore);
+  expect(playNotBefore - Date.now()).toBeGreaterThan(30_000);
+  room.dispose();
+});

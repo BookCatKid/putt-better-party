@@ -4,6 +4,10 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
   const phase = useBetterPartyState(betterPartyStore, (partyState) => partyState.phase);
   const hole = useBetterPartyState(betterPartyStore, (partyState) => partyState.holeIndex);
   const nextError = useBetterPartyState(betterPartyStore, (partyState) => partyState.nextError);
+  const awaitingPlayers = useBetterPartyState(
+    betterPartyStore,
+    (partyState) => partyState.awaitingPlayers,
+  );
   const [open, setOpen] = BetterPartyReact.useState(false);
   const [confirm, setConfirm] = BetterPartyReact.useState(null);
   const [pending, setPending] = BetterPartyReact.useState(false);
@@ -110,6 +114,14 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
         },
         [
           createElement('h3', { className: 'mb-3 text-sm font-bold' }, 'Party controls'),
+          awaitingPlayers > 0 &&
+            createElement(
+              'p',
+              { role: 'status', className: 'mb-2 text-xs text-white/70' },
+              awaitingPlayers === 1
+                ? 'Waiting for 1 player to finish loading.'
+                : `Waiting for ${awaitingPlayers} players to finish loading.`,
+            ),
           nextError &&
             createElement(
               'p',

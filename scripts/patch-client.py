@@ -96,7 +96,10 @@ const isTransportSpectator = _e;
         "ne=(0,J.useCallback)(()=>{window.setTimeout(()=>j(!0),2500)},[])",
         "ne=(0,J.useCallback)(()=>{bpScenePrepared(l.id);window.setTimeout(()=>j(!0),2500)},[l.id])",
     )
-    return 'import{bpConnection,bpAck,bpScenePrepared}from"./runtime-DL2fiDAQ.js";' + source
+    return (
+        "import{bpConnection,bpAck,bpScenePrepared,transportSceneReadyLevelId}"
+        'from"./runtime-DL2fiDAQ.js";' + source
+    )
 
 
 patch("GameCanvas-C5hQh1sR.js", transport_patch)
@@ -106,17 +109,17 @@ def runtime_patch(s):
     s = replace_once(
         s,
         "active:!0,code:e,hostToken:n,self:t,selfRole:",
-        "active:!0,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
+        "active:!0,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
     )
     s = replace_once(
         s,
         "active:!1,selfRole:",
-        "active:!1,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,selfRole:",
+        "active:!1,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,selfRole:",
     )
     s = replace_once(
         s,
         "phase:e.phase,holeIndex:e.holeIndex",
-        "bpInitialSnapshot:true,recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,nextError:e.nextError??null,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
+        "bpInitialSnapshot:true,recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,awaitingPlayers:e.awaitingPlayers??0,nextError:e.nextError??null,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
     )
     s = replace_once(
         s,

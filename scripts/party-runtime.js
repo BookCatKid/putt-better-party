@@ -58,6 +58,12 @@ export function bpHostAction(action, seconds) {
   });
 }
 
+/** Level ID the route has prepared, or null while it is still preparing. */
+export function transportSceneReadyLevelId() {
+  const partyState = partyRuntimeStore.state;
+  return partyState.bpSceneReady ?? null;
+}
+
 // Called by the original renderer's scene-preparation callback.
 export function bpScenePrepared(levelId) {
   if (partyRuntimeStore.state.active && partyRuntimeStore.state.bpSceneReady !== levelId) {
