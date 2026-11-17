@@ -31,6 +31,10 @@ try {
     const join = await styles();
     assert.deepEqual(join, home);
     assert(join.background.includes('radial-gradient'));
+    assert.equal(
+      await c.evalJS('getComputedStyle(document.querySelector(".bp-back")).borderRadius'),
+      join.button.radius,
+    );
     await c.evalJS('document.querySelector(".bp-back").click()');
     await waitFor(
       c,

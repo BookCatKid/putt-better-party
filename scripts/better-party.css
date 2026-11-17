@@ -447,7 +447,8 @@ body:has(> #app) {
   color: #34d399;
 }
 .bp-entry button,
-.bp-entry input {
+.bp-entry input,
+.bp-entry a.bp-resume {
   font-family: inherit;
   font-size: 15px;
   line-height: 1.25;
@@ -462,7 +463,8 @@ body:has(> #app) {
     border-color 0.15s;
 }
 .bp-entry button:focus-visible,
-.bp-entry input:focus-visible {
+.bp-entry input:focus-visible,
+.bp-entry a.bp-resume:focus-visible {
   outline: 2px solid #6ee7b7;
   outline-offset: 3px;
 }
@@ -617,7 +619,7 @@ body:has(> #app) {
   letter-spacing: 0.15em;
 }
 .bp-entry .bp-back {
-  display: block;
+  display: flex;
   width: 100%;
   margin-top: 20px;
   text-align: center;
