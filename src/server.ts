@@ -350,6 +350,8 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
           filters,
           {
             browse,
+            excludeIds:
+              filters.mode === 'append' ? new Set(configuration.selectedHoleIds) : undefined,
             stats: publicStats,
             currentDay: currentDailyNumber,
             allowed,

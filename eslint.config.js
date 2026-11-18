@@ -64,7 +64,12 @@ export default [
   },
   {
     // These snippets are inserted into the pinned original client's lexical scope.
-    files: ['scripts/picker.js', 'scripts/match-details.js', 'scripts/host-menu.js'],
+    files: [
+      'scripts/picker.js',
+      'scripts/match-details.js',
+      'scripts/host-menu.js',
+      'scripts/lobby.js',
+    ],
     languageOptions: {
       globals: {
         ...globals.browser,
@@ -75,6 +80,16 @@ export default [
         bpPickerBusy: 'readonly',
         bpHostAction: 'readonly',
         bpCastVote: 'readonly',
+        bpSetReady: 'readonly',
+        bpStartMatch: 'readonly',
+        BpOriginalLobbyPlayer: 'readonly',
+        bpLeaveParty: 'readonly',
+        CommunityCoursePicker: 'readonly',
+        BpNumericSettings: 'readonly',
+        BpLobbyOptions: 'readonly',
+        BpGuestPlaylist: 'readonly',
+        BpGuestStarting: 'readonly',
+        BpRecoveryNotice: 'readonly',
       },
     },
     rules: {

@@ -56,6 +56,7 @@ try {
     '(()=>{const el=document.querySelector(\'select[aria-label="Party map selection"]\');el.value="picked";el.dispatchEvent(new Event("change",{bubbles:true}))})()',
   );
   await state('s.config.mapSource==="picked"');
+  await clickText('Edit playlist');
   await waitFor(
     client,
     '[...document.querySelectorAll("button")].some(b=>b.textContent==="Auto-generate playlist")',
@@ -73,7 +74,7 @@ try {
   );
   await waitFor(
     client,
-    'document.querySelector(".bp-generator [role=status]").textContent.includes("2 matching courses")',
+    'document.querySelector(".bp-generator [role=status]").textContent.includes("2 courses selected from 2 matching courses")',
   );
   console.log('PASS compound generator filters populate the real host playlist');
   await client.call('Page.navigate', { url: base + '/home' });

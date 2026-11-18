@@ -1,6 +1,9 @@
 // Adapt the original _site.holes community card markup and class names.
 // Party-specific actions replace Play/Fork and account-only controls.
-function CommunityCoursePicker({ config }) {
+function CommunityCoursePicker({ config, holeSettings }) {
+  const [pickerOpen, setPickerOpen] = BetterPartyReact.useState(false);
+  const dialog = BetterPartyReact.useRef(null);
+  const [genMaximum, setGenMaximum] = BetterPartyReact.useState('');
   const [search, setSearch] = BetterPartyReact.useState('');
   const [sort, setSort] = BetterPartyReact.useState('new');
   const [rating, setRating] = BetterPartyReact.useState(0);
@@ -136,6 +139,17 @@ function CommunityCoursePicker({ config }) {
   const titles =
     useBetterPartyState(betterPartyStore, (partyState) => partyState.playlistTitles) ?? {};
   const preparing = useBetterPartyState(betterPartyStore, (partyState) => partyState.preparing);
+  BetterPartyReact.useEffect(() => {
+    const element = dialog.current;
+    if (pickerOpen && config.mapSource === 'picked' && element && !element.open) {
+      element.showModal();
+    }
+    return () => {
+      if (element?.open) {
+        element.close();
+      }
+    };
+  }, [pickerOpen, config.mapSource]);
   const picked = config.selectedHoleIds ?? [];
   const update = (ids) =>
     updateBetterPartyConfig({
@@ -147,7 +161,7 @@ function CommunityCoursePicker({ config }) {
   const pill =
     'rounded-full border border-[var(--line)] px-3.5 py-1.5 text-sm font-bold text-[var(--sea-ink-soft)] hover:border-emerald-500';
   const green =
-    'rounded-full bg-emerald-600 px-4 py-1.5 font-bold text-white hover:bg-emerald-500 disabled:opacity-50';
+    'rounded-full bg-emerald-500 px-4 py-1.5 font-bold text-emerald-950 hover:bg-emerald-400 disabled:opacity-50';
   const btn = (label, onClick, disabled = false, cls = pill, extra = {}) =>
     createElement('button', { type: 'button', onClick, disabled, className: cls, ...extra }, label);
   async function generatorRequest(action, filters) {
@@ -185,6 +199,15 @@ function CommunityCoursePicker({ config }) {
         ),
       ]),
     );
+    if (
+      genMaximum !== '' &&
+      (!Number.isInteger(Number(genMaximum)) ||
+        Number(genMaximum) < 1 ||
+        Number(genMaximum) > 10000)
+    ) {
+      setError('Maximum courses must be a whole number from 1 to 10000');
+      return;
+    }
     generatorActive.current = true;
     setBusy(true);
     setError('');
@@ -197,6 +220,7 @@ function CommunityCoursePicker({ config }) {
         sort: genSort,
         mode: genMode,
         ranges,
+        maxCourses: genMaximum === '' ? undefined : Number(genMaximum),
       });
       while (mounted.current) {
         setGenJob(job);
@@ -269,8 +293,11 @@ function CommunityCoursePicker({ config }) {
         job.progress.matched +
         ' matching';
     } else if (job?.status === 'complete') {
-      message = job.progress.matched
-        ? job.progress.matched + ' matching courses added to the playlist.'
+      message = job.selectedCount
+        ? job.selectedCount +
+          ' courses selected from ' +
+          job.progress.matched +
+          ' matching courses.'
         : 'No matching courses. Your playlist is unchanged.';
     } else if (job?.status === 'cancelled') {
       message = 'Generation cancelled. Your playlist is unchanged.';
@@ -337,6 +364,24 @@ function CommunityCoursePicker({ config }) {
           ),
         ]),
         createElement('div', { className: 'bp-gen-options' }, [
+          createElement('label', { className: 'bp-gen-field' }, [
+            createElement(
+              'span',
+              {},
+              genMode === 'append' ? 'Maximum courses to add' : 'Maximum courses',
+            ),
+            createElement('input', {
+              type: 'number',
+              min: 1,
+              max: 10000,
+              step: 1,
+              placeholder: 'Unlimited',
+              'aria-label': 'Maximum courses',
+              value: genMaximum,
+              disabled: busy || preparing,
+              onChange: (event) => setGenMaximum(event.target.value),
+            }),
+          ]),
           select('Daily holes', genDaily, setGenDaily, [
             ['any', 'Any'],
             ['exclude', 'Exclude past dailies'],
@@ -358,6 +403,7 @@ function CommunityCoursePicker({ config }) {
           { className: 'text-xs text-[var(--sea-ink-soft)]', role: 'status' },
           message,
         ),
+        error && createElement('p', { role: 'alert', className: 'text-xs text-red-300' }, error),
         createElement('div', { className: 'flex flex-wrap gap-2' }, [
           btn(
             genMode === 'append' ? 'Generate & append' : 'Generate & replace',
@@ -372,7 +418,7 @@ function CommunityCoursePicker({ config }) {
         createElement(
           'p',
           { className: 'text-xs text-[var(--sea-ink-soft)]' },
-          'Scanning all matching courses can take a while, especially for average strokes or par. Nothing changes until the full scan succeeds.',
+          'All matching courses are scanned before ordering and applying the maximum. Nothing changes until the scan succeeds.',
         ),
       ],
     );
@@ -397,7 +443,7 @@ function CommunityCoursePicker({ config }) {
   }
   const generation = BetterPartyReact.useRef(0);
   BetterPartyReact.useEffect(() => {
-    if (config.mapSource !== 'picked') {
+    if (config.mapSource !== 'picked' || !pickerOpen) {
       return;
     }
     const abortController = new AbortController();
@@ -430,7 +476,7 @@ function CommunityCoursePicker({ config }) {
       abortController.abort();
       generation.current++;
     };
-  }, [config.mapSource, search, sort, rating, daily, maker]);
+  }, [config.mapSource, pickerOpen, search, sort, rating, daily, maker]);
   async function more() {
     if (loading || page.nextOffset == null) {
       return;
@@ -567,6 +613,7 @@ function CommunityCoursePicker({ config }) {
   if (config.mapSource === 'random') {
     return createElement('div', {}, [
       mode,
+      holeSettings,
       createElement('label', { className: 'bp-number-row mt-3' }, [
         createElement('span', {}, 'Exclude holes played as dailies'),
         createElement('input', {
@@ -596,7 +643,7 @@ function CommunityCoursePicker({ config }) {
       {
         key: courseIndex.id,
         className:
-          'overflow-hidden rounded-2xl border bg-white/40 transition ' +
+          'overflow-hidden rounded-2xl border bg-white/5 transition ' +
           (count ? 'border-emerald-500/50 ring-1 ring-emerald-500/15' : 'border-[var(--line)]'),
       },
       [
@@ -646,7 +693,7 @@ function CommunityCoursePicker({ config }) {
                   target: '_blank',
                   rel: 'noopener noreferrer',
                   className:
-                    'shrink-0 rounded-full bg-emerald-600/10 px-2 py-0.5 text-[11px] font-bold text-emerald-700 no-underline',
+                    'shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold text-emerald-300 no-underline',
                 },
                 'Daily #' + courseIndex.scheduledDay,
               ),
@@ -717,232 +764,288 @@ function CommunityCoursePicker({ config }) {
   }
   return createElement('div', { className: 'flex flex-col gap-3' }, [
     mode,
-    createElement('section', { className: 'bp-community' }, [
+    createElement('div', { className: 'bp-picker-summary' }, [
       createElement(
-        'h2',
-        { className: 'text-3xl font-black tracking-tight text-[var(--sea-ink)]' },
-        'Community holes',
+        'span',
+        { className: 'text-xs text-white/70' },
+        picked.length + (picked.length === 1 ? ' course selected' : ' courses selected'),
       ),
-      createElement(
-        'p',
-        { className: 'mb-4 mt-1 text-sm text-[var(--sea-ink-soft)]' },
-        'Choose holes for your party.',
-      ),
-      createElement('div', { className: 'mb-4 flex flex-wrap items-center gap-2' }, [
-        ...[
-          ['new', 'New'],
-          ['trending', 'Trending'],
-          ['top', 'Top rated'],
-        ].map(([value, label]) =>
-          btn(
-            label,
-            () => setSort(value),
-            false,
-            value === sort
-              ? 'rounded-full bg-emerald-600 px-3.5 py-1.5 text-sm font-bold text-white'
-              : pill,
-          ),
-        ),
-        createElement('input', {
-          value: search,
-          onChange: (item) => setSearch(item.target.value),
-          placeholder: 'Search title or maker…',
-          'aria-label': 'Find party holes',
-          className:
-            'ml-auto w-48 rounded-full border border-[var(--line)] bg-white/60 px-3.5 py-1.5 text-sm',
-        }),
-      ]),
-      createElement('div', { className: 'mb-4 flex flex-wrap items-center gap-2 text-sm' }, [
-        createElement(
-          'select',
-          {
-            value: rating,
-            onChange: (item) => setRating(Number(item.target.value)),
-            'aria-label': 'Minimum rating',
-            className: 'rounded-full border border-[var(--line)] bg-white/60 px-3 py-1.5',
-          },
-          [
-            [0, 'Any rating'],
-            [3, '3★ and up'],
-            [4, '4★ and up'],
-          ].map(([value, label]) => createElement('option', { key: value, value: value }, label)),
-        ),
-        btn(
-          'Ran as a daily',
-          () => setDaily(!daily),
-          false,
-          daily ? 'rounded-full bg-emerald-600 px-3 py-1.5 font-semibold text-white' : pill,
-          { 'aria-pressed': daily },
-        ),
-        maker &&
-          btn(
-            'by ' + maker.name + ' ✕',
-            () => setMaker(null),
-            false,
-            'rounded-full bg-violet-600 px-3 py-1.5 font-semibold text-white',
-          ),
-      ]),
       btn(
-        'Auto-generate playlist',
-        () => setGeneratorOpen(!generatorOpen),
+        'Edit playlist',
+        () => setPickerOpen(true),
         busy || preparing,
-        green,
-        { 'aria-expanded': generatorOpen },
+        'rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white/85 hover:bg-white/20',
       ),
-      generatorOpen && generatorPanel(),
-      createElement('div', { className: 'bp-catalog-layout' }, [
-        createElement('section', { className: 'bp-catalog-scroll' }, [
-          error &&
-            createElement('p', { role: 'alert', className: 'mb-4 text-sm text-red-700' }, error),
-          page.holes.length
-            ? createElement(
-                'ul',
-                {
-                  className:
-                    'grid grid-cols-1 gap-4 sm:grid-cols-2 ' + (loading ? 'opacity-60' : ''),
-                },
-                page.holes.map(card),
-              )
-            : createElement(
-                'p',
-                { className: 'py-16 text-center text-sm text-[var(--sea-ink-soft)]' },
-                loading ? 'Loading…' : 'No holes match. Try clearing some filters.',
-              ),
-          createElement('div', { className: 'mt-6 text-center' }, [
+    ]),
+    pickerOpen &&
+      createElement(
+        'dialog',
+        {
+          ref: dialog,
+          className: 'bp-playlist-dialog rounded-3xl bg-[#11272b] shadow-2xl',
+          'aria-labelledby': 'bp-playlist-title',
+          onCancel: (event) => {
+            event.preventDefault();
+            if (!busy && !preparing) {
+              setPickerOpen(false);
+            }
+          },
+        },
+        [
+          createElement('header', { className: 'bp-playlist-dialog-header' }, [
             createElement(
-              'p',
-              { className: 'text-xs text-[var(--sea-ink-soft)]' },
-              (page.total ?? 0) + ' holes',
+              'h2',
+              { id: 'bp-playlist-title', className: 'text-xl font-black' },
+              'Choose a playlist',
             ),
-            page.nextOffset != null &&
-              btn(
-                loading ? 'Loading…' : 'Load more',
-                more,
-                loading,
-                'mt-2 rounded-full bg-emerald-600 px-6 py-2.5 text-sm font-bold text-white disabled:opacity-50',
-              ),
+            btn(
+              'Done',
+              () => setPickerOpen(false),
+              busy || preparing,
+              'rounded-full bg-emerald-500 px-5 py-2 text-sm font-bold text-emerald-950 hover:bg-emerald-400 disabled:opacity-40',
+            ),
           ]),
-        ]),
-        createElement('aside', {}, [
-          createElement('h3', { className: 'mb-2 font-bold' }, 'Playlist · ' + picked.length),
-          ...picked.map((id, index) =>
-            createElement(
-              'div',
-              {
-                key: index + ':' + id,
-                className: 'bp-playlist-item' + (drag === index ? ' bp-dragging' : ''),
-                draggable: !busy && !preparing,
-                onDragStart: (ev) => {
-                  setDrag(index);
-                  ev.dataTransfer.effectAllowed = 'move';
-                  ev.dataTransfer.setData('text/plain', String(index));
+          createElement('section', { className: 'bp-community' }, [
+            createElement('div', { className: 'mb-4 flex flex-wrap items-center gap-2' }, [
+              ...[
+                ['new', 'New'],
+                ['trending', 'Trending'],
+                ['top', 'Top rated'],
+              ].map(([value, label]) =>
+                btn(
+                  label,
+                  () => setSort(value),
+                  false,
+                  value === sort
+                    ? 'rounded-full bg-emerald-600 px-3.5 py-1.5 text-sm font-bold text-white'
+                    : pill,
+                ),
+              ),
+              createElement('input', {
+                value: search,
+                onChange: (item) => setSearch(item.target.value),
+                placeholder: 'Search title or maker…',
+                'aria-label': 'Find party holes',
+                className:
+                  'ml-auto w-48 rounded-full border border-[var(--line)] bg-black/20 px-3.5 py-1.5 text-sm',
+              }),
+            ]),
+            createElement('div', { className: 'mb-4 flex flex-wrap items-center gap-2 text-sm' }, [
+              createElement(
+                'select',
+                {
+                  value: rating,
+                  onChange: (item) => setRating(Number(item.target.value)),
+                  'aria-label': 'Minimum rating',
+                  className: 'rounded-full border border-[var(--line)] bg-black/20 px-3 py-1.5',
                 },
-                onDragOver: (ev) => {
-                  if (drag !== null) {
-                    ev.preventDefault();
-                    ev.dataTransfer.dropEffect = 'move';
-                  }
-                },
-                onDragEnd: () => setDrag(null),
-                onDrop: (ev) => {
-                  ev.preventDefault();
-                  if (drag !== null && drag !== index) {
-                    move(drag, index - drag);
-                  }
-                  setDrag(null);
-                },
-              },
-              [
-                image(id, names[id] ?? titles[id] ?? id, '', index < 4),
-                createElement('div', {}, [
+                [
+                  [0, 'Any rating'],
+                  [3, '3★ and up'],
+                  [4, '4★ and up'],
+                ].map(([value, label]) =>
+                  createElement('option', { key: value, value: value }, label),
+                ),
+              ),
+              btn(
+                'Ran as a daily',
+                () => setDaily(!daily),
+                false,
+                daily ? 'rounded-full bg-emerald-600 px-3 py-1.5 font-semibold text-white' : pill,
+                { 'aria-pressed': daily },
+              ),
+              maker &&
+                btn(
+                  'by ' + maker.name + ' ✕',
+                  () => setMaker(null),
+                  false,
+                  'rounded-full bg-violet-600 px-3 py-1.5 font-semibold text-white',
+                ),
+            ]),
+            btn(
+              'Auto-generate playlist',
+              () => setGeneratorOpen(!generatorOpen),
+              busy || preparing,
+              green,
+              { 'aria-expanded': generatorOpen },
+            ),
+            generatorOpen && generatorPanel(),
+            createElement('div', { className: 'bp-catalog-layout' }, [
+              createElement('section', { className: 'bp-catalog-scroll' }, [
+                error &&
                   createElement(
                     'p',
-                    { className: 'text-xs font-bold' },
-                    index + 1 + '. ' + (names[id] ?? titles[id] ?? id),
+                    { role: 'alert', className: 'mb-4 text-sm text-red-300' },
+                    error,
                   ),
-                  createElement('div', { className: 'bp-playlist-actions' }, [
-                    btn('↑', () => move(index, -1), index === 0 || busy || preparing, '', {
-                      'aria-label': 'Move hole up',
-                    }),
-                    btn(
-                      '↓',
-                      () => move(index, 1),
-                      index === picked.length - 1 || busy || preparing,
-                      '',
+                page.holes.length
+                  ? createElement(
+                      'ul',
                       {
-                        'aria-label': 'Move hole down',
+                        className:
+                          'grid grid-cols-1 gap-4 sm:grid-cols-2 ' + (loading ? 'opacity-60' : ''),
                       },
+                      page.holes.map(card),
+                    )
+                  : createElement(
+                      'p',
+                      { className: 'py-16 text-center text-sm text-[var(--sea-ink-soft)]' },
+                      loading ? 'Loading…' : 'No holes match. Try clearing some filters.',
                     ),
-                    btn(
-                      '×',
-                      () => update(picked.filter((unused, entry) => entry !== index)),
-                      busy || preparing,
-                      '',
-                      { 'aria-label': 'Remove hole' },
-                    ),
-                  ]),
-                ]),
-              ],
-            ),
-          ),
-          !picked.length &&
-            createElement(
-              'p',
-              { className: 'text-xs text-[var(--sea-ink-soft)]' },
-              'Add holes in the order you want to play.',
-            ),
-          picked.length > 0 && btn('Clear', () => update([]), busy || preparing, pill + ' mt-3'),
-          createElement('div', { className: 'bp-saved-playlists' }, [
-            createElement('input', {
-              'aria-label': 'Playlist name',
-              placeholder: 'Playlist name',
-              value: saveName,
-              maxLength: 60,
-              onChange: (event) => setSaveName(event.target.value),
-            }),
-            btn('Save', save, !saveName.trim() || !picked.length || busy || preparing, pill, {
-              'aria-label': 'Save playlist',
-            }),
-            createElement(
-              'select',
-              {
-                'aria-label': 'Saved playlists',
-                value: savedId,
-                onChange: (event) => setSavedId(event.target.value),
-              },
-              [
-                createElement('option', { value: '' }, 'Saved playlists…'),
-                ...saved.map((playlist) =>
+                createElement('div', { className: 'mt-6 text-center' }, [
                   createElement(
-                    'option',
-                    { key: playlist.id, value: playlist.id },
-                    playlist.name + ' (' + playlist.ids.length + ')',
+                    'p',
+                    { className: 'text-xs text-[var(--sea-ink-soft)]' },
+                    (page.total ?? 0) + ' holes',
                   ),
+                  page.nextOffset != null &&
+                    btn(
+                      loading ? 'Loading…' : 'Load more',
+                      more,
+                      loading,
+                      'mt-2 rounded-full bg-emerald-600 px-6 py-2.5 text-sm font-bold text-white disabled:opacity-50',
+                    ),
+                ]),
+              ]),
+              createElement('aside', { className: 'bp-playlist-sidebar' }, [
+                createElement('h3', { className: 'mb-2 font-bold' }, 'Playlist · ' + picked.length),
+                createElement(
+                  'div',
+                  {
+                    className: 'bp-playlist-scroll',
+                    tabIndex: 0,
+                    'aria-label': 'Selected courses',
+                  },
+                  [
+                    ...picked.map((id, index) =>
+                      createElement(
+                        'div',
+                        {
+                          key: index + ':' + id,
+                          className: 'bp-playlist-item' + (drag === index ? ' bp-dragging' : ''),
+                          draggable: !busy && !preparing,
+                          onDragStart: (ev) => {
+                            setDrag(index);
+                            ev.dataTransfer.effectAllowed = 'move';
+                            ev.dataTransfer.setData('text/plain', String(index));
+                          },
+                          onDragOver: (ev) => {
+                            if (drag !== null) {
+                              ev.preventDefault();
+                              ev.dataTransfer.dropEffect = 'move';
+                            }
+                          },
+                          onDragEnd: () => setDrag(null),
+                          onDrop: (ev) => {
+                            ev.preventDefault();
+                            if (drag !== null && drag !== index) {
+                              move(drag, index - drag);
+                            }
+                            setDrag(null);
+                          },
+                        },
+                        [
+                          image(id, names[id] ?? titles[id] ?? id, '', index < 4),
+                          createElement('div', {}, [
+                            createElement(
+                              'p',
+                              { className: 'text-xs font-bold' },
+                              index + 1 + '. ' + (names[id] ?? titles[id] ?? id),
+                            ),
+                            createElement('div', { className: 'bp-playlist-actions' }, [
+                              btn(
+                                '↑',
+                                () => move(index, -1),
+                                index === 0 || busy || preparing,
+                                '',
+                                {
+                                  'aria-label': 'Move hole up',
+                                },
+                              ),
+                              btn(
+                                '↓',
+                                () => move(index, 1),
+                                index === picked.length - 1 || busy || preparing,
+                                '',
+                                {
+                                  'aria-label': 'Move hole down',
+                                },
+                              ),
+                              btn(
+                                '×',
+                                () => update(picked.filter((unused, entry) => entry !== index)),
+                                busy || preparing,
+                                '',
+                                { 'aria-label': 'Remove hole' },
+                              ),
+                            ]),
+                          ]),
+                        ],
+                      ),
+                    ),
+                    !picked.length &&
+                      createElement(
+                        'p',
+                        { className: 'text-xs text-[var(--sea-ink-soft)]' },
+                        'Add holes in the order you want to play.',
+                      ),
+                  ],
                 ),
-              ],
-            ),
-            btn('Load', loadSaved, !savedId || busy || preparing, pill, {
-              'aria-label': 'Load saved playlist',
-            }),
-            btn(
-              'Delete',
-              () => {
-                store(saved.filter((playlist) => playlist.id !== savedId));
-                setSavedId('');
-              },
-              !savedId || busy || preparing,
-              pill,
-              { 'aria-label': 'Delete saved playlist' },
-            ),
+                picked.length > 0 &&
+                  btn('Clear', () => update([]), busy || preparing, pill + ' mt-3'),
+                createElement('div', { className: 'bp-saved-playlists' }, [
+                  createElement('input', {
+                    'aria-label': 'Playlist name',
+                    placeholder: 'Playlist name',
+                    value: saveName,
+                    maxLength: 60,
+                    onChange: (event) => setSaveName(event.target.value),
+                  }),
+                  btn('Save', save, !saveName.trim() || !picked.length || busy || preparing, pill, {
+                    'aria-label': 'Save playlist',
+                  }),
+                  createElement(
+                    'select',
+                    {
+                      'aria-label': 'Saved playlists',
+                      value: savedId,
+                      onChange: (event) => setSavedId(event.target.value),
+                    },
+                    [
+                      createElement('option', { value: '' }, 'Saved playlists…'),
+                      ...saved.map((playlist) =>
+                        createElement(
+                          'option',
+                          { key: playlist.id, value: playlist.id },
+                          playlist.name + ' (' + playlist.ids.length + ')',
+                        ),
+                      ),
+                    ],
+                  ),
+                  btn('Load', loadSaved, !savedId || busy || preparing, pill, {
+                    'aria-label': 'Load saved playlist',
+                  }),
+                  btn(
+                    'Delete',
+                    () => {
+                      store(saved.filter((playlist) => playlist.id !== savedId));
+                      setSavedId('');
+                    },
+                    !savedId || busy || preparing,
+                    pill,
+                    { 'aria-label': 'Delete saved playlist' },
+                  ),
+                ]),
+                busy &&
+                  createElement(
+                    'p',
+                    { role: 'status', className: 'mt-2 text-xs' },
+                    progress || 'Loading course…',
+                  ),
+              ]),
+            ]),
           ]),
-          busy &&
-            createElement(
-              'p',
-              { role: 'status', className: 'mt-2 text-xs' },
-              progress || 'Loading course…',
-            ),
-        ]),
-      ]),
-    ]),
+        ],
+      ),
   ]);
 }

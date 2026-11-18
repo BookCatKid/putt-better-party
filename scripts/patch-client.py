@@ -218,27 +218,17 @@ def game_patch(s):
         + "\nfunction At(props){return CommunityCoursePicker(props)}\n"
         + s[b:]
     )
+    # Replace only the lobby overlay; retain the original scene, camera,
+    # route, stores and Ready/Start runtime functions unchanged.
     a = s.index("function Mt(")
     b = s.index("function Nt(", a)
     s = (
         s[:a]
-        + replace_once(
-            s[a:b],
-            "mx-6 max-h-[88dvh] w-full max-w-sm overflow-y-auto rounded-3xl bg-[#11272b] p-7",
-            "mx-6 max-h-[88dvh] w-full max-w-6xl overflow-y-auto rounded-3xl bg-[#11272b] p-7 bp-lobby",
-        )
+        + "\nconst bpSetReady = de, bpStartMatch = le, BpOriginalLobbyPlayer = jt;\n"
+        + (root / "scripts/lobby.js").read_text()
+        + "\nfunction Mt(){return (0,J.jsx)(BpLobbyDashboard,{})}\n"
         + s[b:]
     )
-    a = s.index("function Mt(")
-    b = s.index("function Nt(", a)
-    part = s[a:b]
-    first = part.index("s.mapSource===`random`&&(0,J.jsxs)(`label`")
-    last = part.index(
-        "(0,J.jsxs)(`label`,{className:`flex items-center justify-between gap-3 text-xs font-medium text-white/85`,children:[(0,J.jsx)(`span`,{children:`Elimination`})",
-        first,
-    )
-    part = part[:first] + "(0,J.jsx)(BpNumericSettings,{})," + part[last:]
-    s = s[:a] + part + s[b:]
     s = replace_once(
         s,
         "children:d?`Tallying the winners…`:`Next hole starting…`",
@@ -249,32 +239,6 @@ def game_patch(s):
         "a.holes-1||c<=1",
         "a.holes-1||(a.elimination&&(c===0||(R.state.initialPlayers>1&&c===1)))",
     )
-    s = replace_once(
-        s,
-        "s=j(R,e=>e.config),[c,l]",
-        "s=j(R,e=>e.config),bpPreparing=j(R,e=>e.preparing||e.bpPickerBusy),[c,l]",
-    )
-    s = replace_once(
-        s,
-        "disabled:s.mapSource===`picked`&&!s.selectedHoleIds?.length",
-        "disabled:bpPreparing||(s.mapSource===`picked`&&!s.selectedHoleIds?.length)",
-    )
-    s = replace_once(
-        s,
-        "a&&(0,J.jsxs)(`div`,{className:`mb-5 flex flex-col gap-3 rounded-xl bg-white/5 p-3 text-left`",
-        "!a&&(0,J.jsx)(BpGuestPlaylist,{}),a&&(0,J.jsxs)(`div`,{className:`mb-5 flex flex-col gap-3 rounded-xl bg-white/5 p-3 text-left`",
-    )
-    s = replace_once(
-        s, "(0,J.jsx)(At,{config:s}),", "(0,J.jsx)(At,{config:s}),(0,J.jsx)(BpLobbyOptions,{}),"
-    )
-    s = replace_once(
-        s,
-        "children:`Party lobby`}),n&&",
-        "children:`Party lobby`}),(0,J.jsx)(BpRecoveryNotice,{}),n&&",
-    )
-    s = replace_once(
-        s, "children:`Start party`", "children:bpPreparing?`Loading courses…`:`Start party`"
-    )
     # Leaving on purpose tells the server so, which hands host authority on at
     # once instead of waiting out the reconnect grace period.
     s = replace_once(
@@ -282,17 +246,6 @@ def game_patch(s):
         "{href:`/party`,className:`mt-3 block text-xs font-semibold text-white/40 no-underline hover:text-white/70`,children:`Leave party`}",
         "{href:`/party`,onClick:()=>bpLeaveParty(),className:`mt-3 block text-xs font-semibold text-white/40 no-underline hover:text-white/70`,children:`Leave party`}",
     )
-    s = replace_once(
-        s,
-        "!a&&(0,J.jsx)(BpGuestPlaylist,{}),",
-        "!a&&(0,J.jsxs)(J.Fragment,{children:[(0,J.jsx)(BpGuestPlaylist,{}),(0,J.jsx)(BpGuestStarting,{})]}),",
-    )
-    s = replace_once(
-        s,
-        "(0,J.jsx)(`p`,{className:`text-xs text-white/50`,children:`Waiting for the host to start…`})",
-        "!bpPreparing&&(0,J.jsx)(`p`,{className:`text-xs text-white/50`,children:`Waiting for the host to start…`})",
-    )
-
     s = replace_once(
         s,
         "b?ne===`playing`&&i!==`holed`&&i!==`forfeit`&&(0,J.jsx)(Ut,{}):w?null:",

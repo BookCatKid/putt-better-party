@@ -133,7 +133,10 @@ function BpScorecard() {
 
 function BpLobbyOptions() {
   const config = useBetterPartyState(betterPartyStore, (partyState) => partyState.config);
-  const preparing = useBetterPartyState(betterPartyStore, (partyState) => partyState.preparing);
+  const preparing = useBetterPartyState(
+    betterPartyStore,
+    (partyState) => partyState.preparing || partyState.bpPickerBusy,
+  );
   const connected = useBetterPartyState(betterPartyStore, (partyState) => partyState.bpConnected);
   const count = useBetterPartyState(betterPartyStore, (partyState) => partyState.count);
   const createElement = BetterPartyReact.createElement;
@@ -296,7 +299,7 @@ function BpNumericField({ label, value, min, max, apply, disabled, unit, sliderS
     ]),
   ]);
 }
-function BpNumericSettings() {
+function BpNumericSettings({ section } = {}) {
   const configuration = useBetterPartyState(betterPartyStore, (partyState) => partyState.config);
   const disabled = useBetterPartyState(
     betterPartyStore,
@@ -304,7 +307,8 @@ function BpNumericSettings() {
   );
   const createElement = BetterPartyReact.createElement;
   return createElement(BetterPartyReact.Fragment, {}, [
-    configuration.mapSource === 'random' &&
+    section !== 'timer' &&
+      configuration.mapSource === 'random' &&
       createElement(BpNumericField, {
         label: 'Holes',
         value: configuration.holes,
@@ -313,15 +317,16 @@ function BpNumericSettings() {
         apply: (holes) => updateBetterPartyConfig({ holes }),
         disabled,
       }),
-    createElement(BpNumericField, {
-      label: 'Timer',
-      value: Math.round(configuration.timerMs / 1000),
-      min: 20,
-      max: 300,
-      apply: (number) => updateBetterPartyConfig({ timerMs: number * 1000 }),
-      disabled,
-      unit: 's',
-    }),
+    section !== 'holes' &&
+      createElement(BpNumericField, {
+        label: 'Timer',
+        value: Math.round(configuration.timerMs / 1000),
+        min: 20,
+        max: 300,
+        apply: (number) => updateBetterPartyConfig({ timerMs: number * 1000 }),
+        disabled,
+        unit: 's',
+      }),
   ]);
 }
 

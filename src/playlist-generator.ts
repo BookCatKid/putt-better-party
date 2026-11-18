@@ -16,6 +16,7 @@ export type Filters = {
   sort: 'new' | 'top' | 'trending' | 'shuffle';
   mode: 'replace' | 'append';
   ranges: Partial<Record<Metric, Range>>;
+  maxCourses?: number;
 };
 export function parseFilters(value: unknown): Filters {
   if (!isRecord(value) || !isRecord(value.ranges)) {
@@ -32,6 +33,16 @@ export function parseFilters(value: unknown): Filters {
     value.search.length > 100
   ) {
     throw new Error('Invalid playlist filters');
+  }
+  const maxCourses = value.maxCourses;
+  if (
+    maxCourses !== undefined &&
+    (typeof maxCourses !== 'number' ||
+      !Number.isInteger(maxCourses) ||
+      maxCourses < 1 ||
+      maxCourses > 10_000)
+  ) {
+    throw new Error('Maximum courses must be a whole number from 1 to 10000');
   }
   const selected: Filters['ranges'] = {};
   for (const [metric, range] of Object.entries(value.ranges)) {
@@ -64,7 +75,7 @@ export function parseFilters(value: unknown): Filters {
       selected[key] = parsed;
     }
   }
-  return { search: value.search.trim(), daily, sort, mode, ranges: selected };
+  return { search: value.search.trim(), daily, sort, mode, ranges: selected, maxCourses };
 }
 function matches(range: Range | undefined, value: unknown) {
   return (
@@ -82,6 +93,7 @@ export interface PlaylistProgress {
 }
 type ScanDependencies = {
   browse: Browse;
+  excludeIds?: ReadonlySet<string>;
   stats: (id: string) => Promise<{ avgStrokes: number | null }>;
   specification: (id: string) => Promise<CourseSpecification>;
   currentDay: () => number;
@@ -157,6 +169,7 @@ export async function generatePlaylist(
         (typeof hole.scheduledDay === 'number' && hole.scheduledDay <= day) ||
         (filters.daily === 'only' && hole.scheduledDay == null);
       const pass =
+        !deps.excludeIds?.has(hole.id) &&
         (filters.daily !== 'exclude' || !featured) &&
         (filters.daily !== 'only' || featured) &&
         matches(filters.ranges.rating, hole.ratingAvg) &&
@@ -202,13 +215,14 @@ export async function generatePlaylist(
       [selected[index], selected[other]] = [selected[other], selected[index]];
     }
   }
-  return selected;
+  return selected.slice(0, filters.maxCourses);
 }
 
 type Job = {
   status: 'running' | 'complete' | 'cancelled' | 'failed';
   progress: PlaylistProgress;
   error?: string;
+  selectedCount?: number;
   at: number;
 };
 export class PlaylistJobs {
@@ -254,6 +268,7 @@ export class PlaylistJobs {
           if (holes.length) {
             apply(holes);
           }
+          job.selectedCount = holes.length;
           job.status = 'complete';
         } else {
           job.status = 'cancelled';

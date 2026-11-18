@@ -147,3 +147,32 @@ test('cancelled or failed jobs never overwrite an existing playlist, and all mat
   expect(jobs.get('THREE').status).toBe('failed');
   expect(applied).toHaveLength(1);
 });
+
+test('maximum courses limits the full filtered pool after ordering, including shuffled results from later pages', async () => {
+  const { calls, deps } = dependencies();
+  const limited = filters({ ranges: { rating: { min: 4, max: 5 } }, maxCourses: 2 });
+  expect((await generatePlaylist(limited, deps)).map((hole) => hole.id)).toEqual(['one', 'three']);
+  calls.browse.length = 0;
+  const random = Math.random;
+  try {
+    Math.random = () => 0;
+    const shuffled = await generatePlaylist({ ...limited, sort: 'shuffle' }, deps);
+    expect(shuffled.map((hole) => hole.id)).toEqual(['three', 'four']);
+    expect(calls.browse.map((page) => page.offset)).toEqual([0, 2, 4]);
+    expect(calls.progress.at(-1).matched).toBe(4);
+  } finally {
+    Math.random = random;
+  }
+  expect(await generatePlaylist({ ...limited, maxCourses: 10 }, deps)).toHaveLength(4);
+  expect(
+    (
+      await generatePlaylist(
+        { ...limited, mode: 'append' },
+        { ...deps, excludeIds: new Set(['one', 'three']) },
+      )
+    ).map((hole) => hole.id),
+  ).toEqual(['four', 'five']);
+  for (const invalid of [0, -1, 1.5, 10001, '10', null]) {
+    expect(() => filters({ maxCourses: invalid })).toThrow('Maximum courses');
+  }
+});

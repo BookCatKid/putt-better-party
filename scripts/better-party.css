@@ -932,3 +932,264 @@ body:has(> #app) {
 .bp-leaderboard-note {
   margin-top: 20px;
 }
+
+/* Layout only. The archived lobby's colors, type, rounded panels,
+   player row component and buttons are reused directly. */
+.bp-dashboard {
+  display: flex;
+  flex-direction: column;
+  width: min(calc(100% - 48px), 800px);
+  max-height: 88dvh;
+  overflow: hidden;
+}
+.bp-dashboard-header {
+  flex-shrink: 0;
+  margin-bottom: 20px;
+}
+.bp-dashboard-invite-fallback {
+  display: block;
+  width: min(100%, 320px);
+  margin: 8px auto 0;
+  padding: 7px;
+  background: #0a1c21;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.bp-dashboard-body {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.bp-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(230px, 1fr);
+  grid-template-areas: 'courses players' 'rules settings';
+  align-items: stretch;
+  gap: 12px;
+}
+.bp-dashboard-courses {
+  grid-area: courses;
+}
+.bp-dashboard-players {
+  grid-area: players;
+}
+.bp-dashboard-rules {
+  grid-area: rules;
+}
+.bp-dashboard-settings {
+  grid-area: settings;
+}
+.bp-dashboard-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.bp-dashboard-panel-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.bp-dashboard-courses .bp-dashboard-panel-content {
+  max-height: min(45dvh, 460px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.bp-dashboard-courses .bp-guest-course-list {
+  max-height: 192px;
+}
+.bp-dashboard-courses .bp-guest-course-list img {
+  flex-shrink: 0;
+}
+.bp-dashboard-courses .bp-guest-course-list li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.bp-dashboard-courses .bp-dashboard-panel-content > .mb-4 {
+  margin-bottom: 0;
+}
+.bp-dashboard-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+.bp-dashboard-player-list {
+  max-height: min(35dvh, 300px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.bp-dashboard-player-list > li {
+  padding: 6px 0;
+}
+.bp-dashboard .bp-lobby-options {
+  border: 0;
+  padding: 0;
+  gap: 12px;
+}
+.bp-dashboard .bp-number-slider {
+  width: min(128px, 19vw);
+}
+.bp-dashboard-hole-count,
+.bp-dashboard-rule {
+  margin-top: 12px;
+}
+.bp-dashboard-readonly {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  padding: 6px 0;
+}
+.bp-dashboard-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex-shrink: 0;
+  margin-top: 16px;
+}
+.bp-dashboard-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.bp-dashboard-summary strong {
+  color: #ffffffd9;
+  font-size: 13px;
+}
+.bp-dashboard-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.bp-dashboard-action {
+  flex: 1;
+  min-width: 120px;
+}
+.bp-dashboard-waiting {
+  text-align: center;
+  margin: 0;
+}
+@media (max-width: 680px) {
+  .bp-dashboard {
+    width: calc(100% - 24px);
+    max-height: 92dvh;
+    padding: 16px;
+  }
+  .bp-dashboard-header {
+    margin-bottom: 12px;
+  }
+  .bp-dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'courses' 'players' 'rules' 'settings';
+  }
+}
+
+.bp-picker-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.bp-playlist-dialog {
+  position: fixed;
+  inset: 0;
+  width: min(calc(100vw - 48px), 1180px);
+  max-width: none;
+  max-height: 88dvh;
+  margin: auto;
+  padding: 0;
+  border: 0;
+  color: #fff;
+  overflow: hidden;
+  color-scheme: dark;
+}
+.bp-playlist-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.bp-playlist-dialog::backdrop {
+  background: #0007;
+}
+.bp-playlist-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 24px;
+  border-bottom: 1px solid #ffffff15;
+  flex-shrink: 0;
+}
+.bp-playlist-dialog .bp-community {
+  --sea-ink: #ffffffe6;
+  --sea-ink-soft: #ffffffa8;
+  --line: #ffffff20;
+  background: transparent;
+  border-radius: 0;
+  padding: 20px 24px;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.bp-playlist-dialog .bp-catalog-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 30%);
+  align-items: start;
+  gap: 18px;
+  margin-top: 16px;
+}
+.bp-playlist-dialog .bp-catalog-scroll {
+  max-height: 52dvh;
+  padding-right: 8px;
+}
+.bp-playlist-dialog .bp-catalog-scroll img,
+.bp-playlist-dialog .bp-playlist-item img {
+  background: #ffffff0a;
+}
+.bp-playlist-dialog .bp-playlist-sidebar {
+  min-width: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 12px;
+  background: #ffffff05;
+  border-radius: 12px;
+}
+.bp-playlist-dialog .bp-playlist-scroll {
+  max-height: 35dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.bp-playlist-dialog .bp-playlist-item p {
+  overflow-wrap: anywhere;
+}
+.bp-playlist-dialog .bp-gen-field input,
+.bp-playlist-dialog .bp-gen-field select,
+.bp-playlist-dialog .bp-gen-ranges input,
+.bp-playlist-dialog .bp-saved-playlists input,
+.bp-playlist-dialog .bp-saved-playlists select {
+  background: #0a1c21;
+  color: #ffffffe6;
+}
+.bp-playlist-dialog input::placeholder {
+  color: #ffffff66;
+}
+.bp-playlist-dialog button:disabled {
+  opacity: 0.45;
+}
+@media (max-width: 680px) {
+  .bp-playlist-dialog {
+    width: calc(100vw - 24px);
+    max-height: 94dvh;
+  }
+  .bp-playlist-dialog-header,
+  .bp-playlist-dialog .bp-community {
+    padding: 14px;
+  }
+  .bp-playlist-dialog .bp-catalog-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
