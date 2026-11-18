@@ -6,11 +6,23 @@ import { Room } from './room.js';
 import { logEvent } from './event-log.js';
 import { RoomStore } from './room-store.js';
 import { courseIndex, courseCount, fetchPublicMap, prepareMatch } from './catalog.js';
-import { isRecord, errorMessage, MAP_SOURCE } from './domain.js';
+import { errorMessage, MAP_SOURCE } from './domain.js';
 import { browse, detail, publicStats, preview, rememberPublicMetadata } from './upstream.js';
+import {
+  MAX_JSON_BODY_BYTES,
+  SizeLimitExceededError,
+  assertResponseWithinLimit,
+  containedAssetPath,
+  decodedPathSegment,
+  isPublicCourseId,
+  isReadMethod,
+  isRoomCode,
+  isWriteMethod,
+  parsePublicCourseIdList,
+  readJsonObject,
+} from './request-guards.js';
 import { randomInt } from 'node:crypto';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
 
 const port = Number(process.env.PORT || 8789);
 const root = path.resolve(import.meta.dir, '../web');
@@ -50,6 +62,39 @@ for (const id of courseIndex.keys()) {
 }
 const response = (data: unknown, status = 200) => Response.json(data, { status });
 const origin = new URL(process.env.BP_PUBLIC_ORIGIN ?? 'http://127.0.0.1:' + port).origin;
+const READ_METHODS = ['GET', 'HEAD'] as const;
+const WRITE_METHODS = ['POST'] as const;
+const methodNotAllowed = (allowed: readonly string[]) =>
+  new Response('Method not allowed', {
+    status: 405,
+    headers: { allow: allowed.join(', ') },
+  });
+/**
+ * Content Security Policy, directive by directive. Every relaxation below was
+ * read off what the pinned original client actually loads, so none of them can
+ * be dropped without breaking the game:
+ *
+ * - `default-src 'self' data: blob:` — the fallback for anything not named
+ *   below; `data:` and `blob:` cover generated textures and the module worker.
+ * - `script-src 'unsafe-inline'` — the original bundles inject module scripts.
+ * - `script-src 'unsafe-eval'` — the bundle's scene/physics code is compiled by
+ *   its bundler's dynamic-evaluation path.
+ * - `script-src 'wasm-unsafe-eval' blob:` — Draco and meshopt ship WebAssembly
+ *   decoders and their worker is created from a `blob:` URL.
+ * - `style-src 'unsafe-inline'` — React sets inline `style` attributes.
+ * - `img-src 'self' data: blob:` — thumbnails come from `/api/preview`, and
+ *   generated art arrives as `data:`/`blob:` URLs.
+ * - `connect-src 'self' <ws origin>` — HTTP calls and the party WebSocket are
+ *   both same-origin; the WebSocket scheme must be listed separately.
+ * - `worker-src 'self' blob:` — the decoders run in blob workers.
+ * - `font-src 'self' data:` — the UI font is served from `/assets`.
+ * - `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'` — nothing
+ *   embeds a plugin, rewrites the base URL or frames the page.
+ */
+const csp =
+  "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' " +
+  origin.replace(/^http/, 'ws') +
+  "; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
 const admin = createAdmin({
   origin,
   passwordHash: process.env.BP_ADMIN_PASSWORD_HASH,
@@ -57,10 +102,6 @@ const admin = createAdmin({
   courseCount,
   eventLog: process.env.BP_EVENT_LOG,
 });
-const csp =
-  "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' " +
-  origin.replace(/^http/, 'ws') +
-  "; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
 const page = (markup: string) =>
   new Response(markup, {
     headers: {
@@ -68,32 +109,34 @@ const page = (markup: string) =>
       'content-security-policy': csp,
       'referrer-policy': 'no-referrer',
       'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
     },
   });
-const jsonBody = async (request: Request): Promise<Record<string, unknown>> => {
-  if (Number(request.headers.get('content-length')) > 1000000) {
-    throw new Error('Request too large');
-  }
-  const data: unknown = await request.json();
-  if (!isRecord(data)) {
-    throw new Error('Expected a JSON object');
-  }
-  return data;
-};
 const html =
   '<!doctype html><html lang="en" class="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Party · Better Party</title><link rel="icon" href="/favicon.ico" type="image/x-icon"><link rel="stylesheet" href="/assets/styles-S28F_fms.css"><body class="bp-page"><div id="app"></div><script type="module" src="/assets/index-DFMxt6BL.js"></script></body></html>';
 const server = Bun.serve<{ room: Room; uid: string | null }>({
   hostname: '127.0.0.1',
   port,
-  maxRequestBodySize: 1024 * 1024,
+  maxRequestBodySize: MAX_JSON_BODY_BYTES,
   async fetch(req, httpServer) {
     const url = new URL(req.url);
     const pathname = url.pathname;
     if (req.headers.get('host') !== new URL(origin).host) {
       return new Response('Invalid host', { status: 403 });
     }
+    // Every route is a read or a create: an unexpected verb (PUT, DELETE, PATCH,
+    // OPTIONS) must not fall through to a path-only test and be answered as if it
+    // were a read.
+    if (!isReadMethod(req.method) && !isWriteMethod(req.method)) {
+      return methodNotAllowed([...READ_METHODS, ...WRITE_METHODS]);
+    }
+    const readOnly = isReadMethod(req.method);
     if (pathname.startsWith('/ws/party/')) {
-      const room = rooms.get(pathname.split('/').at(-1) ?? '');
+      if (!readOnly) {
+        return methodNotAllowed(READ_METHODS);
+      }
+      const code = decodedPathSegment(pathname.slice('/ws/party/'.length));
+      const room = isRoomCode(code) ? rooms.get(code) : undefined;
       if (!room || req.headers.get('origin') !== origin) {
         return new Response('Room not found or invalid origin', { status: 403 });
       }
@@ -102,15 +145,24 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
         : new Response('Bad upgrade', { status: 400 });
     }
     if (pathname === '/favicon.ico') {
-      return new Response(Bun.file(path.join(root, 'favicon.ico')), {
-        headers: {
-          'content-type': 'image/x-icon',
-          'cache-control': 'public, max-age=3600',
-          'x-content-type-options': 'nosniff',
-        },
-      });
+      if (!readOnly) {
+        return methodNotAllowed(READ_METHODS);
+      }
+      const favicon = containedAssetPath(root, pathname);
+      return favicon
+        ? new Response(Bun.file(favicon), {
+            headers: {
+              'content-type': 'image/x-icon',
+              'cache-control': 'public, max-age=3600',
+              'x-content-type-options': 'nosniff',
+            },
+          })
+        : new Response('Not found', { status: 404 });
     }
     if (pathname === '/health') {
+      if (!readOnly) {
+        return methodNotAllowed(READ_METHODS);
+      }
       return response({ ok: true, rooms: rooms.size, maps: courseCount() });
     }
     if (req.method === 'POST' && req.headers.get('origin') !== origin) {
@@ -120,7 +172,10 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
       if (pathname.startsWith('/api/admin/')) {
         return await admin(req, pathname);
       }
-      if (req.method === 'GET' && pathname === '/admin') {
+      if (pathname === '/admin') {
+        if (!readOnly) {
+          return methodNotAllowed(READ_METHODS);
+        }
         return new Response(Bun.file(new URL('./admin.html', import.meta.url)), {
           headers: {
             'content-type': 'text/html; charset=utf-8',
@@ -133,7 +188,10 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
           },
         });
       }
-      if (req.method === 'GET' && (pathname === '/admin.css' || pathname === '/admin.js')) {
+      if (pathname === '/admin.css' || pathname === '/admin.js') {
+        if (!readOnly) {
+          return methodNotAllowed(READ_METHODS);
+        }
         const file =
           pathname === '/admin.css'
             ? new URL('./admin.css', import.meta.url)
@@ -142,7 +200,10 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
           headers: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
         });
       }
-      if (pathname === '/api/create' && req.method === 'POST') {
+      if (pathname === '/api/create') {
+        if (req.method !== 'POST') {
+          return methodNotAllowed(WRITE_METHODS);
+        }
         if (rooms.size >= 100) {
           return response({ error: 'Room limit reached' }, 429);
         }
@@ -164,8 +225,12 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
         logEvent('room_created', { room: room.code });
         return response({ code, hostToken: room.hostToken });
       }
-      if (pathname.startsWith('/api/room/') && req.method === 'GET') {
-        const room = rooms.get(pathname.slice(10));
+      if (pathname.startsWith('/api/room/')) {
+        if (!readOnly) {
+          return methodNotAllowed(READ_METHODS);
+        }
+        const code = decodedPathSegment(pathname.slice('/api/room/'.length));
+        const room = isRoomCode(code) ? rooms.get(code) : undefined;
         return room
           ? response({
               code: room.code,
@@ -175,20 +240,23 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
             })
           : response({ error: 'Room does not exist' }, 404);
       }
-      if (pathname === '/api/join' && req.method === 'POST') {
-        const requestBody = await jsonBody(req);
-        const room = rooms.get(typeof requestBody.code === 'string' ? requestBody.code : '');
+      if (pathname === '/api/join') {
+        if (req.method !== 'POST') {
+          return methodNotAllowed(WRITE_METHODS);
+        }
+        const requestBody = await readJsonObject(req);
+        const room = isRoomCode(requestBody.code) ? rooms.get(requestBody.code) : undefined;
         if (!room) {
           return response({ error: 'Room does not exist' }, 404);
         }
         return response(room.issue(requestBody.name, requestBody.uid, requestBody.session));
       }
-      if (
-        (pathname === '/api/import' || pathname === '/api/import-playlist') &&
-        req.method === 'POST'
-      ) {
-        const requestBody = await jsonBody(req);
-        const room = rooms.get(typeof requestBody.code === 'string' ? requestBody.code : '');
+      if (pathname === '/api/import' || pathname === '/api/import-playlist') {
+        if (req.method !== 'POST') {
+          return methodNotAllowed(WRITE_METHODS);
+        }
+        const requestBody = await readJsonObject(req);
+        const room = isRoomCode(requestBody.code) ? rooms.get(requestBody.code) : undefined;
         const player = room?.players.get(
           typeof requestBody.uid === 'string' ? requestBody.uid : '',
         );
@@ -204,24 +272,24 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
           return response({ error: 'Only a connected lobby host may import maps' }, 403);
         }
         if (pathname === '/api/import') {
-          if (typeof requestBody.id !== 'string') {
+          if (!isPublicCourseId(requestBody.id)) {
             return response({ error: 'Invalid course ID' }, 400);
           }
           const { spec: _spec, ...meta } = await fetchPublicMap(requestBody.id, {
             saved: requestBody.saved === true,
           });
+          assertResponseWithinLimit(meta);
           logEvent('course_imported', { room: room.code, uid: player.uid, courseId: meta.id });
           return response(meta);
         }
-        if (
-          !Array.isArray(requestBody.ids) ||
-          requestBody.ids.length < 1 ||
-          requestBody.ids.some((id) => typeof id !== 'string' || !/^[a-zA-Z0-9_-]{5,64}$/.test(id))
-        ) {
-          return response({ error: 'Invalid saved playlist' }, 400);
+        let playlistIds: string[];
+        try {
+          playlistIds = parsePublicCourseIdList(requestBody.ids);
+        } catch (error) {
+          return response({ error: errorMessage(error) }, 400);
         }
         const items = [];
-        for (const id of new Set<string>(requestBody.ids)) {
+        for (const id of new Set<string>(playlistIds)) {
           items.push(await fetchPublicMap(id, { saved: true }));
         }
         if (!allowed()) {
@@ -229,18 +297,20 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
         }
         room.configure(player.ws, {
           mapSource: MAP_SOURCE.PICKED,
-          selectedHoleIds: requestBody.ids,
-          holes: requestBody.ids.length,
+          selectedHoleIds: playlistIds,
+          holes: playlistIds.length,
         });
         logEvent('playlist_imported', {
           room: room.code,
           uid: player.uid,
           courses: items.map(({ id }) => id),
         });
-        return response({ holes: items.map(({ spec, ...meta }) => meta) });
+        const playlistMeta = items.map(({ spec, ...meta }) => meta);
+        assertResponseWithinLimit(playlistMeta);
+        return response({ holes: playlistMeta });
       }
       if (pathname === '/api/generate-playlist' && req.method === 'POST') {
-        const body = await jsonBody(req);
+        const body = await readJsonObject(req);
         const room = rooms.get(typeof body.code === 'string' ? body.code : '');
         const player = room?.players.get(typeof body.uid === 'string' ? body.uid : '');
         const authorized = () =>
@@ -327,24 +397,50 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
         return page(await Bun.file(new URL('./leaderboard.html', import.meta.url)).text());
       }
       if (pathname === '/api/catalog') {
+        if (!readOnly) {
+          return methodNotAllowed(READ_METHODS);
+        }
         const catalogPage = await browse(Object.fromEntries(url.searchParams));
+        // A relay of an upstream page: bounded rather than trusted, because the
+        // field lengths upstream are not ours to control.
+        assertResponseWithinLimit(catalogPage);
         return response(catalogPage);
       }
 
-      if (pathname.startsWith('/api/preview/') && req.method === 'GET') {
-        return await preview(decodeURIComponent(pathname.slice(13)));
+      if (pathname.startsWith('/api/preview/')) {
+        if (!readOnly) {
+          return methodNotAllowed(READ_METHODS);
+        }
+        const courseId = decodedPathSegment(pathname.slice('/api/preview/'.length));
+        if (!isPublicCourseId(courseId)) {
+          return response({ error: 'Invalid course ID' }, 400);
+        }
+        return await preview(courseId);
       }
       if (pathname.startsWith('/api/map/')) {
-        const course = courseIndex.get(decodeURIComponent(pathname.slice(9)));
+        if (!readOnly) {
+          return methodNotAllowed(READ_METHODS);
+        }
+        const courseId = decodedPathSegment(pathname.slice('/api/map/'.length));
+        const course = isPublicCourseId(courseId) ? courseIndex.get(courseId) : undefined;
         return course?.spec ? response(course) : response({ error: 'Map missing' }, 404);
       }
       if (pathname === '/home' || pathname === '/') {
+        if (!readOnly) {
+          return methodNotAllowed(READ_METHODS);
+        }
         return page(await Bun.file(new URL('./home.html', import.meta.url)).text());
       }
       if (pathname === '/party') {
+        if (!readOnly) {
+          return methodNotAllowed(READ_METHODS);
+        }
         return page(await Bun.file(new URL('./home.html', import.meta.url)).text());
       }
       if (/^\/party\/[A-Z2-9]{5}$/.test(pathname)) {
+        if (!readOnly) {
+          return methodNotAllowed(READ_METHODS);
+        }
         return page(html);
       }
       if (pathname.startsWith('/_serverFn/')) {
@@ -357,9 +453,12 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
         return response({ error: 'Official API disabled' }, 404);
       }
       if (/^\/(assets|models|sfx|sky)\//.test(pathname)) {
-        const full = path.resolve(root, '.' + decodeURIComponent(pathname));
-        if (full.startsWith(root + '/') && existsSync(full)) {
-          return new Response(Bun.file(full), {
+        if (!readOnly) {
+          return methodNotAllowed(READ_METHODS);
+        }
+        const asset = containedAssetPath(root, pathname);
+        if (asset) {
+          return new Response(Bun.file(asset), {
             headers: { 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' },
           });
         }
@@ -385,6 +484,9 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
           : 'other',
         method: req.method,
       });
+      if (error instanceof SizeLimitExceededError) {
+        return response({ error: errorMessage(error) }, error.status);
+      }
       return response({ error: errorMessage(error) }, 400);
     }
   },
