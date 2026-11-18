@@ -696,3 +696,95 @@ body:has(> #app) {
   font-size: 13px;
   line-height: 1.4;
 }
+
+.bp-course-vote {
+  display: grid;
+  gap: 8px;
+  text-align: center;
+}
+.bp-vote-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+.bp-vote-course {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background: #ffffff0b;
+  padding: 8px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+.bp-vote-course:hover {
+  background: #ffffff1c;
+}
+.bp-vote-course[aria-pressed='true'] {
+  border-color: #34d399;
+  background: #34d39920;
+}
+.bp-vote-course:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+.bp-vote-course img {
+  width: 100%;
+  aspect-ratio: 1200/630;
+  object-fit: cover;
+  border-radius: 7px;
+  background: #ffffff0a;
+}
+.bp-vote-course strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+.bp-vote-meta {
+  font-size: 11px;
+  color: #ffffffa8;
+  overflow-wrap: anywhere;
+}
+.bp-vote-tally {
+  font-size: 12px;
+  font-weight: 700;
+  color: #a7f3d0;
+  margin-top: auto;
+  padding-top: 4px;
+}
+.bp-hole-clock {
+  background: #0009;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.bp-player-time {
+  color: #a7f3d0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.bp-cell-time {
+  display: block;
+  color: #a7f3d0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 520px) {
+  .bp-vote-grid {
+    grid-template-columns: 1fr;
+  }
+  .bp-vote-course {
+    display: grid;
+    grid-template-columns: 42% 1fr;
+  }
+  .bp-vote-course img {
+    grid-row: span 4;
+    align-self: center;
+  }
+}

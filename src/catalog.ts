@@ -6,7 +6,7 @@ import {
   type PublicCourse,
   type RoomConfig,
 } from './domain.js';
-import { browse, detail } from './upstream.js';
+import { browse, detail, publicRating } from './upstream.js';
 import { currentDailyNumber, validateCourse } from './upstream/client-adapter.js';
 import { chooseRandom } from './random-selection.js';
 
@@ -40,6 +40,7 @@ async function retrievePublicMap(id: string, options?: { saved?: boolean }): Pro
     title: mapDetail.title,
     author: mapDetail.author || '',
     par: specification.par,
+    ...publicRating(id),
     spec: specification,
   };
 }
@@ -57,13 +58,14 @@ export async function prepareMatch(
   config: RoomConfig,
   seen: string[] = [],
 ): Promise<PreparedMatch> {
+  const voting = config.mapSource === MAP_SOURCE.RANDOM && config.courseVoting;
   let selectedIds = config.selectedHoleIds.slice();
   let nextHistory = seen;
 
   if (config.mapSource === MAP_SOURCE.RANDOM) {
     const selection = await chooseRandom({
       browse,
-      count: config.holes,
+      count: voting ? 1 + 3 * (config.holes - 1) : config.holes,
       seen,
       excludeDaily: config.excludeDaily,
       currentDay: currentDailyNumber(),
@@ -81,15 +83,33 @@ export async function prepareMatch(
   const results = await Promise.allSettled(
     initialIds.map((id) => retrievePublicMap(id, { saved: manual })),
   );
-  const specifications = [];
+  const specifications: PublicCourse[] = [];
   for (const result of results) {
     if (result.status === 'rejected') {
       throw result.reason;
     }
     const course = result.value;
     courseEntries.set(course.id, course);
-    specifications.push(structuredClone(course.spec));
+    specifications.push(course);
   }
 
-  return { ids: selectedIds, specs: specifications, seen: nextHistory };
+  if (voting) {
+    const ballots = [
+      [specifications[0]],
+      ...Array.from({ length: config.holes - 1 }, (_unused, index) =>
+        specifications.slice(1 + index * 3, 4 + index * 3),
+      ),
+    ];
+    return {
+      ids: ballots.map((choices) => choices[0].id),
+      specs: ballots.map((choices) => structuredClone(choices[0].spec)),
+      ballots,
+      seen: nextHistory,
+    };
+  }
+  return {
+    ids: selectedIds,
+    specs: specifications.map((course) => structuredClone(course.spec)),
+    seen: nextHistory,
+  };
 }

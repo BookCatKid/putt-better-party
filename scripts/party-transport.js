@@ -44,6 +44,7 @@ function resolveTransportBindings(injected) {
     sceneReadyLevelId: provided.sceneReadyLevelId ?? transportSceneReadyLevelId,
     isSpectator: provided.isSpectator ?? isTransportSpectator,
     ack: provided.ack ?? bpAck,
+    updateVote: provided.updateVote ?? (provided.partyStore ? () => {} : bpReceiveVote),
   };
 }
 
@@ -296,6 +297,9 @@ function connectBetterParty(code, identity, options = {}) {
         bind.setRoster(message.players);
         receivedRoster = true;
         completeHandshake();
+        return;
+      case 'course-vote':
+        bind.updateVote(message);
         return;
       case 'board':
         bind.setBoard({

@@ -28,7 +28,11 @@ function BpGuestPlaylist() {
             ]),
           ),
         )
-      : createElement('p', { className: 'text-xs text-white/70' }, 'Random holes'),
+      : createElement(
+          'p',
+          { className: 'text-xs text-white/70' },
+          config.courseVoting ? 'Random courses · vote between holes' : 'Random holes',
+        ),
     createElement(
       'p',
       { className: 'mt-2 text-xs text-white/60' },
@@ -98,12 +102,27 @@ function BpScorecard() {
                       title: round.title + ' · ' + (score?.status ?? round.status),
                       className: score?.status === 'holed' ? 'bp-holed' : '',
                     },
-                    round.status === 'skipped'
-                      ? 'Skip'
-                      : (score?.strokes ?? (score?.status === 'eliminated' ? 'DNF' : '—')),
+                    [
+                      round.status === 'skipped'
+                        ? 'Skip'
+                        : (score?.strokes ?? (score?.status === 'eliminated' ? 'DNF' : '—')),
+                      score?.timeMs != null &&
+                        createElement(
+                          'small',
+                          { key: 'time', className: 'bp-cell-time' },
+                          bpFormatTime(score.timeMs),
+                        ),
+                    ],
                   );
                 }),
-                createElement('td', {}, player.totalStrokes),
+                createElement('td', {}, [
+                  player.totalStrokes,
+                  createElement(
+                    'small',
+                    { key: 'time', className: 'bp-cell-time' },
+                    bpFormatTime(player.totalTimeMs),
+                  ),
+                ]),
               ]),
             ),
           ),
@@ -157,6 +176,17 @@ function BpLobbyOptions() {
         ].map(([value, label]) => createElement('option', { key: value, value }, label)),
       ),
     ]),
+    config.mapSource === 'random' &&
+      createElement('label', {}, [
+        createElement('span', {}, 'Vote on next course'),
+        createElement('input', {
+          type: 'checkbox',
+          'aria-label': 'Vote on next course',
+          checked: !!config.courseVoting,
+          disabled: preparing || !connected,
+          onChange: (event) => updateBetterPartyConfig({ courseVoting: event.target.checked }),
+        }),
+      ]),
     createElement('label', {}, [
       createElement('span', {}, 'Lock party'),
       createElement('input', {
@@ -347,5 +377,139 @@ function BpSpectating() {
   return createElement('div', { className: 'bp-spectating', role: 'status' }, [
     createElement('p', { className: 'bp-spectating-title' }, 'Spectating'),
     createElement('p', { className: 'bp-spectating-detail' }, detail),
+  ]);
+}
+
+// The original party runtime already presents server-relative start and end times.
+function bpFormatTime(ms) {
+  if (!Number.isFinite(ms)) {
+    return '—';
+  }
+  const milliseconds = Math.floor(Math.max(0, ms));
+  return (
+    Math.floor(milliseconds / 60000) +
+    ':' +
+    String(Math.floor(milliseconds / 1000) % 60).padStart(2, '0') +
+    '.' +
+    String(milliseconds % 1000).padStart(3, '0')
+  );
+}
+
+function BpPlayerTime({ row, total }) {
+  return BetterPartyReact.createElement(
+    'span',
+    {
+      className: 'bp-player-time',
+      title: total ? 'Total scored time' : 'Hole time',
+    },
+    bpFormatTime(total ? row.totalTimeMs : row.holeTimeMs),
+  );
+}
+
+function BpHoleClock() {
+  const phase = useBetterPartyState(betterPartyStore, (state) => state.phase);
+  const start = useBetterPartyState(betterPartyStore, (state) => state.startAt);
+  const end = useBetterPartyState(betterPartyStore, (state) => state.timerEndsAt);
+  const role = useBetterPartyState(betterPartyStore, (state) => state.selfRole);
+  const board = useBetterPartyState(betterPartyStore, (state) => state.board);
+  const uid = useBetterPartyState(betterPartyStore, (state) => state.self?.uid);
+  const [now, setNow] = BetterPartyReact.useState(Date.now);
+  BetterPartyReact.useEffect(() => {
+    if (phase !== 'playing') {
+      return;
+    }
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 100);
+    return () => clearInterval(timer);
+  }, [phase, start]);
+  if (phase !== 'playing' || role === 'spectator' || !start) {
+    return null;
+  }
+  const player = board?.standings?.find((entry) => entry.uid === uid);
+  const elapsed = player?.holeTimeMs ?? Math.max(0, Math.min(now, end || now) - start);
+  return BetterPartyReact.createElement(
+    'p',
+    { className: 'bp-hole-clock' },
+    'Time ' + bpFormatTime(elapsed),
+  );
+}
+
+function BpCourseVote() {
+  const vote = useBetterPartyState(betterPartyStore, (state) => state.vote);
+  const uid = useBetterPartyState(betterPartyStore, (state) => state.self?.uid);
+  const connected = useBetterPartyState(betterPartyStore, (state) => state.bpConnected);
+  const [now, setNow] = BetterPartyReact.useState(Date.now);
+  BetterPartyReact.useEffect(() => {
+    if (!vote?.id) {
+      return;
+    }
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 200);
+    return () => clearInterval(timer);
+  }, [vote?.id]);
+  if (!vote) {
+    return null;
+  }
+  const seconds = Math.max(0, Math.ceil((vote.endsAt - now) / 1000));
+  const selected = vote.ballots?.[uid];
+  const createElement = BetterPartyReact.createElement;
+  return createElement('section', { className: 'bp-course-vote' }, [
+    createElement(
+      'h3',
+      { key: 'title', className: 'text-lg font-black' },
+      'Vote for hole ' + (vote.target + 1),
+    ),
+    createElement(
+      'p',
+      { key: 'remaining', className: 'text-xs text-white/65' },
+      seconds ? seconds + 's remaining · Ties decided randomly' : 'Choosing the next course…',
+    ),
+    createElement(
+      'div',
+      { key: 'choices', className: 'bp-vote-grid' },
+      vote.choices.map((choice) =>
+        createElement(
+          'button',
+          {
+            key: choice.id,
+            type: 'button',
+            className: 'bp-vote-course',
+            'aria-pressed': selected === choice.id,
+            disabled: !connected || seconds === 0,
+            onClick: () => bpCastVote(choice.id),
+          },
+          [
+            createElement('img', {
+              key: 'preview',
+              src: '/api/preview/' + encodeURIComponent(choice.id),
+              alt: '',
+              loading: 'eager',
+            }),
+            createElement('strong', { key: 'title' }, choice.title),
+            createElement(
+              'span',
+              { key: 'author', className: 'bp-vote-meta' },
+              choice.author || 'Community course',
+            ),
+            createElement(
+              'span',
+              { key: 'meta', className: 'bp-vote-meta' },
+              'Par ' +
+                choice.par +
+                (Number.isFinite(choice.ratingAvg)
+                  ? ' · ★ ' + choice.ratingAvg.toFixed(1)
+                  : ' · Unrated'),
+            ),
+            createElement(
+              'span',
+              { key: 'tally', className: 'bp-vote-tally' },
+              choice.votes +
+                (choice.votes === 1 ? ' vote' : ' votes') +
+                (selected === choice.id ? ' · Your vote' : ''),
+            ),
+          ],
+        ),
+      ),
+    ),
   ]);
 }

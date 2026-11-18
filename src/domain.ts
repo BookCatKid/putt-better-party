@@ -16,6 +16,7 @@ export interface RoomConfig {
   excludeDaily: boolean;
   randomHoles: number;
   lateJoin: LateJoinPolicy;
+  courseVoting: boolean;
 }
 
 /** The original game owns the rest of the specification's schema. */
@@ -30,6 +31,8 @@ export interface CourseMetadata {
   title?: string;
   author?: string;
   par?: number;
+  ratingAvg?: number;
+  ratingCount?: number;
 }
 export interface CatalogEntry extends CourseMetadata {
   spec?: CourseSpecification;
@@ -53,6 +56,7 @@ export interface PreparedMatch {
   ids: string[];
   specs: CourseSpecification[];
   seen?: string[];
+  ballots?: PublicCourse[][];
 }
 export type PrepareMatch = (
   config: RoomConfig,

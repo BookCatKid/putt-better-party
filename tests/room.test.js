@@ -1265,7 +1265,7 @@ test('next-hole late arrivals spectate through a restart and enter only the foll
     expect(late.player.role).toBe('player');
     expect(room.initialPlayers).toBe(2);
     expect(room.roundHistory[0].rows).toEqual([
-      { uid: host.identity.uid, strokes: 2, status: 'holed' },
+      { uid: host.identity.uid, strokes: 2, status: 'holed', timeMs: expect.any(Number) },
     ]);
     expect(late.player.totalStrokes).toBe(0);
     expect(late.player.holesSurvived).toBe(0);
@@ -1347,5 +1347,174 @@ test('never keeps a newcomer spectating until rematch even as holes advance', as
     expect(late.player.role).toBe('player');
   } finally {
     room.dispose();
+  }
+});
+
+test('server-recorded hole times break equal stroke totals, not primary stroke or survival ranking', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 1, results: 1 });
+  try {
+    const slower = enter(room, 'Alpha', true);
+    const faster = enter(room, 'Zulu');
+    const moreStrokes = enter(room, 'Beta');
+    room.handle(slower.ws, {
+      t: 'config',
+      config: { mapSource: 'picked', selectedHoleIds: ['p', 'q'], elimination: false },
+    });
+    room.handle(slower.ws, { t: 'start' });
+    await waitForRoom(() => room.phase === 'playing');
+    // Server time only; ignore a client-supplied time.
+    room.startsAt = Date.now() - 1000;
+    room.handle(moreStrokes.ws, { f: 1, s: 3, p: 3, timeMs: 0 });
+    room.startsAt -= 1000;
+    room.handle(faster.ws, { f: 1, s: 2, p: 3, timeMs: 0 });
+    const finish = faster.player.holeTimeMs;
+    expect(finish).toBeGreaterThanOrEqual(2000);
+    room.startsAt -= 1000;
+    room.handle(slower.ws, { f: 1, s: 2, p: 3 });
+    expect(room.roundHistory[0].rows.find((row) => row.uid === faster.identity.uid).timeMs).toBe(
+      finish,
+    );
+    expect(room.standings().map((row) => row.uid)).toEqual([
+      faster.identity.uid,
+      slower.identity.uid,
+      moreStrokes.identity.uid,
+    ]);
+    await waitForRoom(() => room.phase === 'playing' && room.holeIndex === 1);
+    expect(faster.player.holeTimeMs).toBeUndefined();
+    expect(faster.player.totalTimeMs).toBe(finish);
+    room.startsAt = Date.now() - 5000;
+    room.handle(faster.ws, { f: 1, s: 1, p: 2 });
+    room.handle(slower.ws, {
+      t: 'host-action',
+      action: 'restart',
+      matchId: room.matchId,
+      holeIndex: room.holeIndex,
+    });
+    expect(faster.player.holeTimeMs).toBeUndefined();
+    expect(faster.player.totalTimeMs).toBe(finish);
+    await waitForRoom(() => room.phase === 'playing');
+    room.handle(faster.ws, { t: 'forfeit' });
+    room.handle(slower.ws, { f: 1, s: 2, p: 2 });
+    room.handle(moreStrokes.ws, { f: 1, s: 2, p: 2 });
+    await waitForRoom(() => room.phase === 'final');
+    expect(faster.player.totalTimeMs).toBe(finish + room.roundTimerMs);
+    expect(room.roundHistory[1].rows.find((row) => row.uid === faster.identity.uid)).toMatchObject({
+      status: 'timeout',
+      timeMs: room.roundTimerMs,
+    });
+    expect(room.standings()[0].uid).toBe(slower.identity.uid);
+  } finally {
+    room.dispose();
+  }
+});
+
+const votingCourse = (id) => ({
+  id,
+  title: id,
+  author: 'Maker',
+  ratingAvg: 4.5,
+  ratingCount: 8,
+  par: 3,
+  spec: { ...spec, id, name: id },
+});
+const votingBallots = [
+  [votingCourse('first')],
+  ['option-a', 'option-b', 'option-c'].map(votingCourse),
+  ['option-d', 'option-e', 'option-f'].map(votingCourse),
+];
+function votingRoom() {
+  return new Room('ABCDE', maps, {
+    countdown: 1,
+    results: 1,
+    votingMs: 1000,
+    prepareMatch: async (config) => {
+      const ballots = structuredClone(votingBallots.slice(0, config.holes));
+      return {
+        ids: ballots.map((choices) => choices[0].id),
+        specs: ballots.map((choices) => choices[0].spec),
+        ballots,
+      };
+    },
+  });
+}
+
+test('optional course voting accepts one revisable vote per connected identity, rejects invalid/stale ballots, loads winner and resets timing', async () => {
+  const room = votingRoom();
+  try {
+    const host = enter(room, 'Host', true);
+    const guest = enter(room, 'Guest');
+    expect(room.config.courseVoting).toBe(false);
+    room.handle(guest.ws, { t: 'config', config: { courseVoting: true } });
+    expect(room.config.courseVoting).toBe(false);
+    room.handle(host.ws, {
+      t: 'config',
+      config: { courseVoting: true, holes: 3, elimination: false },
+    });
+    expect(room.config.courseVoting).toBe(true);
+    room.handle(host.ws, { t: 'start' });
+    await waitForRoom(() => room.phase === 'playing');
+    room.handle(host.ws, { f: 1, s: 1, p: 3 });
+    room.handle(guest.ws, { f: 1, s: 2, p: 3 });
+    await waitForRoom(() => !!room.vote);
+    const voteId = room.vote.id;
+    const cast = (player, courseId, id = voteId) =>
+      room.handle(player.ws, { t: 'course-vote', voteId: id, courseId });
+    expect(room.snapshot().vote.choices.map((choice) => choice.id)).toEqual([
+      'option-a',
+      'option-b',
+      'option-c',
+    ]);
+    expect(room.snapshot().vote.choices[0]).toMatchObject({ ratingAvg: 4.5, par: 3, votes: 0 });
+    cast(host, 'option-b', 'old');
+    cast(host, 'not-an-option');
+    expect(room.voteSnapshot().ballots).toEqual({});
+    cast(host, 'option-a');
+    cast(host, 'option-b');
+    cast(host, 'option-b');
+    cast(guest, 'option-b');
+    expect(room.voteSnapshot().choices.map((choice) => choice.votes)).toEqual([0, 2, 0]);
+    const late = enter(room, 'Late');
+    cast(late, 'option-c');
+    room.close(late.ws);
+    expect(room.voteSnapshot().choices.map((choice) => choice.votes)).toEqual([0, 2, 0]);
+    expect(
+      host.ws.frames.some(
+        (frame) => frame.t === 'course-vote' && frame.vote.choices[1].votes === 2,
+      ),
+    ).toBe(true);
+    room.resolveVote();
+    await waitForRoom(() => room.phase === 'playing' && room.holeIndex === 1);
+    expect(room.holeIds[1]).toBe('option-b');
+    expect(room.snapshot().currentMap.id).toBe('option-b');
+    expect(room.vote).toBeNull();
+    expect(host.player.holeTimeMs).toBeUndefined();
+    expect(room.roundHistory[0].rows).toHaveLength(2);
+    room.handle(host.ws, { f: 1, s: 1, p: 3 });
+    room.handle(guest.ws, { f: 1, s: 2, p: 3 });
+    await waitForRoom(() => !!room.vote);
+    cast(host, 'option-d', voteId);
+    expect(room.voteSnapshot().ballots).toEqual({});
+    // No votes: uniformly choose from the valid options.
+    room.resolveVote();
+    expect(['option-d', 'option-e', 'option-f']).toContain(room.holeIds[2]);
+    expect(room.snapshot().vote).toBeNull();
+  } finally {
+    room.dispose();
+  }
+});
+
+test('manual playlists disable course voting and saved randomized voting recovers', () => {
+  const room = new Room('ABCDE', maps);
+  const restored = new Room('ABCDE', maps);
+  try {
+    const host = enter(room, 'Host', true);
+    room.handle(host.ws, { t: 'config', config: { courseVoting: true } });
+    restored.restore(room.checkpoint());
+    expect(restored.config.courseVoting).toBe(true);
+    room.handle(host.ws, { t: 'config', config: { mapSource: 'picked', selectedHoleIds: ['p'] } });
+    expect(room.config.courseVoting).toBe(false);
+  } finally {
+    room.dispose();
+    restored.dispose();
   }
 });

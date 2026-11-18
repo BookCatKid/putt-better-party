@@ -167,7 +167,8 @@ const isTransportSpectator = _e;
     )
     return (
         "import{bpConnection,bpAck,bpScenePrepared,transportSceneReadyLevelId,"
-        'receiveTransportHostToken,clearTransportHostToken}from"./runtime-DL2fiDAQ.js";' + source
+        'receiveTransportHostToken,clearTransportHostToken,bpReceiveVote}from"./runtime-DL2fiDAQ.js";'
+        + source
     )
 
 
@@ -178,17 +179,17 @@ def runtime_patch(s):
     s = replace_once(
         s,
         "active:!0,code:e,hostToken:n,self:t,selfRole:",
-        "active:!0,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
+        "active:!0,vote:null,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
     )
     s = replace_once(
         s,
         "active:!1,selfRole:",
-        "active:!1,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,selfRole:",
+        "active:!1,vote:null,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,selfRole:",
     )
     s = replace_once(
         s,
         "phase:e.phase,holeIndex:e.holeIndex",
-        "bpInitialSnapshot:true,recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,awaitingPlayers:e.awaitingPlayers??0,nextError:e.nextError??null,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
+        "vote:e.vote?{...e.vote,endsAt:Date.now()+e.vote.endsAt-e.now}:null,bpInitialSnapshot:true,recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,awaitingPlayers:e.awaitingPlayers??0,nextError:e.nextError??null,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
     )
     s = replace_once(
         s,
@@ -207,7 +208,7 @@ patch("runtime-DL2fiDAQ.js", runtime_patch)
 
 
 def game_patch(s):
-    s = 'import{bpHostAction,bpPickerBusy,bpLeaveParty}from"./runtime-DL2fiDAQ.js";' + s
+    s = 'import{bpHostAction,bpPickerBusy,bpLeaveParty,bpCastVote}from"./runtime-DL2fiDAQ.js";' + s
     a = s.index("function At(")
     b = s.index("function jt(", a)
     s = (
@@ -344,6 +345,39 @@ def game_patch(s):
         s,
         "children:[w&&T===`playing`&&i===`holed`",
         "children:[(0,J.jsx)(BpSpectating,{}),w&&!D&&T===`playing`&&i===`holed`",
+    )
+    # Extend the existing results panel and scoreboard, retaining the archived HUD.
+    s = replace_once(
+        s,
+        "o=j(R,e=>e.self?.uid);if(!e||t!==`hole-results`)",
+        "o=j(R,e=>e.self?.uid),bpVote=j(R,e=>e.vote);if(!e||t!==`hole-results`)",
+    )
+    s = replace_once(
+        s,
+        "className:`mx-6 max-h-[88dvh] w-full max-w-sm overflow-y-auto rounded-3xl bg-[#11272b]/95 p-6 text-center shadow-2xl`,children:[(0,J.jsxs)(`p`,{className:`text-xs font-bold uppercase tracking-widest text-white/45`",
+        "className:`mx-6 max-h-[88dvh] w-full ${bpVote?`max-w-3xl`:`max-w-sm`} overflow-y-auto rounded-3xl bg-[#11272b]/95 p-6 text-center shadow-2xl`,children:[(0,J.jsxs)(`p`,{className:`text-xs font-bold uppercase tracking-widest text-white/45`",
+    )
+    s = replace_once(
+        s,
+        "(0,J.jsx)(`p`,{className:`text-sm font-semibold text-white/60`,children:R.state.preparing?",
+        "bpVote?(0,J.jsx)(BpCourseVote,{}):(0,J.jsx)(`p`,{className:`text-sm font-semibold text-white/60`,children:R.state.preparing?",
+    )
+    for name, total in [("Ft", False), ("Lt", False), ("Ht", True)]:
+        a = s.index("function " + name + "(")
+        b = s.index("function ", a + 10)
+        part = s[a:b]
+        part = replace_once(
+            part,
+            "children:[`⛳`,e.holesSurvived,` · `,e.totalStrokes]})",
+            "children:[`⛳`,e.holesSurvived,` · `,e.totalStrokes]}),(0,J.jsx)(BpPlayerTime,{row:e"
+            + (",total:true" if total else "")
+            + "})",
+        )
+        s = s[:a] + part + s[b:]
+    s = replace_once(
+        s,
+        "(0,J.jsx)(BpSpectating,{}),w&&!D",
+        "(0,J.jsx)(BpSpectating,{}),(0,J.jsx)(BpHoleClock,{}),w&&!D",
     )
     # Host menu is a sibling of the settings wrapper, not inside it.
     a = s.index("function It(")

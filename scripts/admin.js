@@ -100,23 +100,44 @@ function renderRooms() {
       room.elimination ? 'Elimination' : 'Stroke play',
       room.locked ? 'Locked' : 'Open',
       'Late join: ' + label(room.lateJoin),
+      room.courseVoting ? 'Course voting' : 'No voting',
       'Last active: ' + time(room.lastActivity),
     ];
     if (room.timerEndsAt) {
       info.push('Round ends: ' + time(room.timerEndsAt));
     }
     card.append(node('p', info.join(' · '), 'admin-room-info'));
+    if (room.vote) {
+      card.append(
+        node('h3', 'Course vote'),
+        table(
+          ['Course', 'Votes'],
+          room.vote.map((choice) => [choice.title, choice.votes]),
+        ),
+      );
+    }
     card.append(node('h3', 'Players'));
     if (room.players.length) {
       card.append(
         table(
-          ['Name', 'Role', 'Connection', 'Current strokes', 'Total', 'Holes'],
+          [
+            'Name',
+            'Role',
+            'Connection',
+            'Current strokes',
+            'Hole time',
+            'Total',
+            'Total time',
+            'Holes',
+          ],
           room.players.map((player) => [
             player.name + (player.isHost ? ' (host)' : ''),
             player.role,
             player.connected ? 'Connected' : 'Disconnected',
             player.strokes,
+            player.holeTimeMs == null ? '—' : (player.holeTimeMs / 1000).toFixed(3) + 's',
             player.totalStrokes,
+            (player.totalTimeMs / 1000).toFixed(3) + 's',
             player.holesSurvived,
           ]),
         ),
@@ -128,14 +149,19 @@ function renderRooms() {
       card.append(
         node('h3', 'Completed rounds'),
         table(
-          ['Hole', 'Course', 'Par', 'Status', 'Holed'],
-          room.rounds.map((round) => [
-            round.hole,
-            round.title,
-            round.par,
-            round.status,
-            round.completed,
-          ]),
+          ['Hole', 'Course', 'Player', 'Strokes', 'Time', 'Status'],
+          room.rounds.flatMap((round) =>
+            round.scores.length
+              ? round.scores.map((score) => [
+                  round.hole,
+                  round.title,
+                  score.name,
+                  score.strokes ?? '—',
+                  score.timeMs == null ? '—' : (score.timeMs / 1000).toFixed(3) + 's',
+                  score.status,
+                ])
+              : [[round.hole, round.title, '—', '—', '—', round.status]],
+          ),
         ),
       );
     }

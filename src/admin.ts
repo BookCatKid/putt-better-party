@@ -14,6 +14,7 @@ const EVENT_FIELDS = [
   'phase',
   'holeIndex',
   'strokes',
+  'timeMs',
   'previous',
   'courseTitle',
   'title',
@@ -54,6 +55,8 @@ export function adminRoom(room: Room) {
       alive: player.alive,
       strokes: room.players.get(uid)?.strokes ?? 0,
       totalStrokes: room.players.get(uid)?.totalStrokes ?? 0,
+      totalTimeMs: room.players.get(uid)?.totalTimeMs ?? 0,
+      holeTimeMs: room.players.get(uid)?.holeTimeMs ?? null,
       holesSurvived: room.players.get(uid)?.holesSurvived ?? 0,
     })),
     currentHole: room.phase === 'lobby' ? null : room.holeIndex + 1,
@@ -63,6 +66,8 @@ export function adminRoom(room: Room) {
     elimination: room.config.elimination,
     locked: room.config.locked,
     lateJoin: room.config.lateJoin,
+    courseVoting: room.config.courseVoting,
+    vote: room.voteSnapshot()?.choices.map(({ title, votes }) => ({ title, votes })) ?? null,
     lastActivity: room.lastActivity,
     rounds: room.roundHistory.map((round) => ({
       hole: round.index + 1,
@@ -70,6 +75,12 @@ export function adminRoom(room: Room) {
       par: round.par,
       status: round.status,
       completed: round.rows.filter((row) => row.status === 'holed').length,
+      scores: round.rows.map(({ uid, strokes, status, timeMs }) => ({
+        name: room.players.get(uid)?.name ?? 'Departed player',
+        strokes,
+        status,
+        timeMs,
+      })),
     })),
   };
 }

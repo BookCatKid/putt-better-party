@@ -11,6 +11,7 @@ import {
   type CourseSpecification,
   type PrepareMatch,
   type LoadCourse,
+  type PublicCourse,
 } from './domain.js';
 import type {
   RoomSocket,
@@ -50,6 +51,7 @@ export const defaults: Readonly<RoomConfig> = Object.freeze({
   excludeDaily: false,
   randomHoles: 3,
   lateJoin: LATE_JOIN.ALWAYS,
+  courseVoting: false,
 });
 function isIntegerInRange(value: unknown, minimum: number, maximum: number): value is number {
   return (
@@ -64,6 +66,9 @@ export class Room {
   readonly catalog: CourseIndex;
   readonly countdown: number;
   readonly results: number;
+  readonly votingMs: number;
+  voteCourses: PublicCourse[][] = [];
+  vote: { id: string; target: number; endsAt: number; ballots: Map<string, string> } | null = null;
   readonly onIdle: (room: Room) => void;
   readonly onChange: (room: Room) => void;
   readonly prepareMatch: PrepareMatch | null;
@@ -108,6 +113,7 @@ export class Room {
     {
       countdown = 5000,
       results = 4000,
+      votingMs = 15000,
       onIdle = () => {},
       onChange = () => {},
       prepareMatch = null,
@@ -118,6 +124,7 @@ export class Room {
     this.catalog = catalog;
     this.countdown = countdown;
     this.results = results;
+    this.votingMs = votingMs;
     this.onIdle = onIdle;
     this.onChange = onChange;
     this.prepareMatch = prepareMatch;
@@ -194,8 +201,12 @@ export class Room {
       preparing: this.starting || this.loadingNext,
       awaitingPlayers: this.phase === 'countdown' ? this.playersAwaitingScene() : 0,
       nextError: this.nextLoadError,
+      vote: this.voteSnapshot(),
       playlistTitles: Object.fromEntries(
-        [...this.config.selectedHoleIds, ...this.holeIds].map((id) => [id, this.playlistTitle(id)]),
+        [
+          ...this.config.selectedHoleIds,
+          ...this.holeIds.slice(0, this.config.courseVoting ? this.holeIndex + 1 : undefined),
+        ].map((id) => [id, this.playlistTitle(id)]),
       ),
       roundHistory: this.roundHistory,
       initialPlayers: this.initialPlayers,
@@ -276,6 +287,7 @@ export class Room {
           rightPlayer.holesSurvived - leftPlayer.holesSurvived ||
           Number(rightPlayer.alive) - Number(leftPlayer.alive) ||
           leftPlayer.totalStrokes - rightPlayer.totalStrokes ||
+          (leftPlayer.totalTimeMs ?? 0) - (rightPlayer.totalTimeMs ?? 0) ||
           leftPlayer.name.localeCompare(rightPlayer.name),
       )
       .map((player, index) => ({
@@ -285,6 +297,8 @@ export class Room {
         rank: index + 1,
         holesSurvived: player.holesSurvived,
         totalStrokes: player.totalStrokes,
+        totalTimeMs: player.totalTimeMs ?? 0,
+        holeTimeMs: player.holeTimeMs ?? null,
         alive: player.alive,
         strokes: player.strokes,
         finished: player.done,
@@ -353,6 +367,7 @@ export class Room {
         participated: false,
         holesSurvived: 0,
         totalStrokes: 0,
+        totalTimeMs: 0,
         strokes: 0,
         done: false,
       };
@@ -391,6 +406,7 @@ export class Room {
       this.phase === 'playing'
     ) {
       // A new document has lost its local physics state; do not allow restarting that hole.
+      player.holeTimeMs ??= this.elapsedHoleMs();
       player.done = true;
       player.success = player.success === true;
       player.roundSpectator = true;
@@ -423,7 +439,7 @@ export class Room {
       count: this.roster().length,
       role: player.role,
     });
-    if (!previouslyParticipated && player.participated) {
+    if (this.vote || (!previouslyParticipated && player.participated)) {
       // Every client needs the updated participant count for elimination UI.
       this.broadcast(this.snapshot());
     } else {
@@ -553,6 +569,8 @@ export class Room {
       this.clearHostSuccession();
       this.promoteSuccessor();
     }
+    this.vote?.ballots.delete(player.uid);
+    this.broadcastVote();
     this.rosterBroadcast();
     this.changed();
     this.onIdle(this);
@@ -571,6 +589,7 @@ export class Room {
       finished: player.done,
     });
     player.ws = null;
+    this.broadcastVote();
     this.lastActivity = Date.now();
     this.positions.delete(player.id);
     this.broadcast({ t: 'bye', id: player.id });
@@ -615,6 +634,8 @@ export class Room {
     switch (message.t) {
       case 'join':
         return;
+      case 'course-vote':
+        return this.castVote(player, message);
       case 'ready':
         if (this.phase === 'lobby' && typeof message.v === 'boolean') {
           if (player.ready !== message.v) {
@@ -782,6 +803,7 @@ export class Room {
       'locked',
       'excludeDaily',
       'lateJoin',
+      'courseVoting',
     ]) {
       if (key in configuration) {
         candidate[key] = configuration[key];
@@ -793,6 +815,7 @@ export class Room {
       !isIntegerInRange(candidate.maxPlayers, 1, 50) ||
       typeof candidate.locked !== 'boolean' ||
       typeof candidate.excludeDaily !== 'boolean' ||
+      typeof candidate.courseVoting !== 'boolean' ||
       (candidate.lateJoin !== LATE_JOIN.NEVER &&
         candidate.lateJoin !== LATE_JOIN.NEXT_HOLE &&
         candidate.lateJoin !== LATE_JOIN.ALWAYS) ||
@@ -813,6 +836,7 @@ export class Room {
       excludeDaily: candidate.excludeDaily,
       randomHoles: this.config.randomHoles,
       lateJoin: candidate.lateJoin,
+      courseVoting: candidate.courseVoting && candidate.mapSource === MAP_SOURCE.RANDOM,
     };
     if (next.mapSource === MAP_SOURCE.RANDOM) {
       const count = 'holes' in configuration ? configuration.holes : this.config.randomHoles;
@@ -849,10 +873,23 @@ export class Room {
       this.broadcast(this.snapshot());
       Promise.resolve()
         .then(() => prepareMatch(configuration, previousSeen))
-        .then(({ ids, specs, seen }) => {
+        .then(({ ids, specs, seen, ballots }) => {
           if (!this.closed && this.phase === 'lobby' && this.starting && this.hostUid === hostUid) {
+            if (
+              configuration.courseVoting &&
+              (!ballots ||
+                ballots.length !== configuration.holes ||
+                ballots.some(
+                  (choices, index) =>
+                    choices.length !== (index === 0 ? 1 : 3) ||
+                    new Set(choices.map((course) => course.id)).size !== choices.length,
+                ))
+            ) {
+              throw new Error('Could not prepare all course voting choices');
+            }
             this.holeIds = ids;
             this.specs = specs;
+            this.voteCourses = ballots ?? [];
             if (Array.isArray(seen)) {
               this.randomSeen = seen;
             }
@@ -897,12 +934,14 @@ export class Room {
       }
       return structuredClone(course.spec);
     });
+    this.voteCourses = [];
     this.startPrepared();
   }
   startPrepared() {
     this.matchId = randomUUID();
     this.holeIndex = 0;
     this.roundHistory = [];
+    this.vote = null;
     this.nextLoadError = null;
     this.retryingNext = false;
     this.recoveryNotice = false;
@@ -918,6 +957,7 @@ export class Room {
         roundSpectator: false,
         holesSurvived: 0,
         totalStrokes: 0,
+        totalTimeMs: 0,
         strokes: 0,
         done: false,
         ready: false,
@@ -947,6 +987,7 @@ export class Room {
     }, delayMs);
   }
   begin() {
+    this.vote = null;
     this.roundTimerMs = this.config.timerMs;
     this.phase = 'countdown';
     this.playNotBefore = Date.now() + this.countdown;
@@ -964,6 +1005,7 @@ export class Room {
       }
       player.strokes = 0;
       player.done = false;
+      player.holeTimeMs = undefined;
       player.success = false;
       player.lastPosition = 0;
       player.sceneReady = false;
@@ -1067,10 +1109,105 @@ export class Room {
       this.startPlay();
     }
   }
+  voteSnapshot(): PartySnapshot['vote'] {
+    const vote = this.vote;
+    if (!vote) {
+      return null;
+    }
+    const ballots = [...vote.ballots].filter(([uid]) => this.players.get(uid)?.ws);
+    return {
+      id: vote.id,
+      target: vote.target,
+      endsAt: vote.endsAt,
+      choices: this.voteCourses[vote.target].map(
+        ({ id, title, author, par, ratingAvg, ratingCount }) => ({
+          id,
+          title,
+          author,
+          par,
+          ratingAvg,
+          ratingCount,
+          votes: ballots.filter(([_uid, choice]) => choice === id).length,
+        }),
+      ),
+      ballots: Object.fromEntries(ballots),
+    };
+  }
+
+  broadcastVote() {
+    if (this.vote) {
+      this.broadcast({ t: 'course-vote', vote: this.voteSnapshot(), now: Date.now() });
+    }
+  }
+
+  castVote(player: Player, message: Record<string, unknown>) {
+    const vote = this.vote;
+    if (
+      !vote ||
+      this.phase !== 'hole-results' ||
+      message.voteId !== vote.id ||
+      Date.now() >= vote.endsAt ||
+      typeof message.courseId !== 'string' ||
+      !this.voteCourses[vote.target].some((course) => course.id === message.courseId)
+    ) {
+      return;
+    }
+    if (vote.ballots.get(player.uid) === message.courseId) {
+      return;
+    }
+    vote.ballots.set(player.uid, message.courseId);
+    this.broadcastVote();
+  }
+
+  openVote(target: number) {
+    this.phase = 'hole-results';
+    this.vote = {
+      id: randomUUID(),
+      target,
+      endsAt: Date.now() + this.votingMs,
+      ballots: new Map(),
+    };
+    this.audit('course_vote_opened', {
+      target,
+      courses: this.voteCourses[target].map((course) => course.id),
+    });
+    this.state();
+    this.schedule(() => this.resolveVote(), this.votingMs);
+  }
+
+  resolveVote() {
+    const ballot = this.voteSnapshot();
+    if (!ballot || this.phase !== 'hole-results') {
+      return;
+    }
+    const maximum = Math.max(...ballot.choices.map((choice) => choice.votes));
+    const tied = ballot.choices.filter((choice) => choice.votes === maximum);
+    const winner = tied[randomInt(tied.length)];
+    const course = this.voteCourses[ballot.target].find((choice) => choice.id === winner.id);
+    if (!course) {
+      throw new Error('Missing validated vote winner');
+    }
+    this.holeIds[ballot.target] = course.id;
+    this.specs[ballot.target] = structuredClone(course.spec);
+    this.audit('course_vote_closed', {
+      target: ballot.target,
+      title: course.title,
+      choices: ballot.choices,
+      winner: winner.id,
+    });
+    this.vote = null;
+    this.holeIndex = ballot.target;
+    this.begin();
+  }
+
   advance() {
     const next = this.holeIndex + 1;
     if (next >= this.holeIds.length) {
       this.finalize();
+      return;
+    }
+    if (this.config.courseVoting && this.voteCourses[next]?.length > 1) {
+      this.openVote(next);
       return;
     }
     if (this.specs[next]) {
@@ -1140,13 +1277,21 @@ export class Room {
       Date.now() <= this.startsAt + this.roundTimerMs
     );
   }
+  elapsedHoleMs() {
+    if (this.phase === 'countdown') {
+      return 0;
+    }
+    return Math.max(0, Math.min(this.roundTimerMs, Date.now() - this.startsAt));
+  }
   finish(player: Player, success: boolean) {
+    player.holeTimeMs = this.elapsedHoleMs();
     player.done = true;
     player.success = success;
     this.audit(success ? 'player_holed' : 'player_forfeited', {
       uid: player.uid,
       name: player.name,
       strokes: player.strokes,
+      timeMs: player.holeTimeMs,
       par: this.specs[this.holeIndex]?.par,
     });
     if (success) {
@@ -1189,11 +1334,14 @@ export class Room {
               uid: player.uid,
               strokes: player.success ? player.strokes : null,
               status: player.success ? 'holed' : 'ended',
+              timeMs: player.holeTimeMs ?? this.elapsedHoleMs(),
             })),
         );
         for (const player of this.players.values()) {
           if (player.participated && player.alive && player.success) {
             player.totalStrokes += player.strokes;
+            player.totalTimeMs =
+              (player.totalTimeMs ?? 0) + (player.holeTimeMs ?? this.elapsedHoleMs());
             player.holesSurvived++;
           }
         }
@@ -1295,6 +1443,8 @@ export class Room {
   finalize() {
     clearTimeout(this.timer);
     this.loadingNext = false;
+    this.vote = null;
+    this.voteCourses = [];
     this.phase = 'final';
     this.state();
     const standings = this.standings();
@@ -1313,28 +1463,43 @@ export class Room {
     // policy is not available in the client bundles; use a documented local rule.
     const scores: RoundScore[] = active.map((player) => {
       if (player.success) {
-        return { uid: player.uid, strokes: player.strokes, status: 'holed' };
+        return {
+          uid: player.uid,
+          strokes: player.strokes,
+          status: 'holed',
+          timeMs: player.holeTimeMs ?? this.elapsedHoleMs(),
+        };
       }
       if (this.config.elimination) {
-        return { uid: player.uid, strokes: null, status: 'eliminated' };
+        return {
+          uid: player.uid,
+          strokes: null,
+          status: 'eliminated',
+          timeMs: player.holeTimeMs ?? this.elapsedHoleMs(),
+        };
       }
       return {
         uid: player.uid,
         strokes: Math.max(player.strokes, this.specs[this.holeIndex].par + 5),
         status: 'timeout',
+        timeMs: this.roundTimerMs,
       };
     });
     this.recordRound('completed', scores);
     for (const player of active) {
       player.done = true;
+      player.holeTimeMs ??= this.elapsedHoleMs();
       if (player.success) {
         player.totalStrokes += player.strokes;
+        player.totalTimeMs = (player.totalTimeMs ?? 0) + player.holeTimeMs;
         player.holesSurvived++;
       } else if (this.config.elimination) {
         player.alive = false;
         player.role = 'spectator';
       } else {
         player.totalStrokes += Math.max(player.strokes, this.specs[this.holeIndex].par + 5);
+        player.holeTimeMs = this.roundTimerMs;
+        player.totalTimeMs = (player.totalTimeMs ?? 0) + player.holeTimeMs;
         player.holesSurvived++;
       }
     }
@@ -1370,6 +1535,8 @@ export class Room {
     this.nextLoadError = null;
     this.retryingNext = false;
     this.phase = 'lobby';
+    this.vote = null;
+    this.voteCourses = [];
     this.recoveryNotice = false;
     this.roundHistory = [];
     this.initialPlayers = 0;
@@ -1394,6 +1561,8 @@ export class Room {
         done: false,
         holesSurvived: 0,
         totalStrokes: 0,
+        totalTimeMs: 0,
+        holeTimeMs: undefined,
         roundSpectator: false,
         joinAfterHole: undefined,
       });

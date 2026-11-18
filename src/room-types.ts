@@ -31,6 +31,8 @@ export interface Player {
   participated: boolean;
   holesSurvived: number;
   totalStrokes: number;
+  totalTimeMs?: number;
+  holeTimeMs?: number;
   strokes: number;
   done: boolean;
   success?: boolean;
@@ -46,6 +48,7 @@ export interface Player {
 export interface RoundScore {
   uid: string;
   strokes: number | null;
+  timeMs?: number;
   status: 'holed' | 'ended' | 'eliminated' | 'timeout';
 }
 export type RoundStatus = 'ended' | 'skipped' | 'completed';
@@ -60,6 +63,7 @@ export interface RoundRecord {
 export interface RoomOptions {
   countdown?: number;
   results?: number;
+  votingMs?: number;
   onIdle?: (room: Room) => void;
   onChange?: (room: Room) => void;
   prepareMatch?: PrepareMatch | null;
@@ -106,6 +110,21 @@ export interface PartySnapshot {
   /** Countdown only: connected players whose scene has not reported ready. */
   awaitingPlayers: number;
   nextError: string | null;
+  vote: {
+    id: string;
+    target: number;
+    endsAt: number;
+    choices: Array<{
+      id: string;
+      title: string;
+      author: string;
+      par: number;
+      ratingAvg?: number;
+      ratingCount?: number;
+      votes: number;
+    }>;
+    ballots: Record<string, string>;
+  } | null;
   playlistTitles: Record<string, string>;
   roundHistory: RoundRecord[];
   initialPlayers: number;

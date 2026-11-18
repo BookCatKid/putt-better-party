@@ -107,3 +107,22 @@ export function bpScenePrepared(levelId) {
     partyRuntimeStore.setState((partyState) => ({ ...partyState, bpSceneReady: levelId }));
   }
 }
+
+export function bpCastVote(courseId) {
+  const state = partyRuntimeStore.state;
+  if (state.bpConnected && state.vote) {
+    sendPartyCommand({ t: 'course-vote', voteId: state.vote.id, courseId });
+  }
+}
+
+export function bpReceiveVote(message) {
+  partyRuntimeStore.setState((state) => {
+    if (!state.vote || message.vote?.id !== state.vote.id) {
+      return state;
+    }
+    return {
+      ...state,
+      vote: { ...message.vote, endsAt: Date.now() + message.vote.endsAt - message.now },
+    };
+  });
+}

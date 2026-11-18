@@ -149,6 +149,20 @@ function evictOldest<Key, Value>(cache: Map<Key, Value>, maximumSize: number): v
   }
 }
 
+export function publicRating(id: string) {
+  const listed = listedCourses.get(id);
+  return {
+    ratingAvg:
+      typeof listed?.ratingAvg === 'number' && Number.isFinite(listed.ratingAvg)
+        ? listed.ratingAvg
+        : undefined,
+    ratingCount:
+      typeof listed?.ratingCount === 'number' && Number.isFinite(listed.ratingCount)
+        ? listed.ratingCount
+        : undefined,
+  };
+}
+
 export function rememberPublicMetadata(id: string, title?: string): void {
   if (/^[a-zA-Z0-9_-]{5,64}$/.test(id) && !listedCourses.has(id)) {
     listedCourses.set(id, { id, title });

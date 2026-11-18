@@ -74,6 +74,7 @@ export default [
         updateBetterPartyConfig: 'readonly',
         bpPickerBusy: 'readonly',
         bpHostAction: 'readonly',
+        bpCastVote: 'readonly',
       },
     },
     rules: {
@@ -198,6 +199,7 @@ export default [
         isTransportSpectator: 'readonly',
         bpConnection: 'readonly',
         bpAck: 'readonly',
+        bpReceiveVote: 'readonly',
       },
     },
     rules: {

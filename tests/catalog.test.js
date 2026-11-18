@@ -596,3 +596,37 @@ test('a random match still refuses a withdrawn course even when other details su
   expect(requested).toHaveLength(2);
   expect(requested.every((id) => !catalog.courseIndex.has(id))).toBe(true);
 });
+
+test('voting prepares distinct public candidates with ratings and uses the original validator for all options', async () => {
+  const holes = Array.from({ length: 7 }, (_unused, index) => ({
+    id: 'vote-' + index,
+    title: 'Option ' + index,
+    author: 'Maker',
+    ratingAvg: 4.2,
+    ratingCount: 10,
+  }));
+  const catalog = await catalogWith({
+    list: async ({ daily }) =>
+      daily
+        ? { holes: [], total: 0, offset: 0, nextOffset: null }
+        : { holes, total: holes.length, offset: 0, nextOffset: null },
+    detail: async (id) => ({ id, public: true, title: 'Option ' + id, spec: courseSpec({ id }) }),
+  });
+  const prepared = await catalog.prepareMatch(
+    {
+      ...pickedConfig([]),
+      mapSource: 'random',
+      holes: 3,
+      randomHoles: 3,
+      courseVoting: true,
+      excludeDaily: true,
+    },
+    [],
+  );
+  expect(prepared.ballots.map((choices) => choices.length)).toEqual([1, 3, 3]);
+  expect(new Set(prepared.ballots.flat().map((course) => course.id)).size).toBe(7);
+  expect(prepared.ballots[1][0]).toMatchObject({ ratingAvg: 4.2, ratingCount: 10, par: 2 });
+  expect(prepared.ids).toHaveLength(3);
+  expect(upstream.requests.detail).toHaveLength(7);
+  expect(validation.requests).toHaveLength(7);
+});
