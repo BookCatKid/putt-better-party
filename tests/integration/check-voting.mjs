@@ -89,6 +89,21 @@ try {
     'Vote for hole 1',
   );
   assert.equal(await client.evalJS('document.body.innerText.includes("Hole 1 of 2 done")'), false);
+  // Scene fallback: while the opening ballot is up, no candidate course has been
+  // chosen, so the route keeps the neutral lobby level instead of showing an
+  // empty or stale course. The ballot must not wait for a candidate to load.
+  const fallback = await client.evalJS(
+    '(async()=>{const g=(' +
+      runtime +
+      ').m.state;return {level:g.level?.id??null,phase:g.phase}})()',
+  );
+  assert(fallback.level !== null, 'the ballot must be shown over a real scene rather than nothing');
+  assert.equal(
+    await client.evalJS('!!document.querySelector(".bp-party-loading")'),
+    false,
+    'the ballot must not be hidden behind the loading screen',
+  );
+  console.log('PASS opening ballot keeps the neutral scene and never blocks on a candidate');
   const first = await client.evalJS('(async()=>(' + runtime + ').E.state.vote.choices[2].id)()');
   await client.evalJS('document.querySelectorAll(".bp-vote-course")[2].click()');
   await waitFor(
