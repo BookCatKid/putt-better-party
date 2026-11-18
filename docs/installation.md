@@ -141,7 +141,7 @@ bun run check
 
 `bun run check` runs client preparation, formatting, linting (ESLint, Ruff,
 ShellCheck), strict TypeScript checking and the unit tests. It is the same check
-CI runs. Current result on a clean tree: **235 tests, 1194 assertions, 23 files**.
+CI runs.
 
 See the [development guide](development.md) for the integration and browser
 suites, and the [operations guide](operations.md) for configuration, deployment,

@@ -123,43 +123,52 @@ setting it there would break course loading on purpose.
 Chosen by the host in the client, validated by the server, and persisted with the
 room. Defaults are what a new party gets.
 
-| Setting           | Default  | Bounds                                                  |
-| ----------------- | -------- | ------------------------------------------------------- |
-| `holes`           | `3`      | 1–9 for a random party; up to 500 for a manual playlist |
-| `timerMs`         | `60000`  | 20 000–300 000 ms                                       |
-| `elimination`     | `true`   | boolean                                                 |
-| `maxPlayers`      | `50`     | 1–50                                                    |
-| `mapSource`       | `random` | `random` or `picked`                                    |
-| `selectedHoleIds` | `[]`     | Up to 500 ids when `mapSource` is `picked`              |
-| `locked`          | `false`  | boolean; refuses new joins                              |
-| `excludeDaily`    | `false`  | boolean; omits previously featured dailies              |
-| `randomHoles`     | `3`      | 1–9                                                     |
-| `lateJoin`        | `always` | `never`, `next-hole` or `always`                        |
-| `courseVoting`    | `false`  | boolean                                                 |
+| Setting           | Default  | Bounds                                                                  |
+| ----------------- | -------- | ----------------------------------------------------------------------- |
+| `holes`           | `3`      | 1–10 000 for a random party; up to 500 stored ids for a manual playlist |
+| `timerMs`         | `60000`  | 0–86 400 000 ms; `0` means no round timer                               |
+| `elimination`     | `true`   | boolean                                                                 |
+| `maxPlayers`      | `50`     | 1–50                                                                    |
+| `mapSource`       | `random` | `random` or `picked`                                                    |
+| `selectedHoleIds` | `[]`     | Up to 500 ids when `mapSource` is `picked`                              |
+| `locked`          | `false`  | boolean; refuses new joins                                              |
+| `excludeDaily`    | `false`  | boolean; omits previously featured dailies                              |
+| `randomHoles`     | `3`      | 1–10 000                                                                |
+| `lateJoin`        | `always` | `never`, `next-hole` or `always`                                        |
+| `courseVoting`    | `false`  | boolean                                                                 |
 
 The `holes` range deserves explanation, because the two numbers look
-inconsistent. A **random** party is capped at 9 because the random selector draws
-from a bounded pool of candidates. A **manual playlist has no upper bound in the
-room** — you can order as many courses as you like, including duplicates — and
-the 500 limit is a persistence resource limit, not a protocol rule. The largest
-playlist in the test suite is 153 courses. Do not read the 9 as a general
-nine-hole cap; it applies only to the random source.
+inconsistent. A **random** party accepts any count from 1 to 10 000: the client
+offers a slider up to nine, but the field also accepts a typed value, and the
+server does not restrict the room to what its slider can display. A **manual
+playlist has no upper bound in the room** — you can order as many courses as you
+like, including duplicates — and the 500 limit is a persistence resource limit,
+not a protocol rule. The largest playlist in the test suite is 153 courses.
+
+`timerMs: 0` is a distinct mode, not a mistake: it means **the round has no
+timer**, and the client shows `Unlimited` instead of a countdown. Every place the
+deadline is used guards against it, so a zero timer does not expire the hole
+instantly — which is precisely what an unguarded `startsAt + timerMs` would do.
 
 Both behaviours were checked against a live room rather than read off the source:
 
-| Attempt                          | Result                      |
-| -------------------------------- | --------------------------- |
-| `mapSource: random`, `holes: 10` | Refused, `invalid-config`   |
-| `mapSource: random`, `holes: 9`  | Accepted                    |
-| `timerMs: 5000`                  | Refused, `invalid-config`   |
-| `timerMs: 20000`                 | Accepted                    |
-| `maxPlayers: 51`                 | Refused, `invalid-config`   |
-| `maxPlayers: 50`                 | Accepted                    |
-| `mapSource: picked`, 12 courses  | Accepted, `holes` became 12 |
+| Attempt                             | Result                      |
+| ----------------------------------- | --------------------------- |
+| `mapSource: random`, `holes: 9`     | Accepted                    |
+| `mapSource: random`, `holes: 10`    | Accepted — `holes` is 10    |
+| `mapSource: random`, `holes: 10000` | Accepted                    |
+| `mapSource: random`, `holes: 10001` | Refused, `invalid-config`   |
+| `timerMs: 0`                        | Accepted — no round timer   |
+| `timerMs: 1800000`                  | Accepted — 30 minutes       |
+| `timerMs: 86400000`                 | Accepted — 24 hours         |
+| `timerMs: 86401000`                 | Refused, `invalid-config`   |
+| `maxPlayers: 51`                    | Refused, `invalid-config`   |
+| `maxPlayers: 50`                    | Accepted                    |
+| `mapSource: picked`, 12 courses     | Accepted, `holes` became 12 |
 
-The last row is the one that matters for the no-cap guarantee: a 12-course
-playlist produces a 12-hole party, so the random-source bound is not leaking
-into picked parties through a shared validator.
+The picked row is the one that matters for the no-cap guarantee: a 12-course
+playlist produces a 12-hole party, so the random-source bound is not leaking into
+picked parties through a shared validator.
 
 ## Service limits
 
