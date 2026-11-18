@@ -21,7 +21,9 @@ export const DEFAULT_PORT = 8789;
  * Addresses that all mean "this machine". They are interchangeable for a local
  * run, so the allowlist includes all of them; a browser that opened the page at
  * `localhost` sends that origin with its requests and would otherwise be
- * refused by a server that only knows `127.0.0.1`.
+ * refused by a server that only knows `127.0.0.1`. `[::1]` is listed for a
+ * deployment that binds the IPv6 loopback with `BP_HOST`; the default listener
+ * is IPv4, so it simply never sees that spelling.
  */
 const LOOPBACK_HOSTNAMES = ['127.0.0.1', 'localhost', '[::1]'] as const;
 

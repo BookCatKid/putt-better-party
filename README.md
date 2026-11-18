@@ -47,14 +47,15 @@ Read the [development guide](docs/development.md) for quality checks, testing an
 
 ## Configuration
 
-| Variable           | Default              | Description                                          |
-| ------------------ | -------------------- | ---------------------------------------------------- |
-| `PORT`             | `8789`               | HTTP and WebSocket port                              |
-| `BP_DB`            | `state/rooms.sqlite` | SQLite room database                                 |
-| `BP_PUBLIC_ORIGIN` | Local HTTP origin    | Exact public origin for a reverse-proxied deployment |
-| `BP_EVENT_LOG`     | Unset (disabled)     | Private JSON-lines gameplay event log path           |
+| Variable           | Default                    | Description                                          |
+| ------------------ | -------------------------- | ---------------------------------------------------- |
+| `PORT`             | `8789`                     | HTTP and WebSocket port                              |
+| `BP_HOST`          | `127.0.0.1`                | Address the listener binds to                        |
+| `BP_DB`            | `state/rooms.sqlite`       | SQLite room database                                 |
+| `BP_PUBLIC_ORIGIN` | Local HTTP loopback origin | Exact public origin for a reverse-proxied deployment |
+| `BP_EVENT_LOG`     | Unset (disabled)           | Private JSON-lines gameplay event log path           |
 
-The service binds to loopback by default. Review deployment security before exposing it publicly. Room credentials are stored in the database; keep database backups private. For persistent gameplay logging, set `BP_EVENT_LOG` to a path under the private state directory. Logs rotate at 8 MiB with six archives and omit authentication credentials. Do not commit logs or runtime state.
+The service binds to loopback by default and answers `127.0.0.1` and `localhost` for its port, so either local spelling works in a browser. Setting `BP_PUBLIC_ORIGIN` to a bare origin such as `https://party.example.com` turns the service into a proxied deployment: that origin becomes the only one it answers, and a direct loopback request is refused, so the proxy cannot be bypassed. Forwarded headers are not trusted, because trusting them without a configured proxy lets a client choose its own address. Review deployment security before exposing it publicly. Room credentials are stored in the database; keep database backups private. For persistent gameplay logging, set `BP_EVENT_LOG` to a path under the private state directory. Logs rotate at 8 MiB with six archives and omit authentication credentials. Do not commit logs or runtime state.
 
 ## Compatibility and limitations
 
