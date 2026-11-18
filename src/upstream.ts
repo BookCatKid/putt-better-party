@@ -203,13 +203,19 @@ export interface PublicCourseDetail {
  * locally stored geometry. Kept separate from the network call so this boundary
  * can be exercised directly.
  */
+export class UnavailablePublicCourseError extends Error {
+  constructor(readonly courseId: string) {
+    super('Map is unavailable or not public');
+  }
+}
+
 export function parsePublicCourseDetail(
   id: string,
   result: unknown,
   listed: { title?: string; author?: string } = {},
 ): PublicCourseDetail {
   if (!isRecord(result) || result.public !== true || result.id !== id || !result.spec) {
-    throw new Error('Map is unavailable or not public');
+    throw new UnavailablePublicCourseError(id);
   }
   const metadata = { ...listed, ...result };
   // The title is the course's user-facing identity and the value the validator

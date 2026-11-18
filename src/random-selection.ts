@@ -49,6 +49,8 @@ interface RandomSelectionOptions {
   pick?: (maximum: number) => number;
   excludeDaily?: boolean;
   currentDay?: number;
+  omittedIds?: ReadonlySet<string>;
+  featuredIds?: ReadonlySet<string>;
 }
 
 /** Draw uniformly shuffled catalog positions; only retrieve pages as needed. */
@@ -59,8 +61,12 @@ export async function chooseRandom({
   pick = randomInt,
   excludeDaily = false,
   currentDay = Infinity,
+  omittedIds = new Set(),
+  featuredIds,
 }: RandomSelectionOptions): Promise<{ ids: string[]; seen: string[] }> {
-  const excluded = excludeDaily ? await featuredDailyIds(browse, currentDay) : new Set<string>();
+  const excluded = excludeDaily
+    ? (featuredIds ?? (await featuredDailyIds(browse, currentDay)))
+    : new Set<string>();
   const getPage = (offset: number) => browse({ sort: 'new', offset, fresh: excludeDaily });
   const firstPage = await getPage(0);
   const total = firstPage.total;
@@ -96,7 +102,7 @@ export async function chooseRandom({
     );
     for (const hole of holes) {
       const id = hole?.id;
-      if (!id) {
+      if (!id || omittedIds.has(id)) {
         continue;
       }
       const scheduledDay = hole.scheduledDay;

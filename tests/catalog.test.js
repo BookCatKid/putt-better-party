@@ -573,7 +573,7 @@ test('random course details overlap but every specification retains its selected
   expect(validation.requests).toHaveLength(3);
 });
 
-test('a random match still refuses a withdrawn course even when other details succeed', async () => {
+test('a random match with no possible replacement fails without publishing a partial set', async () => {
   const requested = [];
   const catalog = await catalogWith({
     list: async ({ daily }) =>
@@ -598,7 +598,7 @@ test('a random match still refuses a withdrawn course even when other details su
       { ...pickedConfig([]), mapSource: 'random', holes: 2, randomHoles: 2, excludeDaily: true },
       [],
     ),
-  ).rejects.toThrow('Map is unavailable or not public');
+  ).rejects.toThrow('Not enough non-daily public holes available');
   expect(requested).toHaveLength(2);
   expect(requested.every((id) => !catalog.courseIndex.has(id))).toBe(true);
 });
@@ -651,4 +651,41 @@ test('public difficulty statistics use the archived GET function with only a pub
   expect(await publicStats('stats-public')).toEqual({ avgStrokes: 4.2 });
   expect(upstream.requests.stats).toEqual([{ method: 'GET', data: { id: 'stats-public' } }]);
   await expect(publicStats('unknown-stats')).rejects.toThrow('public catalog');
+});
+
+test('random voting replaces withdrawn details with distinct public options', async () => {
+  const holes = Array.from({ length: 7 }, (_, index) => ({
+    id: 'replace-vote-' + index,
+    title: 'Course ' + index,
+  }));
+  let refused;
+  const catalog = await catalogWith({
+    list: async ({ daily }) =>
+      daily
+        ? { holes: [], total: 0, offset: 0, nextOffset: null }
+        : { holes, total: holes.length, offset: 0, nextOffset: null },
+    detail: async (id) => {
+      refused ??= id;
+      return { id, public: id !== refused, title: id, spec: courseSpec({ id }) };
+    },
+  });
+  const prepared = await catalog.prepareMatch(
+    {
+      ...pickedConfig([]),
+      mapSource: 'random',
+      holes: 2,
+      randomHoles: 2,
+      courseVoting: true,
+      excludeDaily: true,
+    },
+    [],
+  );
+  const candidates = prepared.ballots.flat();
+  expect(candidates).toHaveLength(6);
+  expect(new Set(candidates.map((course) => course.id)).size).toBe(6);
+  expect(candidates.every((course) => course.id !== refused)).toBe(true);
+  expect(prepared.seen).not.toContain(refused);
+  expect(catalog.courseIndex.has(refused)).toBe(false);
+  expect(upstream.requests.detail).toHaveLength(7);
+  expect(upstream.requests.list.filter((request) => request.daily)).toHaveLength(1);
 });

@@ -6,9 +6,9 @@ import {
   type PublicCourse,
   type RoomConfig,
 } from './domain.js';
-import { browse, detail, publicRating } from './upstream.js';
+import { browse, detail, publicRating, UnavailablePublicCourseError } from './upstream.js';
 import { currentDailyNumber, validateCourse } from './upstream/client-adapter.js';
-import { chooseRandom } from './random-selection.js';
+import { chooseRandom, featuredDailyIds } from './random-selection.js';
 
 /**
  * Process-local course index. The backing map is not publicly mutable.
@@ -59,38 +59,71 @@ export async function prepareMatch(
   seen: string[] = [],
 ): Promise<PreparedMatch> {
   const voting = config.mapSource === MAP_SOURCE.RANDOM && config.courseVoting;
+  const manual = config.mapSource === MAP_SOURCE.PICKED;
   let selectedIds = config.selectedHoleIds.slice();
   let nextHistory = seen;
-
-  if (config.mapSource === MAP_SOURCE.RANDOM) {
-    const selection = await chooseRandom({
-      browse,
-      count: voting ? 3 * config.holes : config.holes,
-      seen,
-      excludeDaily: config.excludeDaily,
-      currentDay: currentDailyNumber(),
-    });
-    selectedIds = selection.ids;
-    nextHistory = selection.seen;
-  }
-
-  // Manual playlists load future holes on demand; the random playlist is bounded.
-  const manual = config.mapSource === MAP_SOURCE.PICKED;
-  const initialIds = manual ? selectedIds.slice(0, 1) : selectedIds;
-  // The request queue limits concurrency globally. Wait for every required
-  // detail and retain the selected order even when responses finish out of
-  // order. A refused course still aborts preparation before a match starts.
-  const results = await Promise.allSettled(
-    initialIds.map((id) => retrievePublicMap(id, { saved: manual })),
-  );
   const specifications: PublicCourse[] = [];
-  for (const result of results) {
-    if (result.status === 'rejected') {
-      throw result.reason;
+
+  if (manual) {
+    // Picked courses are explicit choices: never silently substitute one.
+    for (const id of selectedIds.slice(0, 1)) {
+      specifications.push(await retrievePublicMap(id, { saved: true }));
     }
-    const course = result.value;
+  } else {
+    const count = voting ? 3 * config.holes : config.holes;
+    const currentDay = currentDailyNumber();
+    const featuredIds = config.excludeDaily
+      ? await featuredDailyIds(browse, currentDay)
+      : undefined;
+    const omittedIds = new Set<string>();
+    const unavailableIds = new Set<string>();
+    // Keep successful candidates, and draw replacements only for refused
+    // details. A network/protocol outage still fails instead of hammering
+    // the service. The daily filter is evaluated just once for this match.
+    for (let attempt = 0; specifications.length < count; attempt++) {
+      if (attempt >= 8) {
+        throw new Error('Not enough available public courses; try a smaller match');
+      }
+      const selection = await chooseRandom({
+        browse,
+        count: count - specifications.length,
+        seen: nextHistory,
+        excludeDaily: config.excludeDaily,
+        currentDay,
+        featuredIds,
+        omittedIds,
+      });
+      nextHistory = selection.seen;
+      // Bound pending detail requests even for large typed hole counts.
+      for (let offset = 0; offset < selection.ids.length; offset += 24) {
+        const results = await Promise.allSettled(
+          selection.ids.slice(offset, offset + 24).map((id) => retrievePublicMap(id)),
+        );
+        for (const [index, result] of results.entries()) {
+          const id = selection.ids[offset + index];
+          omittedIds.add(id);
+          if (result.status === 'fulfilled') {
+            specifications.push(result.value);
+          } else if (result.reason instanceof UnavailablePublicCourseError) {
+            unavailableIds.add(id);
+            console.warn('Skipping unavailable random course:', id);
+          } else {
+            throw result.reason;
+          }
+        }
+      }
+      nextHistory = [
+        ...new Set([
+          ...nextHistory.filter((id) => !unavailableIds.has(id)),
+          ...specifications.map((course) => course.id),
+        ]),
+      ];
+    }
+    selectedIds = specifications.map((course) => course.id);
+  }
+  // Publish only after the complete set of validated courses is available.
+  for (const course of specifications) {
     courseEntries.set(course.id, course);
-    specifications.push(course);
   }
 
   if (voting) {
