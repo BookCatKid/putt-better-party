@@ -56,8 +56,8 @@ try {
     ['next-hole', 'After current hole'],
     ['always', 'Always'],
   ]);
-  assert.equal(await client.evalJS(`${policy}.value`), 'never');
-  for (const value of ['always', 'next-hole', 'never']) {
+  assert.equal(await client.evalJS(`${policy}.value`), 'always');
+  for (const value of ['never', 'next-hole', 'always']) {
     await client.evalJS(
       `(()=>{const select=${policy};select.value=${JSON.stringify(value)};select.dispatchEvent(new Event("change",{bubbles:true}));})()`,
     );

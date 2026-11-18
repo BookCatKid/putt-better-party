@@ -127,6 +127,7 @@ test('connect and disconnect preserve identity and remove ghost; late join spect
   const room = new Room('ABCDE', maps, { countdown: 10000 });
   const host = enter(room, 'Host', true);
   const guest = enter(room, 'Guest');
+  room.handle(host.ws, { t: 'config', config: { lateJoin: 'never' } });
   room.handle(host.ws, { t: 'start' });
   const late = enter(room, 'Late');
   expect(late.player.role).toBe('spectator');
@@ -529,6 +530,7 @@ test('spectators count toward capacity and late joiners become spectators', () =
   });
   // A credential issued in the lobby before the room fills.
   const third = room.issue('Third Guest');
+  room.handle(host.ws, { t: 'config', config: { lateJoin: 'never' } });
   room.handle(host.ws, { t: 'start' });
   return waitForRoom(() => room.phase === 'playing').then(() => {
     const late = enter(room, 'Late Guest');
@@ -1205,11 +1207,11 @@ test('late join policy is host-only, validated and restored with backward-compat
   const room = new Room('ABCDE', maps);
   const host = enter(room, 'Host', true);
   const guest = enter(room, 'Guest');
-  expect(room.config.lateJoin).toBe('never');
-  room.handle(guest.ws, { t: 'config', config: { lateJoin: 'always' } });
-  expect(room.config.lateJoin).toBe('never');
+  expect(room.config.lateJoin).toBe('always');
+  room.handle(guest.ws, { t: 'config', config: { lateJoin: 'never' } });
+  expect(room.config.lateJoin).toBe('always');
   room.handle(host.ws, { t: 'config', config: { lateJoin: 'invalid' } });
-  expect(room.config.lateJoin).toBe('never');
+  expect(room.config.lateJoin).toBe('always');
   room.handle(host.ws, { t: 'config', config: { lateJoin: 'next-hole' } });
   expect(room.config.lateJoin).toBe('next-hole');
   room.handle(host.ws, { t: 'config', config: { timerMs: 40000 } });
@@ -1287,7 +1289,6 @@ test('always admits newcomers immediately without resetting the clock or allowin
     room.handle(host.ws, {
       t: 'config',
       config: {
-        lateJoin: 'always',
         elimination: false,
         mapSource: 'picked',
         selectedHoleIds: ['p', 'q'],
@@ -1332,6 +1333,7 @@ test('never keeps a newcomer spectating until rematch even as holes advance', as
       t: 'config',
       config: { elimination: false, mapSource: 'picked', selectedHoleIds: ['p', 'q'] },
     });
+    room.handle(host.ws, { t: 'config', config: { lateJoin: 'never' } });
     room.handle(host.ws, { t: 'start' });
     await waitForRoom(() => room.phase === 'playing');
     const late = enter(room, 'Late');

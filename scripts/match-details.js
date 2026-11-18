@@ -34,8 +34,8 @@ function BpGuestPlaylist() {
       { className: 'mt-2 text-xs text-white/60' },
       'Join during a match: ' +
         ({ never: 'Never', 'next-hole': 'After current hole', always: 'Always' }[
-          config.lateJoin ?? 'never'
-        ] ?? 'Never'),
+          config.lateJoin ?? 'always'
+        ] ?? 'Always'),
     ),
   ]);
 }
@@ -147,7 +147,7 @@ function BpLobbyOptions() {
         {
           'aria-label': 'Join during a match',
           disabled: preparing || !connected,
-          value: config.lateJoin ?? 'never',
+          value: config.lateJoin ?? 'always',
           onChange: (event) => updateBetterPartyConfig({ lateJoin: event.target.value }),
         },
         [

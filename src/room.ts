@@ -49,7 +49,7 @@ export const defaults: Readonly<RoomConfig> = Object.freeze({
   locked: false,
   excludeDaily: false,
   randomHoles: 3,
-  lateJoin: LATE_JOIN.NEVER,
+  lateJoin: LATE_JOIN.ALWAYS,
 });
 function isIntegerInRange(value: unknown, minimum: number, maximum: number): value is number {
   return (
@@ -1443,6 +1443,7 @@ export class Room {
     this.config = {
       ...defaults,
       ...data.config,
+      lateJoin: data.config.lateJoin ?? LATE_JOIN.NEVER,
       randomHoles:
         data.config.randomHoles ??
         (data.config.mapSource === MAP_SOURCE.RANDOM ? data.config.holes : 3),
