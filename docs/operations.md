@@ -224,6 +224,104 @@ never becomes a crash. That has two consequences worth knowing:
 
 Do not expose the service publicly without deciding the questions this project
 cannot decide for you. Serve the original client only where you have the right to
-do so (see the asset-rights note in the README), terminate TLS at the proxy, set
-`BP_PUBLIC_ORIGIN` to the public origin so the proxy is authoritative, and keep
-the database, the event log and any backups private.
+do so (see the asset-rights note in the README).
+
+The service never terminates TLS itself. It speaks plain HTTP and WebSocket, and
+a reverse proxy in front of it is what makes the deployment HTTPS. The pieces
+that have to line up are the origin, the upgrade, the timeouts, and the
+knowledge that the service cannot see the client's address.
+
+### Required configuration
+
+```sh
+BP_HOST=127.0.0.1                       # only the proxy may reach it
+BP_PUBLIC_ORIGIN=https://party.example.com   # authoritative, and turns on HSTS
+BP_DB=/var/lib/better-party/rooms.sqlite
+BP_EVENT_LOG=/var/log/better-party/events.jsonl
+```
+
+Setting `BP_PUBLIC_ORIGIN` has three consequences worth stating plainly:
+
+- The service answers **only** that origin. A direct loopback request is
+  refused with `403`, so the proxy cannot be bypassed by reaching the port
+  another way. Verified: a proxied deployment answers `403` to a loopback `Host`.
+- An `https:` origin marks the deployment as TLS-terminated. `Secure` is added to
+  the admin cookie, and `Strict-Transport-Security: max-age=31536000;
+includeSubDomains` is sent on every response.
+- The WebSocket scheme in the CSP becomes `wss:`, so the browser will accept the
+  socket at the public origin.
+
+Forwarded headers are **not** trusted, with or without a proxy. Without a
+configured proxy a client can set `X-Forwarded-For` to anything, so trusting it
+would let anyone forge an address; with one configured, the public origin is
+already exact. Supply `BP_PUBLIC_ORIGIN` instead of relying on them.
+
+The consequence is that the service cannot see the real client address: every
+request appears to come from the proxy. If you need per-client identity in an
+upstream log, that belongs at the proxy, not in this service.
+
+### Caddy
+
+Caddy obtains and renews a certificate automatically and proxies WebSockets
+without extra configuration:
+
+```
+party.example.com {
+	reverse_proxy 127.0.0.1:8789
+}
+```
+
+### nginx
+
+WebSocket needs the upgrade headers explicitly, and the proxy's read timeout must
+exceed the server's own idle timeout or it will close a healthy socket during a
+quiet lobby:
+
+```nginx
+server {
+	listen 443 ssl;
+	server_name party.example.com;
+
+	ssl_certificate     /etc/letsencrypt/live/party.example.com/fullchain.pem;
+	ssl_certificate_key /etc/letsencrypt/live/party.example.com/privkey.pem;
+
+	location / {
+		proxy_pass http://127.0.0.1:8789;
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
+		proxy_set_header Host $host;
+		# The server closes an idle WebSocket after 120 s, so the proxy must wait
+		# longer; otherwise it drops a socket the server still considers open.
+		proxy_read_timeout 3600s;
+		proxy_send_timeout 3600s;
+	}
+}
+```
+
+Two numbers have to stay in the right order, and both were taken from the code
+rather than guessed:
+
+- **The WebSocket idle timeout is 120 seconds** (`idleTimeout` in `src/server.ts`).
+- **The client sends a heartbeat every 15 seconds** and treats two unanswered
+  pings as a dead connection (`scripts/party-transport.js`). So a healthy party
+  traffic never approaches 120 s, and a proxy timeout below it would break a
+  socket while both ends believed it was fine.
+
+Do not set a proxy request-body limit below the service's own:
+`MAX_JSON_BODY_BYTES` is 1,000,000 bytes, and the service answers with its own
+status when a body exceeds it, which is more useful than the proxy's generic
+error.
+
+### Verifying the deployment
+
+```sh
+curl -sI https://party.example.com/ | grep -iE 'strict-transport|permissions-policy'
+curl -s  https://party.example.com/health
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8789/   # expect 403
+```
+
+The first should show HSTS and the permissions policy, the second should report
+`ok`, and the third should be refused because only the proxy may talk to the
+port. A `403` on the third is the check that the proxy is authoritative rather
+than decorative.

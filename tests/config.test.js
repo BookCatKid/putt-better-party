@@ -98,3 +98,14 @@ test('the websocket scheme follows the HTTP scheme', () => {
   expect(websocketOriginFor('https://party.example.com')).toBe('wss://party.example.com');
   expect(websocketOriginFor('https://party.example.com:8443')).toBe('wss://party.example.com:8443');
 });
+
+test('an HTTPS public origin is recognised as a proxied deployment', () => {
+  const secure = readServerConfig({ BP_PUBLIC_ORIGIN: 'https://party.example.com' });
+  expect(secure.httpsDeployment).toBe(true);
+  // A local run is not, and must not be told it is: sending HSTS over plain
+  // HTTP would poison the browser's view of that host.
+  expect(readServerConfig({}).httpsDeployment).toBe(false);
+  expect(readServerConfig({ BP_PUBLIC_ORIGIN: 'http://party.example.com' }).httpsDeployment).toBe(
+    false,
+  );
+});

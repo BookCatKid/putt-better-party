@@ -41,6 +41,12 @@ export interface ServerConfig {
   websocketOrigins: readonly string[];
   /** True when every allowed origin is an HTTP loopback address. */
   loopbackOnly: boolean;
+  /**
+   * True when the canonical origin is HTTPS, i.e. the service runs behind a
+   * TLS-terminating proxy. Transport-security headers and `Secure` cookies are
+   * only correct in that case.
+   */
+  httpsDeployment: boolean;
 }
 
 function readPort(raw: string | undefined): number {
@@ -118,6 +124,11 @@ export function readServerConfig(
     const host = new URL(value).hostname;
     return (LOOPBACK_HOSTNAMES as readonly string[]).includes(host);
   });
+  // A public HTTPS origin means the service is behind a TLS-terminating proxy.
+  // That is the only situation where transport-security headers make sense: on a
+  // plain-HTTP loopback run an HSTS header would be ignored at best, and the
+  // `Secure` cookie flag would stop the admin session working at all.
+  const httpsDeployment = new URL(allowedOrigins[0] as string).protocol === 'https:';
 
   return {
     hostname,
@@ -127,5 +138,6 @@ export function readServerConfig(
     allowedHosts,
     websocketOrigins,
     loopbackOnly,
+    httpsDeployment,
   };
 }
