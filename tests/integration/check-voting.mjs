@@ -67,10 +67,13 @@ try {
     headers: { origin: base },
   });
   let snapshot;
+  let revealedVote;
   guest.onmessage = (event) => {
     const frame = JSON.parse(event.data);
     if (frame.t === 'party') {
       snapshot = frame;
+    } else if (frame.t === 'course-vote' && frame.vote?.resolution) {
+      revealedVote = frame.vote;
     }
   };
   await new Promise((resolve, reject) => {
@@ -116,6 +119,27 @@ try {
     'document.querySelectorAll(".bp-vote-tally")[2].textContent.includes("2 votes")',
   );
   console.log('PASS opening ballot before first hole');
+  await state(
+    's.vote?.resolution?.winnerId===s.vote.choices[2].id && !!document.querySelector(".bp-vote-reel-track")',
+  );
+  assert.equal(snapshot.phase, 'hole-results');
+  assert.equal(revealedVote.resolution.winnerId, first);
+  assert.equal(await client.evalJS('document.querySelectorAll(".bp-vote-course").length'), 0);
+  const moving = await client.evalJS(
+    'getComputedStyle(document.querySelector(".bp-vote-reel-track")).transform',
+  );
+  await pause(300);
+  assert.notEqual(
+    await client.evalJS(
+      'getComputedStyle(document.querySelector(".bp-vote-reel-track")).transform',
+    ),
+    moving,
+  );
+  await waitFor(client, '!!document.querySelector(".bp-vote-reel-landed")');
+  assert.equal(
+    await client.evalJS('document.querySelector(".bp-vote-reel-result").textContent'),
+    await client.evalJS('(async()=>(' + runtime + ').E.state.vote.choices[2].title)()'),
+  );
   await state('s.phase==="playing"&&!!document.querySelector(".bp-hole-clock")');
   assert.equal(await client.evalJS('(async()=>(' + runtime + ').E.state.holeIds[0])()'), first);
   const initial = await client.evalJS('document.querySelector(".bp-hole-clock").textContent');

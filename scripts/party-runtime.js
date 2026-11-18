@@ -110,7 +110,7 @@ export function bpScenePrepared(levelId) {
 
 export function bpCastVote(courseId) {
   const state = partyRuntimeStore.state;
-  if (state.bpConnected && state.vote) {
+  if (state.bpConnected && state.vote && !state.vote.resolution) {
     sendPartyCommand({ t: 'course-vote', voteId: state.vote.id, courseId });
   }
 }

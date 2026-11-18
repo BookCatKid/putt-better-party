@@ -1431,6 +1431,7 @@ function votingRoom() {
     countdown: 1,
     results: 1,
     votingMs: 1000,
+    voteRevealMs: 50,
     prepareMatch: async (config) => {
       const ballots = structuredClone(votingBallots.slice(0, config.holes));
       return {
@@ -1469,6 +1470,20 @@ test('optional course voting accepts one revisable vote per connected identity, 
     expect(host.player.done).toBe(false);
     room.handle(host.ws, { t: 'course-vote', voteId: firstVoteId, courseId: 'first-c' });
     room.resolveVote();
+    const resolved = room.voteSnapshot();
+    expect(resolved.resolution).toEqual({ winnerId: 'first-c', durationMs: 50 });
+    expect(room.phase).toBe('hole-results');
+    expect(room.snapshot().currentMap).toBeNull();
+    expect(room.recordEligible).toBe(false);
+    room.handle(guest.ws, { t: 'course-vote', voteId: firstVoteId, courseId: 'first-a' });
+    room.resolveVote();
+    expect(room.voteSnapshot()).toEqual(resolved);
+    room.close(guest.ws);
+    expect(room.voteSnapshot()).toEqual(resolved);
+    const resumed = socket();
+    room.handle(resumed, { t: 'join', ...guest.identity, protocol: 2 });
+    expect(resumed.frames.find((frame) => frame.t === 'party').vote).toEqual(resolved);
+    guest.ws = resumed;
     await waitForRoom(() => room.phase === 'playing');
     expect(room.holeIds[0]).toBe('first-c');
     expect(room.snapshot().currentMap.id).toBe('first-c');
@@ -1515,6 +1530,8 @@ test('optional course voting accepts one revisable vote per connected identity, 
     expect(room.voteSnapshot().ballots).toEqual({});
     // No votes: uniformly choose from the valid options.
     room.resolveVote();
+    expect(['option-d', 'option-e', 'option-f']).toContain(room.voteSnapshot().resolution.winnerId);
+    await waitForRoom(() => room.phase === 'playing' && room.holeIndex === 2);
     expect(['option-d', 'option-e', 'option-f']).toContain(room.holeIds[2]);
     expect(room.snapshot().vote).toBeNull();
   } finally {

@@ -151,7 +151,14 @@ export class Room {
   readonly results: number;
   readonly votingMs: number;
   voteCourses: PublicCourse[][] = [];
-  vote: { id: string; target: number; endsAt: number; ballots: Map<string, string> } | null = null;
+  readonly voteRevealMs: number;
+  vote: {
+    id: string;
+    target: number;
+    endsAt: number;
+    ballots: Map<string, string>;
+    resolved?: NonNullable<PartySnapshot['vote']>;
+  } | null = null;
   readonly onIdle: (room: Room) => void;
   readonly onChange: (room: Room) => void;
   readonly onFinalize: (room: Room) => void;
@@ -199,6 +206,7 @@ export class Room {
       countdown = 5000,
       results = 4000,
       votingMs = 15000,
+      voteRevealMs = 3400,
       onIdle = () => {},
       onChange = () => {},
       onFinalize = () => {},
@@ -211,6 +219,7 @@ export class Room {
     this.countdown = countdown;
     this.results = results;
     this.votingMs = votingMs;
+    this.voteRevealMs = voteRevealMs;
     this.onIdle = onIdle;
     this.onChange = onChange;
     this.onFinalize = onFinalize;
@@ -1081,7 +1090,7 @@ export class Room {
     this.startPrepared();
   }
   startPrepared() {
-    this.recordEligible = true;
+    this.recordEligible = !this.config.courseVoting;
     this.matchId = randomUUID();
     this.holeIndex = 0;
     this.roundHistory = [];
@@ -1266,6 +1275,9 @@ export class Room {
     if (!vote) {
       return null;
     }
+    if (vote.resolved) {
+      return vote.resolved;
+    }
     const ballots = [...vote.ballots].filter(([uid]) => this.players.get(uid)?.ws);
     return {
       id: vote.id,
@@ -1296,6 +1308,7 @@ export class Room {
     const vote = this.vote;
     if (
       !vote ||
+      vote.resolved ||
       this.phase !== 'hole-results' ||
       message.voteId !== vote.id ||
       Date.now() >= vote.endsAt ||
@@ -1328,8 +1341,9 @@ export class Room {
   }
 
   resolveVote() {
+    const vote = this.vote;
     const ballot = this.voteSnapshot();
-    if (!ballot || this.phase !== 'hole-results') {
+    if (!vote || !ballot || vote.resolved || this.phase !== 'hole-results') {
       return;
     }
     const winner = drawWeightedCourse(ballot.choices);
@@ -1337,17 +1351,29 @@ export class Room {
     if (!course) {
       throw new Error('Missing validated vote winner');
     }
-    this.holeIds[ballot.target] = course.id;
-    this.specs[ballot.target] = structuredClone(course.spec);
     this.audit('course_vote_closed', {
       target: ballot.target,
       title: course.title,
       choices: ballot.choices,
       winner: winner.id,
     });
-    this.vote = null;
-    this.holeIndex = ballot.target;
-    this.begin();
+    // Keep the results overlay and frozen draw available to every client,
+    // including reconnecting clients, until the reveal has finished.
+    vote.resolved = {
+      ...ballot,
+      endsAt: Date.now() + this.voteRevealMs,
+      resolution: { winnerId: winner.id, durationMs: this.voteRevealMs },
+    };
+    this.broadcastVote();
+    this.schedule(() => {
+      if (this.vote !== vote || this.phase !== 'hole-results') {
+        return;
+      }
+      this.holeIds[ballot.target] = course.id;
+      this.specs[ballot.target] = structuredClone(course.spec);
+      this.holeIndex = ballot.target;
+      this.begin();
+    }, this.voteRevealMs);
   }
 
   advance() {

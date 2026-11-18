@@ -12,6 +12,7 @@ export function eligibleScores(room: Room, now = Date.now()): BestScore[] {
   if (
     room.phase !== 'final' ||
     room.config.mapSource !== 'random' ||
+    room.config.courseVoting ||
     !room.recordEligible ||
     room.roundHistory.length !== room.config.holes ||
     !room.roundHistory.every(

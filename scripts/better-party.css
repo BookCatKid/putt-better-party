@@ -768,6 +768,116 @@ body:has(> #app) {
   margin-top: auto;
   padding-top: 4px;
 }
+/* The center marker is stationary; the reel decelerates onto the server's draw. */
+.bp-vote-reveal {
+  display: grid;
+  gap: 12px;
+}
+.bp-vote-reel {
+  --bp-reel-step: 152px;
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #0005;
+  padding: 14px 0;
+  isolation: isolate;
+}
+.bp-vote-reel::before,
+.bp-vote-reel::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  width: 18%;
+  z-index: 1;
+  pointer-events: none;
+}
+.bp-vote-reel::before {
+  left: 0;
+  background: linear-gradient(90deg, #10272b, transparent);
+}
+.bp-vote-reel::after {
+  right: 0;
+  background: linear-gradient(270deg, #10272b, transparent);
+}
+.bp-vote-reel-track {
+  display: flex;
+  position: relative;
+  left: 50%;
+  width: max-content;
+  animation-name: bp-vote-roll;
+  animation-timing-function: cubic-bezier(0.12, 0.65, 0.18, 1);
+  animation-fill-mode: both;
+  will-change: transform;
+}
+.bp-vote-reel-item {
+  box-sizing: border-box;
+  flex: 0 0 var(--bp-reel-step);
+  width: var(--bp-reel-step);
+  padding: 0 5px;
+  display: grid;
+  gap: 6px;
+  text-align: center;
+}
+.bp-vote-reel-item img {
+  width: 100%;
+  aspect-ratio: 1200 / 630;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #ffffff0b;
+}
+.bp-vote-reel-item strong {
+  font-size: 12px;
+  line-height: 1.3;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.bp-vote-reel-pointer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: var(--bp-reel-step);
+  transform: translateX(-50%);
+  border: 2px solid #34d399;
+  border-radius: 10px;
+  z-index: 2;
+  pointer-events: none;
+}
+.bp-vote-reel-pointer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 7px solid transparent;
+  border-top-color: #34d399;
+}
+.bp-vote-reel-landed .bp-vote-reel-pointer {
+  background: #34d39914;
+  box-shadow: inset 0 0 16px #34d39935;
+}
+.bp-vote-reel-result {
+  font-size: 14px;
+  font-weight: 800;
+  color: #a7f3d0;
+  min-height: 20px;
+}
+@keyframes bp-vote-roll {
+  from {
+    transform: translateX(calc(var(--bp-reel-step) * -1.5));
+  }
+  to {
+    transform: translateX(var(--bp-reel-stop));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bp-vote-reel-track {
+    animation: none;
+    transform: translateX(var(--bp-reel-stop));
+  }
+}
+
 .bp-hole-clock {
   background: #0009;
   border-radius: 999px;

@@ -62,6 +62,9 @@ test('exclude playlists, restarted matches, skipped or ended holes, timeout and 
   room.config.mapSource = 'picked';
   expect(eligibleScores(room)).toEqual([]);
   room.config.mapSource = 'random';
+  room.config.courseVoting = true;
+  expect(eligibleScores(room)).toEqual([]);
+  room.config.courseVoting = false;
   room.recordEligible = false;
   expect(eligibleScores(room)).toEqual([]);
   room.recordEligible = true;

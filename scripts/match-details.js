@@ -442,6 +442,64 @@ function BpHoleClock() {
   );
 }
 
+// The server has already made the weighted draw. This reel only presents it;
+// the deadline (translated by the runtime adapter) also supports rejoining mid-spin.
+function BpVoteReel({ vote, now }) {
+  const { winnerId, durationMs } = vote.resolution;
+  const winnerIndex = vote.choices.findIndex((choice) => choice.id === winnerId);
+  const winner = vote.choices[winnerIndex];
+  const spinMs = Math.max(1, durationMs - 700);
+  const startsAt = vote.endsAt - durationMs;
+  const landed = now >= startsAt + spinMs;
+  const [elapsedOnMount] = BetterPartyReact.useState(() => Math.max(0, Date.now() - startsAt));
+  const stopIndex = vote.choices.length * 5 + winnerIndex;
+  const reel = Array.from(
+    { length: vote.choices.length * 7 },
+    (_unused, index) => vote.choices[index % vote.choices.length],
+  );
+  const createElement = BetterPartyReact.createElement;
+  return createElement('div', { className: 'bp-vote-reveal' }, [
+    createElement(
+      'div',
+      {
+        key: 'window',
+        className: 'bp-vote-reel' + (landed ? ' bp-vote-reel-landed' : ''),
+        'aria-hidden': true,
+      },
+      [
+        createElement(
+          'div',
+          {
+            key: 'track',
+            className: 'bp-vote-reel-track',
+            style: {
+              '--bp-reel-stop': 'calc(var(--bp-reel-step) * -' + (stopIndex + 0.5) + ')',
+              animationDuration: spinMs + 'ms',
+              animationDelay: -Math.min(spinMs, elapsedOnMount) + 'ms',
+            },
+          },
+          reel.map((choice, index) =>
+            createElement('div', { key: index, className: 'bp-vote-reel-item' }, [
+              createElement('img', {
+                key: 'preview',
+                src: '/api/preview/' + encodeURIComponent(choice.id),
+                alt: '',
+              }),
+              createElement('strong', { key: 'title' }, choice.title),
+            ]),
+          ),
+        ),
+        createElement('div', { key: 'pointer', className: 'bp-vote-reel-pointer' }),
+      ],
+    ),
+    createElement(
+      'p',
+      { key: 'result', className: 'bp-vote-reel-result', role: 'status' },
+      landed ? winner.title : 'Choosing the next course…',
+    ),
+  ]);
+}
+
 function BpCourseVote() {
   const vote = useBetterPartyState(betterPartyStore, (state) => state.vote);
   const uid = useBetterPartyState(betterPartyStore, (state) => state.self?.uid);
@@ -457,6 +515,16 @@ function BpCourseVote() {
   }, [vote?.id]);
   if (!vote) {
     return null;
+  }
+  if (vote.resolution) {
+    return BetterPartyReact.createElement('section', { className: 'bp-course-vote' }, [
+      BetterPartyReact.createElement(
+        'h3',
+        { key: 'title', className: 'text-lg font-black' },
+        'Hole ' + (vote.target + 1),
+      ),
+      BetterPartyReact.createElement(BpVoteReel, { key: vote.id, vote, now }),
+    ]);
   }
   const seconds = Math.max(0, Math.ceil((vote.endsAt - now) / 1000));
   const selected = vote.ballots?.[uid];

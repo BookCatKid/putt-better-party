@@ -80,6 +80,7 @@ export interface RoomOptions {
   countdown?: number;
   results?: number;
   votingMs?: number;
+  voteRevealMs?: number;
   onIdle?: (room: Room) => void;
   onChange?: (room: Room) => void;
   onFinalize?: (room: Room) => void;
@@ -171,6 +172,8 @@ export interface PartySnapshot {
       votes: number;
     }>;
     ballots: Record<string, string>;
+    /** Frozen server draw; endsAt now marks the end of its reveal. */
+    resolution?: { winnerId: string; durationMs: number };
   } | null;
   playlistTitles: Record<string, string>;
   roundHistory: RoundRecord[];
