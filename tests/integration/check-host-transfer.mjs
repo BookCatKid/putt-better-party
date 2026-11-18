@@ -54,6 +54,21 @@ const openHostControls = async (client) => {
 };
 const addButtons =
   '[...document.querySelectorAll("button")].filter(b=>b.getAttribute("aria-label")?.startsWith("Add "))';
+
+// The import endpoint proxies a live fetch to putt.day and can fail
+// transiently; the picker surfaces the error and re-enables the button.
+async function addCourse(client, index, expectedCount) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await client.evalJS(`${addButtons}[${index}].click()`);
+    try {
+      await expect(client, `s.config.selectedHoleIds?.length===${expectedCount}`, 20000);
+      return;
+    } catch {
+      // Retry the same card.
+    }
+  }
+  throw Error(`Adding course card ${index} kept failing`);
+}
 const capabilityOf = (client) =>
   client.evalJS(
     `(()=>{const code=sessionStorage.getItem("bp.lastRoom");return code?sessionStorage.getItem("bp.host."+code):null})()`,
@@ -87,8 +102,7 @@ try {
   );
   await openPlaylistEditor(host);
   await waitFor(host, addButtons + '.length>=1', 25000);
-  await host.evalJS(`${addButtons}[0].click()`);
-  await expect(host, 's.config.selectedHoleIds?.length===1', 20000);
+  await addCourse(host, 0, 1);
   const originalCapability = await capabilityOf(host);
   assert.equal(typeof originalCapability, 'string');
 
