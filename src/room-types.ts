@@ -12,6 +12,17 @@ export interface RoomSocket {
   send(message: string): unknown;
   close(code?: number, reason?: string): unknown;
 }
+
+/**
+ * A token bucket: capacity is the burst, and it refills at a fixed rate. The
+ * server keeps one per connection so a single client cannot spend the room's
+ * whole CPU, and one much smaller bucket for the frames that fan out to every
+ * player, which are the ones worth flooding.
+ */
+export interface RateBudget {
+  tokens: number;
+  updatedAt: number;
+}
 export interface Identity {
   uid: string;
   session: string;
@@ -44,6 +55,11 @@ export interface Player {
   /** The connected client declares that it reports scene readiness each round. */
   reportsSceneReadiness?: boolean;
   lastPosition?: number;
+  /** Token buckets limiting this connection's frames; see `MESSAGE_BURST`. */
+  messageBudget: RateBudget;
+  boardBudget: RateBudget;
+  /** True once the exhausted-budget audit has been written for this socket. */
+  messageBudgetReported?: boolean;
 }
 export interface RoundScore {
   uid: string;

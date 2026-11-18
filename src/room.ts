@@ -26,6 +26,7 @@ import type {
   PartySnapshot,
   RosterEntry,
   Standing,
+  RateBudget,
 } from './room-types.js';
 import type { BoardFrame, ServerFrame } from './protocol.js';
 
@@ -49,6 +50,46 @@ import type { BoardFrame, ServerFrame } from './protocol.js';
  * and every projection, and `tests/admin.test.js` covers the admin view.
  */
 const token = () => randomBytes(24).toString('base64url');
+/**
+ * A per-connection ceiling on client frames, so one socket cannot spend the
+ * whole room's CPU. Multiplayer play is not chatty: a client reports readiness
+ * once per round, a stroke count when it changes, a few position updates per
+ * second while aiming, and a completion at the end. The budget is therefore
+ * sized well above real play and refilled continuously, so a correct client
+ * never notices it, while a loop of frames is stopped instead of multiplied by
+ * the number of players in the room.
+ */
+const MESSAGE_BURST = 120;
+const MESSAGE_REFILL_PER_SECOND = 60;
+/**
+ * A frame that changes the server's view of a player and then fans out to every
+ * other player is the expensive kind. It is what makes flooding worthwhile, so
+ * it gets its own, much smaller budget: a player's stroke count can only change
+ * when they take a stroke.
+ */
+const BOARD_BURST = 10;
+const BOARD_REFILL_PER_SECOND = 4;
+
+/**
+ * A token bucket: capacity is the burst, and it refills at a fixed rate. Time is
+ * taken as a parameter rather than read here so the decision is the same in a
+ * test as in the server.
+ */
+function freshBudget(capacity: number, now: number): RateBudget {
+  return { tokens: capacity, updatedAt: now };
+}
+/** Spend one token if there is one; answers whether the frame may proceed. */
+function spend(budget: RateBudget, capacity: number, perSecond: number, now: number): boolean {
+  const elapsedSeconds = Math.max(0, now - budget.updatedAt) / 1000;
+  budget.tokens = Math.min(capacity, budget.tokens + elapsedSeconds * perSecond);
+  budget.updatedAt = now;
+  if (budget.tokens < 1) {
+    return false;
+  }
+  budget.tokens -= 1;
+  return true;
+}
+
 /**
  * Round start waits for connected players to report their scene as prepared,
  * but never longer than this after the countdown elapses. Without the gate a
@@ -396,6 +437,8 @@ export class Room {
         totalTimeMs: 0,
         strokes: 0,
         done: false,
+        messageBudget: freshBudget(MESSAGE_BURST, Date.now()),
+        boardBudget: freshBudget(BOARD_BURST, Date.now()),
       };
       this.players.set(identity.uid, player);
       if (
@@ -651,6 +694,17 @@ export class Room {
     }
     this.lastActivity = Date.now();
     const host = player.uid === this.hostUid;
+    const now = Date.now();
+    if (!spend(player.messageBudget, MESSAGE_BURST, MESSAGE_REFILL_PER_SECOND, now)) {
+      // Dropping rather than answering is deliberate: a client that is flooding
+      // must not be able to make the server write back to it. The first frame
+      // over budget is reported so an honest client with a real bug can see it.
+      if (!player.messageBudgetReported) {
+        player.messageBudgetReported = true;
+        this.audit('message_budget_exhausted', { uid: player.uid, kind: message.t ?? null });
+      }
+      return;
+    }
     if (
       (message.t === 'prog' || message.t === 'forfeit' || message.f === 1) &&
       ('matchId' in message || 'holeIndex' in message) &&
@@ -758,13 +812,23 @@ export class Room {
         return;
       case 'prog':
         if (this.playable(player) && isIntegerInRange(message.st, 0, 200)) {
-          if (player.strokes !== message.st) {
-            this.audit('stroke_count', {
-              uid: player.uid,
-              previous: player.strokes,
-              strokes: message.st,
-            });
+          // A progress report is a level, not an event: repeating the count
+          // already recorded changes nothing, so it must not cost a board
+          // broadcast to every player. Without this, one client could make the
+          // server serialize and fan out the standings as fast as it can write.
+          if (player.strokes === message.st) {
+            return;
           }
+          // A board broadcast is the expensive kind, so a player cannot change
+          // their reported count faster than they could take real strokes.
+          if (!spend(player.boardBudget, BOARD_BURST, BOARD_REFILL_PER_SECOND, Date.now())) {
+            return;
+          }
+          this.audit('stroke_count', {
+            uid: player.uid,
+            previous: player.strokes,
+            strokes: message.st,
+          });
           player.strokes = message.st;
           this.broadcast(this.board());
         }
@@ -798,7 +862,6 @@ export class Room {
       (message.c === 0 || message.c === 1) &&
       (message.m === 0 || message.m === 1)
     ) {
-      const now = Date.now();
       if (now - (player.lastPosition ?? 0) < 40) {
         return;
       }
