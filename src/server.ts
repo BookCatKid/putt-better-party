@@ -1,3 +1,4 @@
+import { createAdmin } from './admin.js';
 import { Room } from './room.js';
 import { logEvent } from './event-log.js';
 import { RoomStore } from './room-store.js';
@@ -36,6 +37,13 @@ for (const id of courseIndex.keys()) {
 }
 const response = (data: unknown, status = 200) => Response.json(data, { status });
 const origin = new URL(process.env.BP_PUBLIC_ORIGIN ?? 'http://127.0.0.1:' + port).origin;
+const admin = createAdmin({
+  origin,
+  passwordHash: process.env.BP_ADMIN_PASSWORD_HASH,
+  rooms,
+  courseCount,
+  eventLog: process.env.BP_EVENT_LOG,
+});
 const csp =
   "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' " +
   origin.replace(/^http/, 'ws') +
@@ -96,6 +104,31 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
       return response({ error: 'Invalid origin' }, 403);
     }
     try {
+      if (pathname.startsWith('/api/admin/')) {
+        return await admin(req, pathname);
+      }
+      if (req.method === 'GET' && pathname === '/admin') {
+        return new Response(Bun.file(new URL('./admin.html', import.meta.url)), {
+          headers: {
+            'content-type': 'text/html; charset=utf-8',
+            'content-security-policy':
+              "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+            'referrer-policy': 'no-referrer',
+            'cache-control': 'no-store',
+            'x-content-type-options': 'nosniff',
+            'x-robots-tag': 'noindex, nofollow',
+          },
+        });
+      }
+      if (req.method === 'GET' && (pathname === '/admin.css' || pathname === '/admin.js')) {
+        const file =
+          pathname === '/admin.css'
+            ? new URL('./admin.css', import.meta.url)
+            : new URL('../scripts/admin.js', import.meta.url);
+        return new Response(Bun.file(file), {
+          headers: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
+        });
+      }
       if (pathname === '/api/create' && req.method === 'POST') {
         if (rooms.size >= 100) {
           return response({ error: 'Room limit reached' }, 429);

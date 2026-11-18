@@ -90,7 +90,7 @@ export default [
   },
 
   {
-    files: ['scripts/home.js'],
+    files: ['scripts/home.js', 'scripts/admin.js'],
     languageOptions: { globals: globals.browser },
   },
   {

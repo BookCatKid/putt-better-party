@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Admin · Better Party</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="/assets/styles-S28F_fms.css" />
+    <link rel="stylesheet" href="/admin.css" />
+    <script src="/admin.js" defer></script>
+  </head>
+  <body class="bp-admin">
+    <main id="unlock" class="admin-unlock" hidden>
+      <h1>Admin</h1>
+      <p>Enter the admin password.</p>
+      <form id="login">
+        <input
+          id="password"
+          type="password"
+          placeholder="Admin password"
+          aria-label="Admin password"
+          autocomplete="current-password"
+          required
+          maxlength="256"
+        />
+        <button class="admin-primary" type="submit">Unlock</button>
+      </form>
+      <p id="login-error" role="alert" class="admin-error"></p>
+      <a href="/home">Back to Better Party</a>
+    </main>
+    <main id="dashboard" class="admin-dashboard" hidden>
+      <header class="admin-header">
+        <h1>Party admin</h1>
+        <div class="admin-actions">
+          <span id="updated"></span>
+          <button id="refresh" type="button">Refresh</button>
+          <button id="logout" type="button">Lock</button>
+        </div>
+      </header>
+      <p id="dashboard-error" class="admin-error" role="alert"></p>
+      <section id="metrics" class="admin-metrics" aria-label="Server overview"></section>
+      <section class="admin-section">
+        <div class="admin-heading">
+          <h2>Rooms</h2>
+          <label><input id="connected-only" type="checkbox" /> Connected only</label>
+        </div>
+        <div id="rooms" class="admin-rooms"></div>
+      </section>
+      <section class="admin-section">
+        <div class="admin-heading">
+          <h2>Recent activity</h2>
+          <div class="admin-filters">
+            <input
+              id="filter"
+              type="search"
+              placeholder="Filter room, player or event"
+              aria-label="Filter activity"
+            />
+            <select id="event-kind" aria-label="Activity type">
+              <option value="">All events</option>
+              <option value="match">Matches</option>
+              <option value="player">Players</option>
+              <option value="round">Rounds</option>
+              <option value="error">Errors</option>
+            </select>
+          </div>
+        </div>
+        <p id="activity-note"></p>
+        <div class="admin-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Room</th>
+                <th>Event</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="activity"></tbody>
+          </table>
+        </div>
+      </section>
+      <a href="/home">Back to Better Party</a>
+    </main>
+  </body>
+</html>
