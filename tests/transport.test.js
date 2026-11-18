@@ -325,7 +325,12 @@ test('a completed handshake disarms the 12 second connection deadline', () => {
   const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
   const socket = env.WebSocket.sockets[0];
   handshake(env, socket);
-  env.clock.advance(60_000);
+  // Answer the heartbeat as a live server would; this test is about the opening
+  // deadline, not about a socket that has gone silent.
+  for (let elapsed = 0; elapsed < 60_000; elapsed += 5000) {
+    env.clock.advance(5000);
+    socket.message({ t: 'pong' });
+  }
   expect(socket.readyState).toBe(1);
   expect(env.WebSocket.sockets.length).toBe(1);
   expect(env.log.connection.filter((entry) => entry.connected === false).length).toBe(1);
@@ -694,5 +699,260 @@ test('a hand-over is what a reconnect claims with', () => {
   const third = env.WebSocket.sockets[2];
   third.open();
   expect(third.sent[0]).toMatchObject({ host: 'capability-3' });
+  dispose();
+});
+
+test('a half-open socket is abandoned once its heartbeats go unanswered', () => {
+  // A dead peer on a live TCP path never delivers a close event, so the adapter
+  // would otherwise stay "connected" forever and swallow every stroke the player
+  // makes. Two unanswered heartbeats are the signal to reconnect.
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const stalled = env.WebSocket.sockets[0];
+  handshake(env, stalled);
+  // The peer is gone but the socket still reports itself open.
+  stalled.readyState = 1;
+  expect(env.log.connection.at(-1).connected).toBe(true);
+
+  env.clock.advance(15_000);
+  expect(stalled.sent.filter((frame) => frame.t === 'ping').length).toBe(1);
+  env.clock.advance(15_000);
+  expect(stalled.sent.filter((frame) => frame.t === 'ping').length).toBe(2);
+  // Still no reply, so the third heartbeat gives up instead of sending.
+  env.clock.advance(15_000);
+  expect(stalled.sent.filter((frame) => frame.t === 'ping').length).toBe(2);
+  expect(env.log.connection.at(-1).connected).toBe(false);
+
+  env.clock.advance(1000);
+  const recovered = env.WebSocket.sockets[1];
+  expect(recovered).toBeDefined();
+  handshake(env, recovered);
+  expect(env.log.connection.at(-1).connected).toBe(true);
+  dispose();
+});
+
+test('any server frame clears the heartbeat debt', () => {
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const socket = env.WebSocket.sockets[0];
+  handshake(env, socket);
+  env.clock.advance(15_000);
+  expect(socket.sent.filter((frame) => frame.t === 'ping').length).toBe(1);
+  // The pong arrives, so the next heartbeat starts from zero again.
+  socket.message({ t: 'pong' });
+  env.clock.advance(15_000);
+  env.clock.advance(15_000);
+  expect(socket.sent.filter((frame) => frame.t === 'ping').length).toBe(3);
+  expect(env.log.connection.filter((entry) => entry.connected === false).length).toBe(1);
+  expect(env.WebSocket.sockets.length).toBe(1);
+  dispose();
+});
+
+test('a disconnect while the ball is still moving neither completes nor double-counts', () => {
+  // The guest drops mid-swing: the shot is charging locally and no result
+  // exists yet. Nothing may be reported for the round, and the reconnect must
+  // wait for the fresh attempt rather than inventing a score.
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  let socket = env.WebSocket.sockets[0];
+  handshake(env, socket);
+  env.gameStore.setState({ level: { id: 'p' }, strokes: 1, phase: 'charging' });
+  expect(socket.sent.filter((frame) => frame.t === 'prog').at(-1)).toMatchObject({ st: 1 });
+  expect(socket.sent.some((frame) => frame.f === 1)).toBe(false);
+
+  socket.drop();
+  env.clock.advance(1000);
+  socket = env.WebSocket.sockets[1];
+  handshake(env, socket);
+  // The same round is still in flight; the charge is reported again but nothing
+  // is claimed as finished.
+  expect(socket.sent.some((frame) => frame.f === 1)).toBe(false);
+  expect(socket.sent.some((frame) => frame.t === 'forfeit')).toBe(false);
+  // Finishing the swing after the reconnect delivers exactly one completion.
+  env.gameStore.setState({ phase: 'holed', strokes: 2, result: { strokes: 2, par: 3 } });
+  expect(socket.sent.filter((frame) => frame.f === 1).length).toBe(1);
+  dispose();
+});
+
+test('a disconnect during the countdown does not claim a score or readiness from a stale level', () => {
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  let socket = env.WebSocket.sockets[0];
+  socket.open();
+  socket.message({ t: 'hello', id: 'conn-1', isHost: false, count: 1, role: 'player' });
+  socket.message({
+    t: 'party',
+    matchId: 'm1',
+    holeIndex: 0,
+    phase: 'countdown',
+    holeIds: ['p'],
+    currentMap: { id: 'p' },
+  });
+  socket.message({ t: 'roster', players: [] });
+  socket.message({ t: 'board', standings: [], alive: 1, holed: 0 });
+  env.setSceneReadyLevelId('p');
+  env.gameStore.setState({ strokes: 0 });
+  expect(socket.sent.filter((frame) => frame.t === 'scene').length).toBe(1);
+
+  socket.drop();
+  env.clock.advance(1000);
+  socket = env.WebSocket.sockets[1];
+  socket.open();
+  expect(socket.sent[0]).toMatchObject({ t: 'join', scene: true });
+  socket.message({ t: 'hello', id: 'conn-2', isHost: false, count: 1, role: 'player' });
+  socket.message({
+    t: 'party',
+    matchId: 'm1',
+    holeIndex: 0,
+    phase: 'countdown',
+    holeIds: ['p'],
+    currentMap: { id: 'p' },
+  });
+  socket.message({ t: 'roster', players: [] });
+  socket.message({ t: 'board', standings: [], alive: 1, holed: 0 });
+  // The round is the same one the level was prepared for, so readiness is
+  // restated on the new connection: the server dropped the old document's
+  // report along with the socket.
+  expect(socket.sent.filter((frame) => frame.t === 'scene').length).toBe(1);
+  expect(socket.sent.some((frame) => frame.f === 1)).toBe(false);
+  dispose();
+});
+
+test('readiness is not restated for a round this connection has not prepared', () => {
+  // The reconnect lands on a round the client has no level for yet. Claiming
+  // readiness from the previous round's prepared level would start the countdown
+  // before the course is on screen.
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  let socket = env.WebSocket.sockets[0];
+  socket.open();
+  socket.message({ t: 'hello', id: 'conn-1', isHost: false, count: 1, role: 'player' });
+  socket.message({
+    t: 'party',
+    matchId: 'm1',
+    holeIndex: 0,
+    phase: 'countdown',
+    holeIds: ['p', 'q'],
+    currentMap: { id: 'p' },
+  });
+  socket.message({ t: 'roster', players: [] });
+  socket.message({ t: 'board', standings: [], alive: 1, holed: 0 });
+  env.setSceneReadyLevelId('p');
+  env.gameStore.setState({ strokes: 0 });
+  expect(socket.sent.filter((frame) => frame.t === 'scene').length).toBe(1);
+
+  socket.drop();
+  env.clock.advance(1000);
+  socket = env.WebSocket.sockets[1];
+  socket.open();
+  socket.message({ t: 'hello', id: 'conn-2', isHost: false, count: 1, role: 'player' });
+  // The server had advanced to hole 2 while the client was away, and the route
+  // still has hole 1 prepared.
+  socket.message({
+    t: 'party',
+    matchId: 'm1',
+    holeIndex: 1,
+    phase: 'countdown',
+    holeIds: ['p', 'q'],
+    currentMap: { id: 'q' },
+  });
+  socket.message({ t: 'roster', players: [] });
+  socket.message({ t: 'board', standings: [], alive: 1, holed: 0 });
+  env.gameStore.setState({ strokes: 1 });
+  expect(socket.sent.some((frame) => frame.t === 'scene')).toBe(false);
+  // Once the new course is prepared the report is made for that round.
+  env.setSceneReadyLevelId('q');
+  env.gameStore.setState({ strokes: 0 });
+  const frames = socket.sent.filter((frame) => frame.t === 'scene');
+  expect(frames.length).toBe(1);
+  expect(frames[0]).toMatchObject({ matchId: 'm1', holeIndex: 1, levelId: 'q' });
+  dispose();
+});
+
+test('a full reload during a round forfeits one hole and never resurrects the old score', () => {
+  // A full reload is a new document: it has no local physics state, so the
+  // server forfeits the hole and turns the player into a round spectator. The
+  // new document must not push the previous document's score at the new round.
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const first = env.WebSocket.sockets[0];
+  handshake(env, first);
+  env.gameStore.setState({ level: { id: 'p' }, strokes: 3, phase: 'charging' });
+
+  // A reload is a fresh adapter instance with a new instance id, which is how
+  // the server distinguishes it from a reconnect.
+  dispose();
+  const reloadedIdentity = { ...IDENTITY, instance: 'inst-2' };
+  const disposeReload = connectBetterParty('ABCDE', reloadedIdentity, { bindings: env.bindings });
+  env.clock.advance(1000);
+  const second = env.WebSocket.sockets.at(-1);
+  second.open();
+  expect(second.sent[0]).toMatchObject({ t: 'join', instance: 'inst-2' });
+  second.message({ t: 'hello', id: 'conn-2', isHost: false, count: 1, role: 'spectator' });
+  second.message({
+    t: 'party',
+    matchId: 'm1',
+    holeIndex: 0,
+    phase: 'playing',
+    holeIds: ['p'],
+    currentMap: { id: 'p' },
+  });
+  second.message({ t: 'roster', players: [] });
+  second.message({ t: 'board', standings: [], alive: 1, holed: 0 });
+  // A spectator reports nothing: no progress and no completion from the state the
+  // previous document was carrying.
+  env.gameStore.setState({ strokes: 3, phase: 'charging' });
+  expect(second.sent.some((frame) => frame.t === 'prog')).toBe(false);
+  expect(second.sent.some((frame) => frame.f === 1)).toBe(false);
+  expect(second.sent.some((frame) => frame.t === 'scene')).toBe(false);
+  disposeReload();
+});
+
+test('a disconnect during the results phase settles rather than replaying the hole', () => {
+  // Between holes the round is over for everybody: the client is on the results
+  // screen and the server is loading the next course. A drop here must not
+  // resend the previous hole's score or claim the next one is ready.
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  let socket = env.WebSocket.sockets[0];
+  handshake(env, socket);
+  env.gameStore.setState({
+    level: { id: 'p' },
+    strokes: 2,
+    phase: 'holed',
+    result: { strokes: 2, par: 3 },
+  });
+  socket.message({
+    t: 'party',
+    matchId: 'm1',
+    holeIndex: 0,
+    phase: 'hole-results',
+    holeIds: ['p', 'q'],
+    currentMap: { id: 'p' },
+  });
+  expect(socket.sent.filter((frame) => frame.f === 1).length).toBe(1);
+
+  socket.drop();
+  env.clock.advance(1000);
+  socket = env.WebSocket.sockets[1];
+  handshake(env, socket, { matchId: 'm1', holeIndex: 0, phase: 'hole-results', mapId: 'p' });
+  // The hole is already scored, so the new connection claims nothing: a
+  // completion is only meaningful while the round is being played. Restating it
+  // here would be a stale result arriving after the server settled the hole.
+  expect(socket.sent.filter((frame) => frame.f === 1).length).toBe(0);
+  expect(socket.sent.some((frame) => frame.t === 'prog')).toBe(false);
+
+  // The next hole arrives; the previous score must not travel with it.
+  socket.message({
+    t: 'party',
+    matchId: 'm1',
+    holeIndex: 1,
+    phase: 'countdown',
+    holeIds: ['p', 'q'],
+    currentMap: { id: 'q' },
+  });
+  env.gameStore.setState({ strokes: 0, phase: 'aiming', result: undefined });
+  expect(socket.sent.filter((frame) => frame.f === 1).length).toBe(0);
+  expect(socket.sent.some((frame) => frame.t === 'forfeit')).toBe(false);
   dispose();
 });

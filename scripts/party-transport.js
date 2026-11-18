@@ -72,6 +72,10 @@ function connectBetterParty(code, identity, options = {}) {
   let roundChangePending = false;
   let sawMapReadyFalse = false;
   let announcedSceneKey = '';
+  // A socket can be half-open: the peer is gone but no close event ever arrives,
+  // so sends keep "succeeding" into the void. Counting unanswered heartbeats is
+  // the only way to notice, and a real drop is what forces a reconnect.
+  let unansweredPings = 0;
 
   function socketOpen() {
     return socket?.readyState === bind.WebSocket.OPEN;
@@ -255,6 +259,9 @@ function connectBetterParty(code, identity, options = {}) {
     if (!message || typeof message !== 'object') {
       return;
     }
+    // Anything at all from the server proves the connection is alive, including
+    // the pong that answers our own heartbeat.
+    unansweredPings = 0;
 
     switch (message.t) {
       case 'hello':
@@ -341,6 +348,11 @@ function connectBetterParty(code, identity, options = {}) {
     awaitingSnapshot = true;
     receivedRoster = false;
     receivedBoard = false;
+    unansweredPings = 0;
+    // A new connection has to state its readiness again: the server may have
+    // dropped the previous document's report, and repeating it is harmless
+    // because a round that already knows we are ready ignores the repeat.
+    announcedSceneKey = '';
     const protocol = bind.location.protocol === 'https:' ? 'wss:' : 'ws:';
     let nextSocket;
     try {
@@ -432,7 +444,28 @@ function connectBetterParty(code, identity, options = {}) {
   connect();
   bind.registerSender(send);
   const gameSubscription = bind.gameStore.subscribe(reportProgress);
-  const heartbeat = bind.setInterval(() => send({ t: 'ping' }), 15_000);
+  /**
+   * A half-open socket accepts writes but never answers them, so a client that
+   * only waits for a close event keeps showing itself as connected while the
+   * player's strokes go nowhere. Two unanswered heartbeats are treated as a
+   * dropped connection and the normal reconnect path takes over.
+   */
+  const heartbeat = bind.setInterval(() => {
+    if (unansweredPings >= 2) {
+      const stalled = socket;
+      socket = null;
+      synchronized = false;
+      bind.clearTimeout(handshakeTimer);
+      bind.connection(false);
+      scheduleReconnect();
+      // Best effort: the close is what tells the server, when it can be told.
+      stalled?.close();
+      return;
+    }
+    if (send({ t: 'ping' })) {
+      unansweredPings++;
+    }
+  }, 15_000);
   const presenceTimer = bind.setInterval(publishPosition, 100);
 
   return () => {
