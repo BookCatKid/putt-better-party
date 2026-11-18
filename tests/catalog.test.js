@@ -654,7 +654,7 @@ test('public difficulty statistics use the archived GET function with only a pub
 });
 
 test('random voting replaces withdrawn details with distinct public options', async () => {
-  const holes = Array.from({ length: 7 }, (_, index) => ({
+  const holes = Array.from({ length: 7 }, (_unused, index) => ({
     id: 'replace-vote-' + index,
     title: 'Course ' + index,
   }));
