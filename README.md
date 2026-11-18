@@ -46,7 +46,7 @@ Better Party implements its own room authority, WebSocket transport and persiste
 | `tests/`   | Unit and integration tests                             |
 | `docs/`    | Architecture and development documentation             |
 
-Read the [development guide](docs/development.md) for quality checks, testing and upstream updates, the [configuration reference](docs/configuration.md) for every setting, limit and default, and the [operations guide](docs/operations.md) for restart, backup, exposure and containers.
+Read the [development guide](docs/development.md) for quality checks, testing and upstream updates, the [configuration reference](docs/configuration.md) for every setting, limit and default, and the [operations guide](docs/operations.md) for restart, backup, exposure and containers. See [CONTRIBUTING.md](CONTRIBUTING.md) before changing behaviour, and [CHANGELOG.md](CHANGELOG.md) for what has changed between releases.
 
 ## Configuration
 
