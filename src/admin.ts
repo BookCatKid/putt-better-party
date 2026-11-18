@@ -136,12 +136,22 @@ export async function recentAdminEvents(filename?: string) {
 
 export function createAdmin({
   origin,
+  allowedOrigins,
+  secureCookies,
   passwordHash,
   rooms,
   courseCount,
   eventLog,
 }: {
   origin: string;
+  /**
+   * Exact origins an admin write may come from. A proxied deployment may answer
+   * more than one spelling of its host, so this is a list rather than the single
+   * canonical origin; the canonical one is only used for links.
+   */
+  allowedOrigins: readonly string[];
+  /** A cookie is marked `Secure` only when the canonical origin is HTTPS. */
+  secureCookies: boolean;
   passwordHash?: string;
   rooms: Map<string, Room>;
   courseCount: () => number;
@@ -156,7 +166,7 @@ export function createAdmin({
     token +
     '; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=' +
     maxAge +
-    (origin.startsWith('https:') ? '; Secure' : '');
+    (secureCookies ? '; Secure' : '');
   const session = (request: Request) =>
     request.headers
       .get('cookie')
@@ -176,7 +186,7 @@ export function createAdmin({
         sessions.delete(token);
       }
     }
-    if (request.method !== 'GET' && request.headers.get('origin') !== origin) {
+    if (request.method !== 'GET' && !allowedOrigins.includes(request.headers.get('origin') ?? '')) {
       return reply({ error: 'Invalid origin.' }, 403);
     }
     if (pathname === '/api/admin/login' && request.method === 'POST') {

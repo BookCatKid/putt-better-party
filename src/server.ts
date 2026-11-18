@@ -3,6 +3,7 @@ import { PlaylistJobs, parseFilters } from './playlist-generator.js';
 import { currentDailyNumber, validateCourse } from './upstream/client-adapter.js';
 import { createAdmin } from './admin.js';
 import { Room } from './room.js';
+import { readServerConfig } from './config.js';
 import { logEvent } from './event-log.js';
 import { RoomStore } from './room-store.js';
 import { courseIndex, courseCount, fetchPublicMap, prepareMatch } from './catalog.js';
@@ -25,7 +26,7 @@ import { ClientScriptAssets } from './client-scripts.js';
 import { randomInt } from 'node:crypto';
 import path from 'node:path';
 
-const port = Number(process.env.PORT || 8789);
+const config = readServerConfig();
 const root = path.resolve(import.meta.dir, '../web');
 /**
  * The standalone browser scripts are authored as TypeScript and transpiled on
@@ -70,7 +71,7 @@ for (const id of courseIndex.keys()) {
   rememberPublicMetadata(id, courseIndex.get(id)?.title);
 }
 const response = (data: unknown, status = 200) => Response.json(data, { status });
-const origin = new URL(process.env.BP_PUBLIC_ORIGIN ?? 'http://127.0.0.1:' + port).origin;
+const origin = config.canonicalOrigin;
 const READ_METHODS = ['GET', 'HEAD'] as const;
 const WRITE_METHODS = ['POST'] as const;
 const methodNotAllowed = (allowed: readonly string[]) =>
@@ -102,10 +103,12 @@ const methodNotAllowed = (allowed: readonly string[]) =>
  */
 const csp =
   "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' " +
-  origin.replace(/^http/, 'ws') +
+  config.websocketOrigins.join(' ') +
   "; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
 const admin = createAdmin({
   origin,
+  allowedOrigins: config.allowedOrigins,
+  secureCookies: config.canonicalOrigin.startsWith('https:'),
   passwordHash: process.env.BP_ADMIN_PASSWORD_HASH,
   rooms,
   courseCount,
@@ -124,13 +127,13 @@ const page = (markup: string) =>
 const html =
   '<!doctype html><html lang="en" class="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Party · Better Party</title><link rel="icon" href="/favicon.ico" type="image/x-icon"><link rel="stylesheet" href="/assets/styles-S28F_fms.css"><body class="bp-page"><div id="app"></div><script type="module" src="/assets/index-DFMxt6BL.js"></script></body></html>';
 const server = Bun.serve<{ room: Room; uid: string | null }>({
-  hostname: '127.0.0.1',
-  port,
+  hostname: config.hostname,
+  port: config.port,
   maxRequestBodySize: MAX_JSON_BODY_BYTES,
   async fetch(req, httpServer) {
     const url = new URL(req.url);
     const pathname = url.pathname;
-    if (req.headers.get('host') !== new URL(origin).host) {
+    if (!config.allowedHosts.includes(req.headers.get('host') ?? '')) {
       return new Response('Invalid host', { status: 403 });
     }
     // Every route is a read or a create: an unexpected verb (PUT, DELETE, PATCH,
@@ -146,7 +149,7 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
       }
       const code = decodedPathSegment(pathname.slice('/ws/party/'.length));
       const room = isRoomCode(code) ? rooms.get(code) : undefined;
-      if (!room || req.headers.get('origin') !== origin) {
+      if (!room || !config.allowedOrigins.includes(req.headers.get('origin') ?? '')) {
         return new Response('Room not found or invalid origin', { status: 403 });
       }
       return httpServer.upgrade(req, { data: { room, uid: null } })
@@ -174,7 +177,7 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
       }
       return response({ ok: true, rooms: rooms.size, maps: courseCount() });
     }
-    if (req.method === 'POST' && req.headers.get('origin') !== origin) {
+    if (req.method === 'POST' && !config.allowedOrigins.includes(req.headers.get('origin') ?? '')) {
       return response({ error: 'Invalid origin' }, 403);
     }
     try {
@@ -564,5 +567,5 @@ setInterval(() => {
     }
   }
 }, 60000);
-logEvent('server_started', { port });
+logEvent('server_started', { hostname: config.hostname, port: config.port });
 console.log('Better Party local only:', server.url.href);

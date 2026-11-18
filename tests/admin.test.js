@@ -13,7 +13,15 @@ const passwordHash = await Bun.password.hash(password, {
   timeCost: 2,
 });
 const makeAdmin = (options = {}) =>
-  createAdmin({ origin, passwordHash, rooms: new Map(), courseCount: () => 3, ...options });
+  createAdmin({
+    origin,
+    allowedOrigins: [origin],
+    secureCookies: true,
+    passwordHash,
+    rooms: new Map(),
+    courseCount: () => 3,
+    ...options,
+  });
 const send = (admin, path, { body, cookie, source = origin } = {}) => {
   const url = '/api/admin/' + path;
   return admin(
