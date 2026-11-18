@@ -96,6 +96,56 @@ const isTransportSpectator = _e;
         "ne=(0,J.useCallback)(()=>{window.setTimeout(()=>j(!0),2500)},[])",
         "ne=(0,J.useCallback)(()=>{bpScenePrepared(l.id);window.setTimeout(()=>j(!0),2500)},[l.id])",
     )
+    # The original Dn ball starts at [0, radius, 0] and consumes the
+    # runtime's one-shot teleport AFTER the physics step. A replacement
+    # Rapier world can therefore advance at the origin, or miss a teleport
+    # consumed by the outgoing world. Give the party body its actual tee
+    # and initialize each fresh attempt/body before either physics driver.
+    source = replace_once(
+        source,
+        "function Dn({century:e=!1})",
+        "function Dn({century:e=!1,bpLevel,bpRuntimeReady})",
+    )
+    source = replace_once(
+        source,
+        "return S((a,o)=>{let p=t?o:Math.min(o,_n)",
+        """const bpAttempt = (0,J.useRef)(null);
+    const bpSpawn = bpLevel ? Lr(bpLevel).spawn : null;
+    W(()=>{
+      const body=n.current, game=B.state;
+      if(!bpSpawn || !bpRuntimeReady.current || !body || game.level?.id!==bpLevel.id) return;
+      if(bpAttempt.current?.body===body && bpAttempt.current.seq===game.attemptSeq) return;
+      bpAttempt.current={body,seq:game.attemptSeq};
+      if(game.phase!==`aiming` || game.strokes!==0) return;
+      body.setTranslation({x:bpSpawn[0],y:bpSpawn[1]+K.ballRadius,z:bpSpawn[2]},true);
+      body.setLinvel(gn,true);
+      body.setAngvel(gn,true);
+      if(N.current){
+        N.current=false;
+        body.setBodyType(f.Dynamic,true);
+        if(r.current) r.current.visible=true;
+        if(i.current) i.current.visible=e;
+      }
+      V.discontinuitySeq++;
+      V.ballPos.set(bpSpawn[0],bpSpawn[1]+K.ballRadius,bpSpawn[2]);
+    },-101);
+    return S((a,o)=>{let p=t?o:Math.min(o,_n)""",
+    )
+    source = replace_once(
+        source,
+        "let h=n.current;if(!h)return;let g=B.state;if(g.teleport)",
+        "let h=n.current;if(!h)return;let g=B.state;if(bpLevel&&(!bpRuntimeReady.current||g.level?.id!==bpLevel.id))return;if(g.teleport)",
+    )
+    source = replace_once(
+        source,
+        "position:[0,K.ballRadius,0],onCollisionEnter",
+        "position:bpSpawn?[bpSpawn[0],bpSpawn[1]+K.ballRadius,bpSpawn[2]]:[0,K.ballRadius,0],onCollisionEnter",
+    )
+    source = replace_once(
+        source,
+        "(0,Y.jsx)(Dn,{century:m})",
+        "(0,Y.jsx)(Dn,{century:m,bpLevel:_e?l:void 0,bpRuntimeReady:z})",
+    )
     return (
         "import{bpConnection,bpAck,bpScenePrepared,transportSceneReadyLevelId,"
         'receiveTransportHostToken,clearTransportHostToken}from"./runtime-DL2fiDAQ.js";' + source
@@ -292,5 +342,5 @@ for source in (private / "assets").glob("*.js"):
     "export const Xt={state:{active:false}}; export const A=new Map();"
 )
 print(
-    "Patched isolated browser bootstrap, local join, local catalog, original validation; Party transport and scene readiness changes only in GameCanvas; physics unchanged."
+    "Patched isolated browser bootstrap, local join, local catalog, original validation; Party transport, scene readiness, and initial ball placement patched; shot physics unchanged."
 )
