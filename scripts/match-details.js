@@ -470,7 +470,9 @@ function BpCourseVote() {
     createElement(
       'p',
       { key: 'remaining', className: 'text-xs text-white/65' },
-      seconds ? seconds + 's remaining · Ties decided randomly' : 'Choosing the next course…',
+      seconds
+        ? seconds + 's remaining · Random selection weighted by votes'
+        : 'Choosing the next course…',
     ),
     createElement(
       'div',

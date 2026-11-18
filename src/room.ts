@@ -50,6 +50,26 @@ import type { BoardFrame, ServerFrame } from './protocol.js';
  * and every projection, and `tests/admin.test.js` covers the admin view.
  */
 const token = () => randomBytes(24).toString('base64url');
+
+/** Draw one vote ticket uniformly; without any votes every course is eligible. */
+export function drawWeightedCourse<Choice extends { votes: number }>(
+  choices: Choice[],
+  draw: (maximum: number) => number = randomInt,
+): Choice {
+  const total = choices.reduce((sum, choice) => sum + choice.votes, 0);
+  if (!total) {
+    return choices[draw(choices.length)];
+  }
+  let ticket = draw(total);
+  for (const choice of choices) {
+    if (ticket < choice.votes) {
+      return choice;
+    }
+    ticket -= choice.votes;
+  }
+  throw new Error('Invalid weighted course draw');
+}
+
 /**
  * A per-connection ceiling on client frames, so one socket cannot spend the
  * whole room's CPU. Multiplayer play is not chatty: a client reports readiness
@@ -1312,9 +1332,7 @@ export class Room {
     if (!ballot || this.phase !== 'hole-results') {
       return;
     }
-    const maximum = Math.max(...ballot.choices.map((choice) => choice.votes));
-    const tied = ballot.choices.filter((choice) => choice.votes === maximum);
-    const winner = tied[randomInt(tied.length)];
+    const winner = drawWeightedCourse(ballot.choices);
     const course = this.voteCourses[ballot.target].find((choice) => choice.id === winner.id);
     if (!course) {
       throw new Error('Missing validated vote winner');

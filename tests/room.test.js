@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { Room } from '../src/room.js';
+import { Room, drawWeightedCourse } from '../src/room.js';
 const spec = { id: 'public-level', name: 'Example', par: 3 };
 const maps = new Map([
   ['p', { id: 'p', spec }],
@@ -1851,4 +1851,42 @@ test('unlimited rounds remain playable without a timeout and retain elapsed scor
   room.handle(host.ws, { f: 1, s: 1, p: 3 });
   expect(host.player.holeTimeMs).toBeGreaterThan(0);
   room.dispose();
+});
+
+test('course selection is a weighted draw across every vote, not a majority win', () => {
+  const choices = [
+    { id: 'a', votes: 3 },
+    { id: 'b', votes: 1 },
+    { id: 'c', votes: 0 },
+  ];
+  const results = Array.from(
+    { length: 4 },
+    (_, ticket) =>
+      drawWeightedCourse(choices, (maximum) => {
+        expect(maximum).toBe(4);
+        return ticket;
+      }).id,
+  );
+  expect(results).toEqual(['a', 'a', 'a', 'b']);
+  const noVotes = choices.map((choice) => ({ ...choice, votes: 0 }));
+  expect(
+    Array.from(
+      { length: 3 },
+      (_, ticket) =>
+        drawWeightedCourse(noVotes, (maximum) => {
+          expect(maximum).toBe(3);
+          return ticket;
+        }).id,
+    ),
+  ).toEqual(['a', 'b', 'c']);
+  expect(
+    drawWeightedCourse(
+      [
+        { id: 'a', votes: 0 },
+        { id: 'b', votes: 1 },
+        { id: 'c', votes: 0 },
+      ],
+      () => 0,
+    ).id,
+  ).toBe('b');
 });
