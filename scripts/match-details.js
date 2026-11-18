@@ -224,14 +224,24 @@ function BpUpcoming() {
   );
 }
 
-function BpNumericField({ label, value, min, max, apply, disabled, unit, sliderStep = 1 }) {
+function BpNumericField({
+  label,
+  value,
+  min,
+  max,
+  apply,
+  disabled,
+  unit,
+  sliderStep = 1,
+  inputMax = max,
+}) {
   const createElement = BetterPartyReact.createElement;
   const [draft, setDraft] = BetterPartyReact.useState(String(value));
   const [slider, setSlider] = BetterPartyReact.useState(value);
   const cancel = BetterPartyReact.useRef(false);
   BetterPartyReact.useEffect(() => {
     setDraft(String(value));
-    setSlider(value);
+    setSlider(Math.min(value, max));
   }, [value]);
   function commit() {
     if (cancel.current) {
@@ -240,12 +250,12 @@ function BpNumericField({ label, value, min, max, apply, disabled, unit, sliderS
       return;
     }
     const number = Number(draft);
-    if (draft.trim() && Number.isInteger(number) && number >= min && number <= max) {
+    if (draft.trim() && Number.isInteger(number) && number >= min && number <= inputMax) {
       if (number !== value) {
         apply(number);
       }
       setDraft(String(number));
-      setSlider(number);
+      setSlider(Math.min(number, max));
     } else {
       setDraft(String(value));
     }
@@ -277,7 +287,7 @@ function BpNumericField({ label, value, min, max, apply, disabled, unit, sliderS
           type: 'number',
           'aria-label': label,
           min,
-          max,
+          max: inputMax,
           step: 1,
           value: draft,
           disabled,
@@ -314,6 +324,7 @@ function BpNumericSettings({ section } = {}) {
         value: configuration.holes,
         min: 1,
         max: 9,
+        inputMax: 10000,
         apply: (holes) => updateBetterPartyConfig({ holes }),
         disabled,
       }),

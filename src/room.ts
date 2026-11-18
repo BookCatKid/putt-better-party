@@ -959,8 +959,8 @@ export class Room {
     };
     if (next.mapSource === MAP_SOURCE.RANDOM) {
       const count = 'holes' in configuration ? configuration.holes : this.config.randomHoles;
-      if (!isIntegerInRange(count, 1, 9)) {
-        return this.error(ws, 'invalid-config', 'Random matches must contain 1–9 holes.');
+      if (!isIntegerInRange(count, 1, 10_000)) {
+        return this.error(ws, 'invalid-config', 'Random matches must contain 1–10,000 holes.');
       }
       next.randomHoles = count;
       next.holes = count;

@@ -432,8 +432,10 @@ test('manual playlists exceed nine holes, random count is independent, and custo
   room.handle(host.ws, { t: 'config', config: { mapSource: 'random' } });
   expect(room.config.holes).toBe(7);
   expect(room.config.excludeDaily).toBe(true);
-  room.handle(host.ws, { t: 'config', config: { holes: 10 } });
-  expect(room.config.holes).toBe(7);
+  room.handle(host.ws, { t: 'config', config: { holes: 18 } });
+  expect(room.config.holes).toBe(18);
+  room.handle(host.ws, { t: 'config', config: { holes: 10001 } });
+  expect(room.config.holes).toBe(18);
   room.handle(host.ws, { t: 'config', config: { timerMs: 301000 } });
   expect(room.config.timerMs).toBe(127000);
   room.dispose();

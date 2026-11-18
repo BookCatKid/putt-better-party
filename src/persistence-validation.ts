@@ -34,7 +34,7 @@ const MAX_IDENTITIES = 200;
 const MAX_HUE = 359;
 const MAX_NAME_LENGTH = 24;
 const MIN_RANDOM_HOLES = 1;
-const MAX_RANDOM_HOLES = 9;
+const MAX_RANDOM_HOLES = 10_000;
 /**
  * A manual playlist has no upper bound in the room, so this is a persistence
  * resource limit rather than a protocol rule. The largest playlist in the
