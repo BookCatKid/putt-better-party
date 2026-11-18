@@ -1861,7 +1861,7 @@ test('course selection is a weighted draw across every vote, not a majority win'
   ];
   const results = Array.from(
     { length: 4 },
-    (_, ticket) =>
+    (_unused, ticket) =>
       drawWeightedCourse(choices, (maximum) => {
         expect(maximum).toBe(4);
         return ticket;
@@ -1872,7 +1872,7 @@ test('course selection is a weighted draw across every vote, not a majority win'
   expect(
     Array.from(
       { length: 3 },
-      (_, ticket) =>
+      (_unused, ticket) =>
         drawWeightedCourse(noVotes, (maximum) => {
           expect(maximum).toBe(3);
           return ticket;
