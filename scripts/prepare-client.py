@@ -4,7 +4,10 @@
 import hashlib
 import json
 import pathlib
+import posixpath
+import re
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -28,6 +31,73 @@ for path, expected in hashes.items():
         raise SystemExit(f"Archived asset hash mismatch: {path}; restore it from Git")
 
 print(f"Verified all {len(hashes)} archived asset hashes", flush=True)
+
+
+# The lock proves what is archived is intact, but says nothing about whether the
+# bundles ask for something the lock does not carry. Reverse the references the
+# client builds at runtime and require every one of them to be pinned, so a course
+# piece, prop, skybox, sound or GLB texture that nobody archived fails the build
+# instead of showing up as a missing model in a live round.
+#
+# The evidence behind each registry is in docs/dependency-inventory.md, and
+# tests/assets.test.js asserts the same invariants so drift is caught either way.
+def bundle_source(name):
+    return (private / "assets" / name).read_text(errors="replace")
+
+
+required = set()
+
+# Course pieces and piece floors.
+registry = bundle_source("registry-BaQMskdl.js")
+for name in re.findall(r"`([\w./-]+\.glb)`", registry):
+    required.add("/models/minigolf/" + name)
+
+# Decor props. The bundle routes a small set to the minigolf models and the rest
+# to decor/, and the nested graveyard and platformer sets live under decor/ too.
+props = bundle_source("courseEventRuntime-Bzd93hOE.js")
+minigolf_props = set(re.findall(r"`(lost-ball-[a-z]+|golf-club|golf-flag)`", props))
+prop_start = props.index("tree:`tree_default.glb`")
+for key, name in re.findall(r'[{,]"?([\w-]+)"?:`([^`]+\.glb)`', props[prop_start:]):
+    folder = "minigolf" if key in minigolf_props else "decor"
+    required.add(f"/models/{folder}/{name}")
+
+# Theme skyboxes. Snow names none, because it is a gradient plus weather.
+for name in re.findall(r"skybox:[a-z]\(`([^`]+\.webp)`\)", bundle_source("theme-BxxhUw0H.js")):
+    required.add(name)
+
+# Sound loader enumeration: `<name>-<n>.mp3` for n in 1..count.
+loader = bundle_source("GameRoot-7kMtVtdO.js")
+sound_counts = re.search(r"Ve=\{putt:4([^}]+)\}", loader)
+if sound_counts is None:
+    raise SystemExit("Could not read the sound registry; the build layout changed")
+for name, count in re.findall(r"([a-z]+):(\d+)", sound_counts.group(0)):
+    for index in range(1, int(count) + 1):
+        required.add(f"/sfx/{name}-{index}.mp3")
+
+# External resources named from inside a GLB, which no bundle mentions at all.
+for path in hashes:
+    if not path.endswith(".glb"):
+        continue
+    data = (private / path.lstrip("/")).read_bytes()
+    if data[:4] != b"glTF":
+        raise SystemExit(f"Archived model is not a binary glTF: {path}")
+    chunk = struct.unpack("<I", data[12:16])[0]
+    document = json.loads(data[20 : 20 + chunk].decode("utf-8"))
+    resources = [image.get("uri") for image in document.get("images", [])]
+    resources += [buffer.get("uri") for buffer in document.get("buffers", [])]
+    for uri in resources:
+        if not isinstance(uri, str) or uri.startswith("data:"):
+            continue
+        directory = posixpath.dirname(path)
+        required.add(posixpath.join(directory, uri))
+
+unpinned = sorted(required - set(hashes))
+if unpinned:
+    raise SystemExit(
+        "The client needs assets the lock does not archive:\n  " + "\n  ".join(unpinned)
+    )
+
+print(f"Cross-checked {len(required)} runtime asset references against the lock", flush=True)
 
 # Replace only generated output, never the archived originals.
 for generated in (web, private / "validation"):
