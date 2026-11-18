@@ -1,6 +1,8 @@
 /** Application-owned contracts. The original client's wire keys are not renamed. */
 export const MAP_SOURCE = { RANDOM: 'random', PICKED: 'picked' } as const;
 export type MapSource = (typeof MAP_SOURCE)[keyof typeof MAP_SOURCE];
+export const LATE_JOIN = { NEVER: 'never', NEXT_HOLE: 'next-hole', ALWAYS: 'always' } as const;
+export type LateJoinPolicy = (typeof LATE_JOIN)[keyof typeof LATE_JOIN];
 export type RoomPhase = 'lobby' | 'countdown' | 'playing' | 'hole-results' | 'final';
 
 export interface RoomConfig {
@@ -13,6 +15,7 @@ export interface RoomConfig {
   locked: boolean;
   excludeDaily: boolean;
   randomHoles: number;
+  lateJoin: LateJoinPolicy;
 }
 
 /** The original game owns the rest of the specification's schema. */

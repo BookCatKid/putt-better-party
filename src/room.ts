@@ -2,6 +2,7 @@ import { randomUUID, randomBytes, randomInt } from 'node:crypto';
 import { logEvent } from './event-log.js';
 import {
   MAP_SOURCE,
+  LATE_JOIN,
   isRecord,
   errorMessage,
   type RoomConfig,
@@ -48,6 +49,7 @@ export const defaults: Readonly<RoomConfig> = Object.freeze({
   locked: false,
   excludeDaily: false,
   randomHoles: 3,
+  lateJoin: LATE_JOIN.NEVER,
 });
 function isIntegerInRange(value: unknown, minimum: number, maximum: number): value is number {
   return (
@@ -84,6 +86,7 @@ export class Room {
   phase: RoomPhase = 'lobby';
   roundHistory: RoundRecord[] = [];
   initialPlayers = 0;
+  private readonly admittedParticipants = new Set<string>();
   config: RoomConfig = { ...defaults, selectedHoleIds: [] };
   holeIds: string[] = [];
   specs: CourseSpecification[] = [];
@@ -213,6 +216,42 @@ export class Room {
   playersAwaitingScene() {
     return this.playersExpectedToLoad().filter((player) => !player.sceneReady).length;
   }
+  spectatorReason(player: Player) {
+    if (player.role !== 'spectator') {
+      return null;
+    }
+    if (player.participated) {
+      return player.alive ? 'round-forfeit' : 'eliminated';
+    }
+    if (player.joinAfterHole !== undefined && this.holeIndex + 1 < this.holeIds.length) {
+      return 'next-hole';
+    }
+    return 'next-match';
+  }
+
+  /** Admit only first-time participants. Missing earlier holes never earn
+   * scores, and an eliminated or deliberately departed identity cannot reset. */
+  admitLatePlayer(player: Player) {
+    if (this.admittedParticipants.has(player.uid)) {
+      return;
+    }
+    this.admittedParticipants.add(player.uid);
+    Object.assign(player, {
+      role: 'player',
+      alive: true,
+      participated: true,
+      roundSpectator: false,
+      joinAfterHole: undefined,
+      strokes: 0,
+      done: false,
+      success: false,
+      sceneReady: false,
+    });
+    // Includes newly admitted players in the solo-vs-multiplayer elimination rule.
+    this.initialPlayers++;
+    this.audit('late_player_admitted', { uid: player.uid, name: player.name });
+  }
+
   roster() {
     return [...this.players.values()]
       .filter((player) => player.ws || this.phase !== 'lobby')
@@ -222,6 +261,7 @@ export class Room {
         name: player.name,
         hue: player.hue,
         role: player.role,
+        spectatorReason: this.spectatorReason(player),
         isHost: player.uid === this.hostUid,
         ready: player.ready,
         alive: player.alive,
@@ -279,6 +319,7 @@ export class Room {
     let player = this.players.get(identity.uid);
     const reportsSceneReadiness = message.scene === true;
     const returning = !!player;
+    const previouslyParticipated = !!player?.participated;
     const replacedSocket = !!player?.ws;
     const reload =
       !!player && player.instance !== undefined && player.instance !== message.instance;
@@ -316,6 +357,23 @@ export class Room {
         done: false,
       };
       this.players.set(identity.uid, player);
+      if (
+        this.config.lateJoin !== LATE_JOIN.NEVER &&
+        !this.admittedParticipants.has(identity.uid) &&
+        ['countdown', 'playing', 'hole-results'].includes(this.phase)
+      ) {
+        player.joinAfterHole = this.holeIndex;
+      }
+    }
+    if (
+      player.joinAfterHole !== undefined &&
+      !player.participated &&
+      (this.phase === 'countdown' ||
+        (this.phase === 'playing' && Date.now() < this.startsAt + this.roundTimerMs)) &&
+      (this.config.lateJoin === LATE_JOIN.ALWAYS ||
+        (this.phase === 'countdown' && player.joinAfterHole < this.holeIndex))
+    ) {
+      this.admitLatePlayer(player);
     }
     if (player.ws && player.ws !== ws) {
       const old = player.ws;
@@ -326,6 +384,7 @@ export class Room {
     }
     if (
       reload &&
+      previouslyParticipated &&
       ['countdown', 'playing'].includes(this.phase) &&
       player.participated &&
       player.alive &&
@@ -364,7 +423,12 @@ export class Room {
       count: this.roster().length,
       role: player.role,
     });
-    this.send(ws, this.snapshot());
+    if (!previouslyParticipated && player.participated) {
+      // Every client needs the updated participant count for elimination UI.
+      this.broadcast(this.snapshot());
+    } else {
+      this.send(ws, this.snapshot());
+    }
     this.rosterBroadcast();
     this.broadcast(this.board());
     if (this.phase === 'playing') {
@@ -717,6 +781,7 @@ export class Room {
       'selectedHoleIds',
       'locked',
       'excludeDaily',
+      'lateJoin',
     ]) {
       if (key in configuration) {
         candidate[key] = configuration[key];
@@ -728,6 +793,9 @@ export class Room {
       !isIntegerInRange(candidate.maxPlayers, 1, 50) ||
       typeof candidate.locked !== 'boolean' ||
       typeof candidate.excludeDaily !== 'boolean' ||
+      (candidate.lateJoin !== LATE_JOIN.NEVER &&
+        candidate.lateJoin !== LATE_JOIN.NEXT_HOLE &&
+        candidate.lateJoin !== LATE_JOIN.ALWAYS) ||
       (candidate.mapSource !== MAP_SOURCE.RANDOM && candidate.mapSource !== MAP_SOURCE.PICKED) ||
       !Array.isArray(candidate.selectedHoleIds) ||
       candidate.selectedHoleIds.some((id) => typeof id !== 'string' || !this.catalog.has(id))
@@ -744,6 +812,7 @@ export class Room {
       locked: candidate.locked,
       excludeDaily: candidate.excludeDaily,
       randomHoles: this.config.randomHoles,
+      lateJoin: candidate.lateJoin,
     };
     if (next.mapSource === MAP_SOURCE.RANDOM) {
       const count = 'holes' in configuration ? configuration.holes : this.config.randomHoles;
@@ -854,7 +923,14 @@ export class Room {
         ready: false,
       });
     }
-    this.initialPlayers = [...this.players.values()].filter((player) => player.participated).length;
+    this.admittedParticipants.clear();
+    for (const player of this.players.values()) {
+      if (player.participated) {
+        this.admittedParticipants.add(player.uid);
+        player.joinAfterHole = undefined;
+      }
+    }
+    this.initialPlayers = this.admittedParticipants.size;
     this.audit('match_started', {
       config: this.config,
       courses: this.holeIds.map((id) => ({ id, title: this.playlistTitle(id) })),
@@ -878,6 +954,14 @@ export class Room {
     this.readyDeadline = this.playNotBefore + READY_GRACE_MS;
     this.positions.clear();
     for (const player of this.players.values()) {
+      if (
+        player.ws &&
+        !player.participated &&
+        player.joinAfterHole !== undefined &&
+        player.joinAfterHole < this.holeIndex
+      ) {
+        this.admitLatePlayer(player);
+      }
       player.strokes = 0;
       player.done = false;
       player.success = false;
@@ -1289,6 +1373,7 @@ export class Room {
     this.recoveryNotice = false;
     this.roundHistory = [];
     this.initialPlayers = 0;
+    this.admittedParticipants.clear();
     this.holeIndex = 0;
     this.holeIds = [];
     this.specs = [];
@@ -1310,6 +1395,7 @@ export class Room {
         holesSurvived: 0,
         totalStrokes: 0,
         roundSpectator: false,
+        joinAfterHole: undefined,
       });
     }
     this.state();

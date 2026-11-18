@@ -242,7 +242,10 @@ function connectBetterParty(code, identity, options = {}) {
     }
 
     bind.updateParty(message);
-    if (message.phase === 'countdown' || message.phase === 'playing') {
+    if (
+      (message.phase === 'countdown' || message.phase === 'playing') &&
+      previous.selfRole !== 'spectator'
+    ) {
       bind.setFlyCamera(false);
     }
     awaitingSnapshot = false;

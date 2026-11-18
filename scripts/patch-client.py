@@ -145,7 +145,25 @@ const isTransportSpectator = _e;
     source = replace_once(
         source,
         "(0,Y.jsx)(Dn,{century:m})",
-        "(0,Y.jsx)(Dn,{century:m,bpLevel:_e?l:void 0,bpRuntimeReady:z})",
+        "!bpHideLocalBall&&(0,Y.jsx)(Dn,{century:m,bpLevel:_e?l:void 0,bpRuntimeReady:z})",
+    )
+    # The original ball is a Rapier rigid body (Dn), with separate aim and
+    # shadow meshes. Do not mount any of them until the party role is known.
+    # Keep the canvas, course and socket mounted for spectators.
+    source = replace_once(
+        source,
+        "Se=ge||xe;return",
+        """bpSpectating=w(M,e=>e.active&&e.selfRole===`spectator`),bpHideLocalBall=w(M,e=>e.active&&(!e.bpInitialSnapshot||e.selfRole===`spectator`||!e.roster.some(p=>p.uid===e.self?.uid))),Se=ge||xe||bpSpectating;return""",
+    )
+    source = replace_once(
+        source,
+        "(0,Y.jsx)(ir,{}),(0,Y.jsx)(hr,{})",
+        "!bpHideLocalBall&&(0,Y.jsx)(ir,{}),!bpHideLocalBall&&(0,Y.jsx)(hr,{})",
+    )
+    source = replace_once(
+        source,
+        "(0,Y.jsx)(en,{}),(0,Y.jsx)(nn,{})",
+        "(0,Y.jsx)(en,{}),!bpHideLocalBall&&(0,Y.jsx)(nn,{})",
     )
     return (
         "import{bpConnection,bpAck,bpScenePrepared,transportSceneReadyLevelId,"
@@ -303,6 +321,29 @@ def game_patch(s):
         s,
         "className:`flex shrink-0 items-start gap-2`,children:[s&&",
         "className:`flex shrink-0 items-start gap-2 bp-toolbar`,children:[s&&",
+    )
+    # Party spectators use the original free camera, with no local score or
+    # putting controls. The overlay uses the same HUD typography and contrast.
+    s = replace_once(s, "O=x||E,k=()=>", "O=x||E||D,k=()=>")
+    s = replace_once(
+        s,
+        "children:[s&&(0,J.jsx)(`div`,{className:`rounded-xl bg-black/50 px-4",
+        "children:[s&&!D&&(0,J.jsx)(`div`,{className:`rounded-xl bg-black/50 px-4",
+    )
+    s = replace_once(
+        s,
+        "i===`charging`&&(0,J.jsx)(`p`,{className:`rounded-full bg-black/50",
+        "i===`charging`&&!D&&(0,J.jsx)(`p`,{className:`rounded-full bg-black/50",
+    )
+    s = replace_once(
+        s,
+        "w&&(i===`holed`||i===`forfeit`||D))&&(0,J.jsx)(`button`",
+        "w&&!D&&(i===`holed`||i===`forfeit`))&&(0,J.jsx)(`button`",
+    )
+    s = replace_once(
+        s,
+        "children:[w&&T===`playing`&&i===`holed`",
+        "children:[(0,J.jsx)(BpSpectating,{}),w&&!D&&T===`playing`&&i===`holed`",
     )
     # Host menu is a sibling of the settings wrapper, not inside it.
     a = s.index("function It(")

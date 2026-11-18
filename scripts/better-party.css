@@ -674,3 +674,25 @@ body:has(> #app) {
   color: #fca5a5;
   overflow-wrap: anywhere;
 }
+
+/* Uses the same dark translucent HUD treatment as the original party game. */
+.bp-spectating {
+  width: max-content;
+  max-width: min(24rem, 85vw);
+  padding: 14px 22px;
+  border-radius: 16px;
+  background: #000b;
+  text-align: center;
+}
+.bp-spectating-title {
+  color: #a7f3d0;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+.bp-spectating-detail {
+  margin-top: 5px;
+  color: #ffffffcc;
+  font-size: 13px;
+  line-height: 1.4;
+}

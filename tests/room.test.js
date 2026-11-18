@@ -1200,3 +1200,150 @@ test('a completion from the finished attempt cannot score the restarted one', as
   expect(guest.player.strokes).toBe(4);
   room.dispose();
 });
+
+test('late join policy is host-only, validated and restored with backward-compatible defaults', () => {
+  const room = new Room('ABCDE', maps);
+  const host = enter(room, 'Host', true);
+  const guest = enter(room, 'Guest');
+  expect(room.config.lateJoin).toBe('never');
+  room.handle(guest.ws, { t: 'config', config: { lateJoin: 'always' } });
+  expect(room.config.lateJoin).toBe('never');
+  room.handle(host.ws, { t: 'config', config: { lateJoin: 'invalid' } });
+  expect(room.config.lateJoin).toBe('never');
+  room.handle(host.ws, { t: 'config', config: { lateJoin: 'next-hole' } });
+  expect(room.config.lateJoin).toBe('next-hole');
+  room.handle(host.ws, { t: 'config', config: { timerMs: 40000 } });
+  expect(room.config.lateJoin).toBe('next-hole');
+  const checkpoint = room.checkpoint();
+  expect(checkpoint.config.lateJoin).toBe('next-hole');
+  const restored = new Room('ABCDE', maps);
+  restored.restore(checkpoint);
+  expect(restored.config.lateJoin).toBe('next-hole');
+  delete checkpoint.config.lateJoin;
+  restored.restore(checkpoint);
+  expect(restored.config.lateJoin).toBe('never');
+  restored.dispose();
+  room.dispose();
+});
+
+test('next-hole late arrivals spectate through a restart and enter only the following hole', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  try {
+    const host = enter(room, 'Host', true);
+    room.handle(host.ws, {
+      t: 'config',
+      config: {
+        lateJoin: 'next-hole',
+        elimination: false,
+        mapSource: 'picked',
+        selectedHoleIds: ['p', 'q'],
+      },
+    });
+    room.handle(host.ws, { t: 'start' });
+    await waitForRoom(() => room.phase === 'playing');
+    const late = enter(room, 'Late');
+    expect(late.player.role).toBe('spectator');
+    expect(room.roster().find((player) => player.uid === late.identity.uid).spectatorReason).toBe(
+      'next-hole',
+    );
+    room.handle(late.ws, { t: 'prog', st: 9 });
+    room.handle(late.ws, { f: 1, s: 1, p: 3 });
+    expect(late.player.strokes).toBe(0);
+    expect(room.standings()).toHaveLength(1);
+    room.handle(host.ws, {
+      t: 'host-action',
+      action: 'restart',
+      matchId: room.matchId,
+      holeIndex: room.holeIndex,
+    });
+    expect(late.player.role).toBe('spectator');
+    await waitForRoom(() => room.phase === 'playing');
+    room.handle(host.ws, { f: 1, s: 2, p: 3 });
+    await waitForRoom(() => room.holeIndex === 1 && room.phase === 'playing');
+    expect(late.player.role).toBe('player');
+    expect(room.initialPlayers).toBe(2);
+    expect(room.roundHistory[0].rows).toEqual([
+      { uid: host.identity.uid, strokes: 2, status: 'holed' },
+    ]);
+    expect(late.player.totalStrokes).toBe(0);
+    expect(late.player.holesSurvived).toBe(0);
+    room.handle(late.ws, { f: 1, s: 1, p: 2 });
+    room.handle(host.ws, { f: 1, s: 3, p: 2 });
+    await waitForRoom(() => room.phase === 'final');
+    expect(room.standings().map((player) => player.uid)).toEqual([
+      host.identity.uid,
+      late.identity.uid,
+    ]);
+    expect(late.player.totalStrokes).toBe(1);
+  } finally {
+    room.dispose();
+  }
+});
+
+test('always admits newcomers immediately without resetting the clock or allowing reentry exploits', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  try {
+    const host = enter(room, 'Host', true);
+    room.handle(host.ws, {
+      t: 'config',
+      config: {
+        lateJoin: 'always',
+        elimination: false,
+        mapSource: 'picked',
+        selectedHoleIds: ['p', 'q'],
+      },
+    });
+    room.handle(host.ws, { t: 'start' });
+    await waitForRoom(() => room.phase === 'playing');
+    const started = room.startsAt;
+    const late = enter(room, 'Late');
+    expect(late.player.role).toBe('player');
+    expect(late.player.participated).toBe(true);
+    expect(room.startsAt).toBe(started);
+    expect(room.board().alive).toBe(2);
+    expect(host.ws.frames.filter((frame) => frame.t === 'party').at(-1).initialPlayers).toBe(2);
+    room.handle(late.ws, { t: 'prog', st: 1 });
+    expect(late.player.strokes).toBe(1);
+    // A deliberate departure does not turn the same identity into a newcomer.
+    room.handle(late.ws, { t: 'leave' });
+    const again = socket();
+    room.handle(again, { t: 'join', ...late.identity, protocol: 2 });
+    expect(room.players.get(late.identity.uid).role).toBe('spectator');
+    expect(room.board().alive).toBe(1);
+    room.handle(host.ws, { f: 1, s: 2, p: 3 });
+    const duringResults = enter(room, 'Results joiner');
+    expect(duringResults.player.role).toBe('spectator');
+    await waitForRoom(() => room.phase === 'playing' && room.holeIndex === 1);
+    expect(duringResults.player.role).toBe('player');
+    expect(room.players.get(late.identity.uid).role).toBe('spectator');
+    expect(room.roundHistory[0].rows.every((row) => row.uid !== duringResults.identity.uid)).toBe(
+      true,
+    );
+  } finally {
+    room.dispose();
+  }
+});
+
+test('never keeps a newcomer spectating until rematch even as holes advance', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  try {
+    const host = enter(room, 'Host', true);
+    room.handle(host.ws, {
+      t: 'config',
+      config: { elimination: false, mapSource: 'picked', selectedHoleIds: ['p', 'q'] },
+    });
+    room.handle(host.ws, { t: 'start' });
+    await waitForRoom(() => room.phase === 'playing');
+    const late = enter(room, 'Late');
+    expect(room.spectatorReason(late.player)).toBe('next-match');
+    room.handle(host.ws, { f: 1, s: 1, p: 3 });
+    await waitForRoom(() => room.phase === 'playing' && room.holeIndex === 1);
+    expect(late.player.role).toBe('spectator');
+    room.handle(host.ws, { f: 1, s: 1, p: 2 });
+    await waitForRoom(() => room.phase === 'final');
+    room.handle(host.ws, { t: 'rematch' });
+    expect(late.player.role).toBe('player');
+  } finally {
+    room.dispose();
+  }
+});

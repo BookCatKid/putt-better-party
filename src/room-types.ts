@@ -35,6 +35,8 @@ export interface Player {
   done: boolean;
   success?: boolean;
   roundSpectator?: boolean;
+  /** A newcomer must wait until the room advances beyond this hole. */
+  joinAfterHole?: number;
   /** The client reported its level prepared for the current round. */
   sceneReady?: boolean;
   /** The connected client declares that it reports scene readiness each round. */

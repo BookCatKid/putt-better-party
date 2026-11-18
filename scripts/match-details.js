@@ -29,6 +29,14 @@ function BpGuestPlaylist() {
           ),
         )
       : createElement('p', { className: 'text-xs text-white/70' }, 'Random holes'),
+    createElement(
+      'p',
+      { className: 'mt-2 text-xs text-white/60' },
+      'Join during a match: ' +
+        ({ never: 'Never', 'next-hole': 'After current hole', always: 'Always' }[
+          config.lateJoin ?? 'never'
+        ] ?? 'Never'),
+    ),
   ]);
 }
 function BpScorecard() {
@@ -130,6 +138,23 @@ function BpLobbyOptions() {
               number,
             ),
           ),
+      ),
+    ]),
+    createElement('label', {}, [
+      createElement('span', {}, 'Join during a match'),
+      createElement(
+        'select',
+        {
+          'aria-label': 'Join during a match',
+          disabled: preparing || !connected,
+          value: config.lateJoin ?? 'never',
+          onChange: (event) => updateBetterPartyConfig({ lateJoin: event.target.value }),
+        },
+        [
+          ['never', 'Never'],
+          ['next-hole', 'After current hole'],
+          ['always', 'Always'],
+        ].map(([value, label]) => createElement('option', { key: value, value }, label)),
       ),
     ]),
     createElement('label', {}, [
@@ -299,4 +324,28 @@ function BpGuestStarting() {
       ]),
     ],
   );
+}
+
+function BpSpectating() {
+  const role = useBetterPartyState(betterPartyStore, (state) => state.selfRole);
+  const phase = useBetterPartyState(betterPartyStore, (state) => state.phase);
+  const roster = useBetterPartyState(betterPartyStore, (state) => state.roster);
+  const uid = useBetterPartyState(betterPartyStore, (state) => state.self?.uid);
+  if (role !== 'spectator' || !['countdown', 'playing'].includes(phase)) {
+    return null;
+  }
+  const player = roster.find((entry) => entry.uid === uid);
+  let detail = 'You can play when the next match starts.';
+  if (player?.spectatorReason === 'next-hole') {
+    detail = 'You’ll join at the next hole if the match continues.';
+  } else if (player?.spectatorReason === 'eliminated') {
+    detail = 'You’re out of this match. Watch the remaining players.';
+  } else if (player?.spectatorReason === 'round-forfeit') {
+    detail = 'You’re watching the rest of this hole.';
+  }
+  const createElement = BetterPartyReact.createElement;
+  return createElement('div', { className: 'bp-spectating', role: 'status' }, [
+    createElement('p', { className: 'bp-spectating-title' }, 'Spectating'),
+    createElement('p', { className: 'bp-spectating-detail' }, detail),
+  ]);
 }
