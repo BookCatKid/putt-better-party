@@ -99,20 +99,58 @@ healthy process with live rooms. Use it to confirm the listener is up.
 
 ## Backups
 
-The database runs in WAL mode, so copying `rooms.sqlite` on its own from a live
-service can miss recent commits. Either stop the service first — a `SIGTERM`
-checkpoints the log — or take a consistent copy with SQLite's own tooling (the
-`sqlite3` command line is not needed to run the service, only for this):
+The database runs in WAL mode, so copying `rooms.sqlite` by hand is **not** a
+backup: recent commits can still be only in the `-wal` file. Measured on a live
+service with three rooms created, the WAL held 57712 bytes while the main file
+was 4096 — a plain copy would have captured a database that looks intact and
+contains nothing.
+
+Use the bundled tool, which takes a consistent snapshot through SQLite's own
+backup API and works against a running service:
 
 ```sh
-sqlite3 state/rooms.sqlite ".backup 'state/backup-$(date +%F).sqlite'"
+bun run backup                                    # -> state/backups/rooms-<utc>.sqlite
+python3 scripts/backup.py verify <file>           # integrity, room count, versions
+bun run backup:prune --keep 7                     # keep the newest seven
 ```
 
-Keep backups as private as the original: they contain identity sessions and host
-capabilities. Verify a restore by copying the backup to a scratch path, pointing
-`BP_DB` at it, and confirming the rooms appear. Room state is expendable — losing
-it loses parties in progress, not accounts — so a backup is a convenience rather
+`create` writes one self-contained file and then verifies it immediately, because
+a backup that cannot be restored is worse than none. `verify` reports the room
+count and the checkpoint version of every row, and warns when no room is a
+version this build can read — that is what a rollback to an older build looks
+like, and it is better to hear it now than at startup. `prune` keeps the newest
+backups by timestamp and refuses `--keep 0`, so a prune can never leave you with
+nothing.
+
+Backups and their directory are created `0600` inside `0700`, and `verify`
+refuses a file that is readable beyond its owner. They contain identity sessions
+and host capabilities, so treat them exactly like the database itself: never
+commit them, never attach them to an issue, and delete them when they age out.
+
+To prove a restore, point `BP_DB` at a backup and start the service on another
+port:
+
+```sh
+BP_DB=state/backups/rooms-2026-01-01T00-00-00-000Z.sqlite PORT=8790 bun run start
+curl -s http://127.0.0.1:8790/health
+```
+
+The room count in `/health` is the check. Room state is expendable — losing it
+loses parties in progress, not accounts — so a backup is a convenience rather
 than a record of anything irreplaceable.
+
+### Restoring after a version change
+
+The loader skips a row it cannot read rather than deleting or rewriting it, so a
+checkpoint written by a newer build is left intact for a later migration and
+never becomes a crash. That has two consequences worth knowing:
+
+- Rolling back to an older build over a database written by a newer one leaves
+  the newer rows in place and skips them, so the older build starts without those
+  rooms and the data is still there if you roll forward again.
+- Rows untouched for 30 minutes are swept at startup, so a pending migration has
+  a window rather than forever. Take a backup before any version change, which
+  `verify` then lets you inspect to confirm what the old build could read.
 
 ## Recovering from problems
 
