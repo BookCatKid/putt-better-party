@@ -1,4 +1,5 @@
 import { Room } from './room.js';
+import { logEvent } from './event-log.js';
 import { RoomStore } from './room-store.js';
 import { courseIndex, courseCount, fetchPublicMap, prepareMatch } from './catalog.js';
 import { isRecord, errorMessage, MAP_SOURCE } from './domain.js';
@@ -34,9 +35,10 @@ for (const id of courseIndex.keys()) {
   rememberPublicMetadata(id, courseIndex.get(id)?.title);
 }
 const response = (data: unknown, status = 200) => Response.json(data, { status });
+const origin = new URL(process.env.BP_PUBLIC_ORIGIN ?? 'http://127.0.0.1:' + port).origin;
 const csp =
-  "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://127.0.0.1:" +
-  port +
+  "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' " +
+  origin.replace(/^http/, 'ws') +
   "; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
 const page = (markup: string) =>
   new Response(markup, {
@@ -59,7 +61,6 @@ const jsonBody = async (request: Request): Promise<Record<string, unknown>> => {
 };
 const html =
   '<!doctype html><html lang="en" class="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Party · Better Party</title><link rel="icon" href="/favicon.ico" type="image/x-icon"><link rel="stylesheet" href="/assets/styles-S28F_fms.css"><body class="bp-page"><div id="app"></div><script type="module" src="/assets/index-DFMxt6BL.js"></script></body></html>';
-const origin = 'http://127.0.0.1:' + port;
 const server = Bun.serve<{ room: Room; uid: string | null }>({
   hostname: '127.0.0.1',
   port,
@@ -67,7 +68,7 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
   async fetch(req, httpServer) {
     const url = new URL(req.url);
     const pathname = url.pathname;
-    if (req.headers.get('host') !== '127.0.0.1:' + port) {
+    if (req.headers.get('host') !== new URL(origin).host) {
       return new Response('Invalid host', { status: 403 });
     }
     if (pathname.startsWith('/ws/party/')) {
@@ -113,6 +114,7 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
         });
         rooms.set(code, room);
         store.save(room);
+        logEvent('room_created', { room: room.code });
         return response({ code, hostToken: room.hostToken });
       }
       if (pathname.startsWith('/api/room/') && req.method === 'GET') {
@@ -161,6 +163,7 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
           const { spec: _spec, ...meta } = await fetchPublicMap(requestBody.id, {
             saved: requestBody.saved === true,
           });
+          logEvent('course_imported', { room: room.code, uid: player.uid, courseId: meta.id });
           return response(meta);
         }
         if (
@@ -181,6 +184,11 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
           mapSource: MAP_SOURCE.PICKED,
           selectedHoleIds: requestBody.ids,
           holes: requestBody.ids.length,
+        });
+        logEvent('playlist_imported', {
+          room: room.code,
+          uid: player.uid,
+          courses: items.map(({ id }) => id),
         });
         return response({ holes: items.map(({ spec, ...meta }) => meta) });
       }
@@ -206,6 +214,11 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
         return page(html);
       }
       if (pathname.startsWith('/_serverFn/')) {
+        logEvent('official_api_blocked', {
+          functionId: /^\/_serverFn\/[a-f0-9]{64}$/.test(pathname)
+            ? pathname.slice('/_serverFn/'.length)
+            : 'invalid',
+        });
         console.log('Blocked unrelated official server function', pathname);
         return response({ error: 'Official API disabled' }, 404);
       }
@@ -216,11 +229,28 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
             headers: { 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' },
           });
         }
+        logEvent('asset_missing', {
+          path: /^\/(assets|models|sfx|sky)\/[a-zA-Z0-9_./-]{1,200}$/.test(pathname)
+            ? pathname
+            : 'invalid-path',
+        });
         console.log('Missing asset', pathname);
         return new Response('Missing asset', { status: 404 });
       }
       return new Response('Not found', { status: 404 });
     } catch (error) {
+      logEvent('http_request_failed', {
+        route: [
+          '/api/join',
+          '/api/create',
+          '/api/import',
+          '/api/import-playlist',
+          '/api/catalog',
+        ].includes(pathname)
+          ? pathname
+          : 'other',
+        method: req.method,
+      });
       return response({ error: errorMessage(error) }, 400);
     }
   },
@@ -242,7 +272,10 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
         console.error(errorMessage(error));
       }
     },
-    close(ws) {
+    close(ws, code) {
+      if (ws.data.uid) {
+        logEvent('socket_closed', { room: ws.data.room.code, uid: ws.data.uid, code });
+      }
       ws.data.room.close(ws);
     },
   },
@@ -265,4 +298,5 @@ setInterval(() => {
     }
   }
 }, 60000);
+logEvent('server_started', { port });
 console.log('Better Party local only:', server.url.href);
