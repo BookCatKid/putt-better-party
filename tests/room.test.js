@@ -1562,3 +1562,143 @@ test('a one-hole voting party votes before play, admits an opening voter even if
     room.dispose();
   }
 });
+
+/**
+ * The reconnect matrix: a disconnect in every phase, not just the ones that
+ * happened to get a test. Each phase has a different thing that must survive,
+ * so a single "reconnect works" test would not show it. The host is used for
+ * the lobby and countdown cases because the crown must survive with it, and a
+ * player for the phases where the party has already started.
+ */
+test('a reconnect in the lobby keeps the identity and the host crown', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, { t: 'config', config: { maxPlayers: 4 } });
+  expect(room.phase).toBe('lobby');
+  room.close(host.ws);
+  expect(room.players.get(host.identity.uid).ws).toBe(null);
+  const again = socket();
+  room.handle(again, {
+    t: 'join',
+    ...host.identity,
+    protocol: 2,
+    host: room.hostToken,
+    instance: 'again',
+  });
+  expect(room.phase).toBe('lobby');
+  expect(room.hostUid).toBe(host.identity.uid);
+  expect(room.players.get(host.identity.uid).ws).toBe(again);
+  // The configuration is the party's, not the connection's.
+  expect(room.config.maxPlayers).toBe(4);
+  expect(again.frames.some((frame) => frame.t === 'hello' && frame.isHost === true)).toBe(true);
+  expect(again.frames.some((frame) => frame.t === 'party' && frame.phase === 'lobby')).toBe(true);
+  room.dispose();
+});
+
+test('a reconnect in the countdown keeps the match and the hole index', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 40, results: 5 });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p', 'q'], elimination: false },
+  });
+  room.handle(host.ws, { t: 'start' });
+  const matchId = room.matchId;
+  expect(room.phase).toBe('countdown');
+  // A player whose page dropped mid-countdown is still in the match; the party
+  // must not restart, re-prepare or renumber the hole around the reconnect.
+  const guest = enter(room, 'Guest');
+  room.close(guest.ws);
+  const again = socket();
+  room.handle(again, {
+    t: 'join',
+    ...guest.identity,
+    protocol: 2,
+    instance: 'again',
+  });
+  expect(room.phase).toBe('countdown');
+  expect(room.matchId).toBe(matchId);
+  expect(room.holeIndex).toBe(0);
+  expect(room.players.get(guest.identity.uid).ws).toBe(again);
+  expect(again.frames.some((frame) => frame.t === 'party' && frame.matchId === matchId)).toBe(true);
+  room.dispose();
+});
+
+test('a reconnect while the previous hole is being scored stays in scoring', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 40 });
+  const host = enter(room, 'Host', true);
+  const guest = enter(room, 'Guest');
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p', 'q'], elimination: false },
+  });
+  room.handle(host.ws, { t: 'start' });
+  await waitForRoom(() => room.phase === 'playing');
+  const matchId = room.matchId;
+  room.handle(host.ws, { f: 1, s: 2, p: 3 });
+  room.handle(guest.ws, { f: 1, s: 2, p: 3 });
+  expect(room.phase).toBe('hole-results');
+  room.close(guest.ws);
+  const again = socket();
+  room.handle(again, {
+    t: 'join',
+    ...guest.identity,
+    protocol: 2,
+    instance: 'again',
+  });
+  // Scoring is not a round to replay: the hole is settled for this player.
+  expect(room.phase).toBe('hole-results');
+  expect(room.holeIndex).toBe(0);
+  expect(room.matchId).toBe(matchId);
+  expect(again.frames.some((frame) => frame.t === 'party' && frame.phase === 'hole-results')).toBe(
+    true,
+  );
+  // No replayed completion and no progress claim from the fresh document.
+  expect(again.frames.some((frame) => frame.f === 1)).toBe(false);
+  room.dispose();
+});
+
+test('a reconnect after the party ends is re-sent the final standings', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const host = enter(room, 'Host', true);
+  const guest = enter(room, 'Guest');
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p'], elimination: false },
+  });
+  room.handle(host.ws, { t: 'start' });
+  await waitForRoom(() => room.phase === 'playing');
+  room.handle(host.ws, { f: 1, s: 2, p: 3 });
+  room.handle(guest.ws, { f: 1, s: 3, p: 3 });
+  await waitForRoom(() => room.phase === 'final');
+  const uid = guest.identity.uid;
+  // Final standings go to everybody, and a late socket must not have to ask.
+  room.close(guest.ws);
+  const again = socket();
+  room.handle(again, {
+    t: 'join',
+    ...guest.identity,
+    protocol: 2,
+    instance: 'again',
+  });
+  expect(room.phase).toBe('final');
+  const final = again.frames.find((frame) => frame.t === 'final');
+  expect(final).toBeTruthy();
+  expect(final.standings).toHaveLength(2);
+  expect(final.standings.map((row) => row.uid)).toContain(uid);
+  room.dispose();
+});
+
+test('closing the only connection keeps a spectator out of the roster', async () => {
+  // A socket that simply goes away must not leave a ghost the party still
+  // counts. The lobby drops it outright; after the start the identities that
+  // were never admitted are dropped the same way.
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  enter(room, 'Host', true);
+  const watcher = enter(room, 'Watcher');
+  expect(room.roster()).toHaveLength(2);
+  room.close(watcher.ws);
+  expect(room.roster()).toHaveLength(1);
+  expect(room.players.has(watcher.identity.uid)).toBe(false);
+  room.dispose();
+});
