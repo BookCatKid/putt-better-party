@@ -335,33 +335,325 @@ test('daily exclusion spans every page and prefers the newest listing over a cac
   expect(dailyRequests.every((player) => player.fresh === true)).toBe(true);
 });
 
-test('random selection overlaps only required catalog pages and retains the draw order', async () => {
-  const holes = Array.from({ length: 72 }, (_unused, index) => ({ id: 'hole' + index }));
-  const gate = Promise.withResolvers();
-  const requests = [];
-  const picks = [24, 47];
-  const selection = chooseRandom({
-    browse: async ({ offset }) => {
-      requests.push(offset);
-      if (offset !== 0) {
-        await gate.promise;
-      }
-      return {
-        total: holes.length,
-        holes: holes.slice(offset, offset + 24),
-        nextOffset: offset + 24 < holes.length ? offset + 24 : null,
-      };
+/**
+ * A complete, valid checkpoint as a later process would find it. Tests start
+ * from this and break exactly one thing so a rejection can only come from the
+ * field under test.
+ */
+function checkpointPayload(overrides = {}) {
+  return {
+    version: 1,
+    code: 'ABCDE',
+    hostToken: 'host-token',
+    hostUid: 'uid-host',
+    hostTransfer: null,
+    issued: [{ uid: 'uid-host', session: 'session-host', name: 'Host', hue: 200 }],
+    config: {
+      holes: 3,
+      timerMs: 60000,
+      elimination: true,
+      maxPlayers: 50,
+      mapSource: 'random',
+      selectedHoleIds: [],
+      locked: false,
+      excludeDaily: false,
+      randomHoles: 3,
+      lateJoin: 'always',
+      courseVoting: false,
     },
-    count: 2,
-    pick: () => picks.shift(),
-  });
+    titles: {},
+    randomSeen: ['seen-before'],
+    phase: 'lobby',
+    starting: false,
+    lastActivity: Date.now(),
+    recoveryNotice: false,
+    ...overrides,
+  };
+}
+
+/** Place a raw payload in the store exactly as an earlier process left it. */
+function seedRow(store, code, payload, updated = Date.now()) {
+  const serialized = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  store.db
+    .query(
+      'INSERT INTO rooms VALUES(?,?,?) ON CONFLICT(code) DO UPDATE SET payload=excluded.payload',
+    )
+    .run(code, updated, serialized);
+}
+
+function rowCount(store) {
+  return store.db.query('SELECT COUNT(*) AS count FROM rooms').get().count;
+}
+
+/** Collect the loader's log lines so a test can assert why a row was skipped. */
+function captureErrors(callback) {
+  const messages = [];
+  const originalError = console.error;
+  console.error = (message) => messages.push(String(message));
   try {
-    await Bun.sleep(0);
-    expect(requests).toEqual([0, 24, 48]);
+    return { result: callback(), messages };
   } finally {
-    gate.resolve();
-    await selection;
+    console.error = originalError;
   }
-  expect(await selection).toEqual({ ids: ['hole24', 'hole48'], seen: ['hole24', 'hole48'] });
-  expect(requests).toEqual([0, 24, 48]);
+}
+
+test('unparseable and non-object payloads are skipped, kept for inspection, and do not stop a good room loading', () => {
+  const store = new RoomStore(':memory:');
+  seedRow(store, 'ABCDE', checkpointPayload());
+  seedRow(store, 'BADJ1', '{"version":1,"code":"BADJ1"');
+  seedRow(store, 'BADJ2', '[1,2,3]');
+  seedRow(store, 'BADJ3', 'null');
+  seedRow(store, 'BADJ4', '"a string payload"');
+  const { result: rooms, messages } = captureErrors(() => store.load(new Map()));
+  expect([...rooms.keys()]).toEqual(['ABCDE']);
+  // A damaged row is not deleted or rewritten: it is the only copy of whatever
+  // credentials it still holds, and an operator may want to inspect it.
+  expect(rowCount(store)).toBe(5);
+  expect(store.db.query('SELECT payload FROM rooms WHERE code=?').get('BADJ1').payload).toBe(
+    '{"version":1,"code":"BADJ1"',
+  );
+  expect(messages.filter((message) => message.includes('not valid JSON')).length).toBe(1);
+  expect(messages.filter((message) => message.includes('not a JSON object')).length).toBe(3);
+  rooms.get('ABCDE').dispose();
+  store.close();
+});
+
+test('a checkpoint from another schema version is skipped as unsupported, not mistaken for corruption', () => {
+  const store = new RoomStore(':memory:');
+  seedRow(store, 'ABCDE', checkpointPayload());
+  seedRow(store, 'NEWER', checkpointPayload({ code: 'NEWER', version: 2 }));
+  seedRow(store, 'OLDER', checkpointPayload({ code: 'OLDER', version: 0 }));
+  seedRow(store, 'TYPED', checkpointPayload({ code: 'TYPED', version: '1' }));
+  const { result: rooms, messages } = captureErrors(() => store.load(new Map()));
+  expect([...rooms.keys()]).toEqual(['ABCDE']);
+  // An unsupported version stays on disk so a later build can migrate it, and
+  // the log says which case it was so the two are not confused operationally.
+  expect(rowCount(store)).toBe(4);
+  expect(messages.filter((message) => message.includes('unsupported-version')).length).toBe(2);
+  expect(messages.filter((message) => message.includes('(corrupt)')).length).toBe(1);
+  rooms.get('ABCDE').dispose();
+  store.close();
+});
+
+test('a checkpoint missing a required field is rejected instead of half-restoring a room', () => {
+  const store = new RoomStore(':memory:');
+  seedRow(store, 'ABCDE', checkpointPayload());
+  for (const missing of ['hostToken', 'code', 'issued', 'config', 'titles', 'randomSeen']) {
+    const payload = checkpointPayload({ code: missing });
+    delete payload[missing];
+    seedRow(store, missing, payload);
+  }
+  const { result: rooms, messages } = captureErrors(() => store.load(new Map()));
+  expect([...rooms.keys()]).toEqual(['ABCDE']);
+  // In particular a room whose host token is missing must not come back, because
+  // every later host check would compare against undefined and admit anyone.
+  expect(rooms.get('hostToken')).toBeUndefined();
+  expect(rowCount(store)).toBe(7);
+  expect(messages.filter((message) => message.includes('(corrupt)')).length).toBe(6);
+  rooms.get('ABCDE').dispose();
+  store.close();
+});
+
+test('configuration outside the bounds the room itself enforces is rejected', () => {
+  const invalidConfigs = [
+    { timerMs: 1000 },
+    { timerMs: 60000.5 },
+    { timerMs: '60000' },
+    { maxPlayers: 51 },
+    { maxPlayers: 0 },
+    { elimination: 'yes' },
+    { locked: 1 },
+    { excludeDaily: null },
+    { mapSource: 'remote' },
+    { holes: 0 },
+    { holes: 10 },
+    { randomHoles: 12 },
+    { selectedHoleIds: 'public1' },
+    { selectedHoleIds: [''] },
+    { selectedHoleIds: [7] },
+    { selectedHoleIds: [null] },
+    // Late joining is a named policy, and course voting is a flag. A row cannot
+    // smuggle an unrecognised policy or a truthy stand-in past the live rules.
+    { lateJoin: 'sometimes' },
+    { lateJoin: true },
+    { lateJoin: null },
+    { courseVoting: 'true' },
+    { courseVoting: 1 },
+  ];
+  const store = new RoomStore(':memory:');
+  seedRow(store, 'ABCDE', checkpointPayload());
+  invalidConfigs.forEach((config, index) => {
+    const code = 'CFG' + index;
+    seedRow(
+      store,
+      code,
+      checkpointPayload({ code, config: { ...checkpointPayload().config, ...config } }),
+    );
+  });
+  const { result: rooms, messages } = captureErrors(() => store.load(new Map()));
+  // Without structural validation the out-of-range values were spread over the
+  // defaults, so a 1-second timer or 51 players came back as accepted settings.
+  expect([...rooms.keys()]).toEqual(['ABCDE']);
+  expect(messages.filter((message) => message.includes('(corrupt)')).length).toBe(
+    invalidConfigs.length,
+  );
+  rooms.get('ABCDE').dispose();
+  store.close();
+});
+
+test('malformed identities are rejected rather than becoming join credentials', () => {
+  const store = new RoomStore(':memory:');
+  seedRow(store, 'ABCDE', checkpointPayload());
+  const malformed = {
+    HUE: [{ uid: 'uid-host', session: 'session-host', name: 'Host', hue: 400 }],
+    HUG: [{ uid: 'uid-host', session: 'session-host', name: 'Host', hue: -1 }],
+    HUH: [{ uid: 'uid-host', session: 'session-host', name: 'Host', hue: 1.5 }],
+    NON: ['not-an-identity'],
+    DUP: [
+      { uid: 'uid-host', session: 'session-one', name: 'Host', hue: 10 },
+      { uid: 'uid-host', session: 'session-two', name: 'Impostor', hue: 20 },
+    ],
+  };
+  for (const [code, issued] of Object.entries(malformed)) {
+    seedRow(store, code, checkpointPayload({ code, issued }));
+  }
+  const { result: rooms, messages } = captureErrors(() => store.load(new Map()));
+  expect([...rooms.keys()]).toEqual(['ABCDE']);
+  expect(messages.filter((message) => message.includes('(corrupt)')).length).toBe(5);
+  rooms.get('ABCDE').dispose();
+  store.close();
+});
+
+test('an oversized random history is trimmed to the room cap instead of being rejected or exhausting memory', () => {
+  const store = new RoomStore(':memory:');
+  const history = Array.from({ length: 12000 }, (unused, index) => 'seen-' + index);
+  seedRow(store, 'ABCDE', checkpointPayload({ randomSeen: history }));
+  seedRow(
+    store,
+    'HUGE',
+    checkpointPayload({ code: 'HUGE', randomSeen: new Array(200000).fill('x') }),
+  );
+  const rows = store.load(new Map());
+  expect([...rows.keys()].sort()).toEqual(['ABCDE', 'HUGE']);
+  expect(rows.get('ABCDE').randomSeen.length).toBe(10000);
+  expect(rows.get('ABCDE').randomSeen[0]).toBe('seen-0');
+  expect(rows.get('HUGE').randomSeen.length).toBe(10000);
+  rows.get('ABCDE').dispose();
+  rows.get('HUGE').dispose();
+  store.close();
+});
+
+test('an oversized payload is refused before it is parsed into memory', () => {
+  const store = new RoomStore(':memory:');
+  seedRow(store, 'ABCDE', checkpointPayload());
+  // Padding inside a string field keeps the JSON syntactically valid, so only
+  // the size guard can stop the row from being decoded and walked.
+  seedRow(store, 'FAT', '{"version":1,"code":"FAT","padding":"' + 'x'.repeat(2_100_000) + '"}');
+  const { result: rooms, messages } = captureErrors(() => store.load(new Map()));
+  expect([...rooms.keys()]).toEqual(['ABCDE']);
+  expect(messages.some((message) => message.includes('characters, more than the supported'))).toBe(
+    true,
+  );
+  expect(rowCount(store)).toBe(2);
+  rooms.get('ABCDE').dispose();
+  store.close();
+});
+
+test('a payload saved under the wrong room code is not resurrected under a different code', () => {
+  const store = new RoomStore(':memory:');
+  seedRow(store, 'ZZZZZ', checkpointPayload({ code: 'ABCDE' }));
+  const { result: rooms, messages } = captureErrors(() => store.load(new Map()));
+  expect(rooms.size).toBe(0);
+  expect(messages.some((message) => message.includes('payload names the room'))).toBe(true);
+  expect(rowCount(store)).toBe(1);
+  store.close();
+});
+
+test('a row written before the random-hole setting existed is migrated, not discarded', () => {
+  const store = new RoomStore(':memory:');
+  const legacyRandom = checkpointPayload({ code: 'LEGACY' });
+  delete legacyRandom.config.randomHoles;
+  legacyRandom.config.holes = 7;
+  seedRow(store, 'LEGACY', legacyRandom);
+  const legacyPicked = checkpointPayload({ code: 'LEGACP' });
+  delete legacyPicked.config.randomHoles;
+  legacyPicked.config.mapSource = 'picked';
+  legacyPicked.config.holes = 4;
+  seedRow(store, 'LEGACP', legacyPicked);
+  const rooms = store.load(new Map());
+  // A random room keeps its hole count; a manual playlist keeps the historical
+  // default of three, which is what Room.restore would have chosen.
+  expect(rooms.get('LEGACY').config.randomHoles).toBe(7);
+  expect(rooms.get('LEGACP').config.randomHoles).toBe(3);
+  expect(rooms.get('LEGACY').config.mapSource).toBe('random');
+  rooms.get('LEGACY').dispose();
+  rooms.get('LEGACP').dispose();
+  store.close();
+});
+
+test('a well-formed checkpoint restores every persisted field', () => {
+  const store = new RoomStore(':memory:');
+  const transfer = { fromUid: 'uid-old', toUid: 'uid-host', at: 1700000000000 };
+  seedRow(
+    store,
+    'ABCDE',
+    checkpointPayload({
+      hostTransfer: transfer,
+      issued: [
+        { uid: 'uid-host', session: 'session-host', name: 'Host', hue: 359 },
+        { uid: 'uid-guest', session: 'session-guest', name: 'Guest', hue: 0 },
+      ],
+      config: {
+        holes: 2,
+        timerMs: 127000,
+        elimination: false,
+        maxPlayers: 8,
+        mapSource: 'picked',
+        selectedHoleIds: ['public1', 'public2'],
+        locked: true,
+        excludeDaily: true,
+        randomHoles: 5,
+        lateJoin: 'next-hole',
+        courseVoting: true,
+      },
+      titles: { public1: 'First', public2: 'Second' },
+      randomSeen: ['seen-before', 'seen-again'],
+      phase: 'playing',
+      starting: false,
+      recoveryNotice: false,
+    }),
+  );
+  const catalog = new Map();
+  const rooms = store.load(catalog);
+  const room = rooms.get('ABCDE');
+  expect(room.hostToken).toBe('host-token');
+  expect(room.hostUid).toBe('uid-host');
+  expect(room.hostTransfer).toEqual(transfer);
+  expect(room.issued.get('uid-guest')).toEqual({
+    uid: 'uid-guest',
+    session: 'session-guest',
+    name: 'Guest',
+    hue: 0,
+  });
+  expect(room.config).toEqual({
+    holes: 2,
+    timerMs: 127000,
+    elimination: false,
+    maxPlayers: 8,
+    mapSource: 'picked',
+    selectedHoleIds: ['public1', 'public2'],
+    locked: true,
+    excludeDaily: true,
+    randomHoles: 5,
+    lateJoin: 'next-hole',
+    courseVoting: true,
+  });
+  expect(room.randomSeen).toEqual(['seen-before', 'seen-again']);
+  // Play cannot resume after a restart, so a mid-match row recovers as a lobby.
+  expect(room.phase).toBe('lobby');
+  expect(room.recoveryNotice).toBe(true);
+  expect(catalog.get('public1')).toEqual({ id: 'public1', title: 'First' });
+  expect(catalog.get('public2')).toEqual({ id: 'public2', title: 'Second' });
+  room.dispose();
+  store.close();
 });

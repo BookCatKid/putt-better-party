@@ -1,9 +1,10 @@
 import { Database, type Statement } from 'bun:sqlite';
 import { errorMessage, type CourseIndex } from './domain.js';
-import type { RoomCheckpoint, RoomOptions } from './room-types.js';
+import type { RoomOptions } from './room-types.js';
 import { mkdirSync, chmodSync } from 'node:fs';
 import path from 'node:path';
 import { Room } from './room.js';
+import { parseStoredRoomPayload } from './persistence-validation.js';
 
 /** One checkpoint failure is logged, not repeated for every later frame. */
 const PERSIST_FAILURE_REPORT_INTERVAL_MS = 60_000;
@@ -59,18 +60,44 @@ export class RoomStore {
   }
   load(catalog: CourseIndex, options: RoomOptions = {}, now = Date.now()): Map<string, Room> {
     this.db.query('DELETE FROM rooms WHERE updated<?').run(now - 1800000);
-    const rooms = new Map();
-    for (const row of this.db.query<{ payload: string }, []>('SELECT payload FROM rooms').all()) {
+    const rooms = new Map<string, Room>();
+    for (const row of this.db
+      .query<{ code: string; payload: string }, []>('SELECT code, payload FROM rooms')
+      .all()) {
+      /*
+       * A stored row is untrusted input: it may have been truncated by a crash,
+       * written by another build, or edited by hand. Validate it before touching
+       * Room.restore, and skip anything that does not describe a whole room.
+       *
+       * A skipped row is deliberately left in place rather than deleted or
+       * overwritten. Deleting destroys the only copy of credentials a player
+       * might still hold, and rewriting it would silently discard play data that
+       * a later migration could repair. The age sweep at the top of this method
+       * already removes rows after 30 minutes of inactivity, so a bad row cannot
+       * linger indefinitely, and an operator can inspect it in the meantime.
+       */
       try {
-        const data: RoomCheckpoint = JSON.parse(row.payload);
-        if (data.version !== 1) {
+        const parsed = parseStoredRoomPayload(row.payload);
+        if (!parsed.ok) {
+          console.error(
+            `Skipped stored room ${JSON.stringify(row.code)} (${parsed.kind}): ${parsed.reason}`,
+          );
           continue;
         }
-        const room = new Room(data.code, catalog, {
+        if (parsed.checkpoint.code !== row.code) {
+          // The checkpoint and the row it was stored under disagree, so one of
+          // them was rewritten or the row was copied between keys. Trusting the
+          // payload would resurrect a room under a code the client never used.
+          console.error(
+            `Skipped stored room ${JSON.stringify(row.code)} (corrupt): payload names the room ${JSON.stringify(parsed.checkpoint.code)}`,
+          );
+          continue;
+        }
+        const room = new Room(parsed.checkpoint.code, catalog, {
           ...options,
           onChange: (changedRoom) => this.save(changedRoom),
         });
-        room.restore(data);
+        room.restore(parsed.checkpoint);
         rooms.set(room.code, room);
         this.save(room);
       } catch (error) {
