@@ -79,3 +79,14 @@ test('running and waiting report what is actually in flight', async () => {
   expect(queue.metrics().running).toBe(0);
   expect(queue.metrics().waiting).toBe(0);
 });
+
+test('the reported version is the manifest version, not a second copy', async () => {
+  const manifest = await Bun.file(new URL('../package.json', import.meta.url)).json();
+  const { VERSION } = await import('../src/version.js');
+  // A hard-coded release string in source drifts from the manifest the moment
+  // someone bumps one and not the other, so the two are kept identical by
+  // construction and this asserts the construction rather than a value.
+  expect(VERSION).toBe(manifest.version);
+  expect(typeof VERSION).toBe('string');
+  expect(VERSION.length).toBeGreaterThan(0);
+});
