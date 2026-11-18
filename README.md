@@ -26,11 +26,14 @@ Install [Bun](https://bun.sh/), Python 3 and curl. From a clone of this reposito
 
 ```sh
 bun install --frozen-lockfile
+bun run hooks:install
 bun run prepare:client
 bun run start
 ```
 
 Open [http://localhost:8789](http://localhost:8789), create a party and share its invite code. Course metadata and specifications are retrieved from the public putt.day catalog; All original client assets from the reviewed snapshot are retained in this private repository so they survive upstream updates. Preparation verifies their SHA-256 hashes and builds the patched client entirely offline.
+
+The [installation guide](docs/installation.md) covers exact versions, what each step does, the failure modes of client preparation, and how to verify a working install.
 
 ## Architecture
 
