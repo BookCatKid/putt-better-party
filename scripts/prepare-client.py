@@ -134,8 +134,6 @@ try:
         check=True,
         env=environment,
     )
-    shutil.copyfile(root / "scripts/home.js", staging / "assets/bp-home.js")
-    shutil.copyfile(root / "scripts/leaderboard.js", staging / "assets/bp-leaderboard.js")
 
     # Syntax-check every bundle whose bytes the patcher changed. A patch that
     # produces invalid JavaScript would otherwise only fail in the browser, after

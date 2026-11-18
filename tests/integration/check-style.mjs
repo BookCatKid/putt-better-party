@@ -33,18 +33,38 @@ try {
     30000,
   );
   const style = await client.evalJS(
-    '(()=>{let x=[...document.querySelectorAll("h1,h2")].find(x=>x.textContent==="Party lobby");let p=x.closest(".rounded-3xl");return {lobbyWidth:getComputedStyle(p).maxWidth,headingSize:getComputedStyle(x).fontSize,headingWeight:getComputedStyle(x).fontWeight,font:getComputedStyle(x).fontFamily,background:getComputedStyle(p).backgroundColor,layout:getComputedStyle(p.parentElement).display}})()',
+    '(()=>{let x=[...document.querySelectorAll("h1,h2")].find(x=>x.textContent==="Party lobby");let p=x.closest(".rounded-3xl");return {lobbyWidth:getComputedStyle(p).maxWidth,cardWidth:p.getBoundingClientRect().width,viewport:window.innerWidth,headingSize:getComputedStyle(x).fontSize,headingWeight:getComputedStyle(x).fontWeight,font:getComputedStyle(x).fontFamily,background:getComputedStyle(p).backgroundColor,layout:getComputedStyle(p.parentElement).display}})()',
   );
   console.log('Join styles', joinStyle, 'Lobby styles', style);
   assert.equal(style.layout, 'flex');
   assert.notEqual(style.background, 'rgba(0, 0, 0, 0)');
-  assert.notEqual(style.lobbyWidth, 'none');
+  /*
+   * The lobby card must be a bounded box rather than stretching the viewport.
+   * It used to be constrained by `max-width`; the dashboard redesign sizes it
+   * explicitly instead, so `max-width` is legitimately `none` and asserting on it
+   * checked the old mechanism rather than the behaviour. Measuring the rendered
+   * width against the viewport holds under either mechanism.
+   */
+  assert(
+    style.cardWidth > 0 && style.cardWidth < style.viewport,
+    `lobby card must be narrower than the viewport (${style.cardWidth} vs ${style.viewport})`,
+  );
   const png = await client.call('Page.captureScreenshot', { format: 'png' });
   await Bun.write('style-proof.png', Buffer.from(png.data, 'base64'));
   await client.evalJS(
     '(()=>{let s=document.querySelector("select[aria-label=\\"Party map selection\\"]");s.value="picked";s.dispatchEvent(new Event("change",{bubbles:true}));})()',
   );
-  await waitFor(client, '!!document.querySelector("button[aria-label^=\\"Add \\"]")', 30000);
+  // The catalogue lives in a modal behind "Edit playlist" since the lobby
+  // redesign, so nothing is rendered to assert on until a host opens it.
+  await waitFor(
+    client,
+    '!![...document.querySelectorAll("button")].find(b=>b.textContent==="Edit playlist")',
+    30000,
+  );
+  await client.evalJS(
+    '[...document.querySelectorAll("button")].find(b=>b.textContent==="Edit playlist").click()',
+  );
+  await waitFor(client, '!!document.querySelector("dialog button[aria-label^=\\"Add \\"]")', 30000);
   const body = await client.evalJS('document.body.innerText');
   assert(!body.includes('Cached / local'));
   assert(!body.includes('Random cached holes'));

@@ -21,11 +21,20 @@ import {
   parsePublicCourseIdList,
   readJsonObject,
 } from './request-guards.js';
+import { ClientScriptAssets } from './client-scripts.js';
 import { randomInt } from 'node:crypto';
 import path from 'node:path';
 
 const port = Number(process.env.PORT || 8789);
 const root = path.resolve(import.meta.dir, '../web');
+/**
+ * The standalone browser scripts are authored as TypeScript and transpiled on
+ * demand, so the repository holds no generated JavaScript and cannot drift from
+ * source. They are not part of the pinned client, so they live here rather than
+ * under `web/`.
+ */
+const scriptsDirectory = path.resolve(import.meta.dir, '../scripts');
+const clientScripts = new ClientScriptAssets(scriptsDirectory);
 const store = new RoomStore(
   process.env.BP_DB || path.resolve(import.meta.dir, '../state/rooms.sqlite'),
 );
@@ -188,16 +197,35 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
           },
         });
       }
-      if (pathname === '/admin.css' || pathname === '/admin.js') {
+      if (pathname === '/admin.css') {
         if (!readOnly) {
           return methodNotAllowed(READ_METHODS);
         }
-        const file =
-          pathname === '/admin.css'
-            ? new URL('./admin.css', import.meta.url)
-            : new URL('../scripts/admin.js', import.meta.url);
-        return new Response(Bun.file(file), {
+        return new Response(Bun.file(new URL('./admin.css', import.meta.url)), {
           headers: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
+        });
+      }
+      if (
+        pathname === '/admin.js' ||
+        pathname === '/assets/bp-home.js' ||
+        pathname === '/assets/bp-leaderboard.js'
+      ) {
+        if (!readOnly) {
+          return methodNotAllowed(READ_METHODS);
+        }
+        const asset = pathname.startsWith('/assets/')
+          ? pathname.slice('/assets/'.length)
+          : pathname.slice(1);
+        const javascript = await clientScripts.javascriptFor(asset);
+        if (javascript === null) {
+          return new Response('Not found', { status: 404 });
+        }
+        return new Response(javascript, {
+          headers: {
+            'content-type': 'text/javascript; charset=utf-8',
+            'cache-control': 'no-store',
+            'x-content-type-options': 'nosniff',
+          },
         });
       }
       if (pathname === '/api/create') {

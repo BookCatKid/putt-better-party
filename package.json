@@ -16,7 +16,7 @@
     "test:catalog": "bun tests/integration/check-live-catalog.mjs",
     "test:recovery": "bun tests/integration/check-recovery.mjs",
     "test:protocol": "bun tests/integration/check-room-lifecycle.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
     "hooks:install": "git config --local core.hooksPath .githooks",
     "precommit": "lint-staged && bun run prepare:client && bun run typecheck && bun test"
   },

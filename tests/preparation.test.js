@@ -56,8 +56,6 @@ test('the prepared client exists and its entry modules are present', () => {
   expect(existsSync(path.join(prepared, 'assets/index-DFMxt6BL.js'))).toBe(true);
   expect(existsSync(path.join(prepared, 'assets/party._code-D3a-IB4-.js'))).toBe(true);
   expect(existsSync(path.join(prepared, 'validation/specValidation-vqop-JBL.js'))).toBe(true);
-  expect(existsSync(path.join(prepared, 'assets/bp-home.js'))).toBe(true);
-  expect(existsSync(path.join(prepared, 'assets/bp-leaderboard.js'))).toBe(true);
 });
 
 test('preparation writes no generated output into the immutable archive', () => {

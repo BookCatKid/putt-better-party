@@ -106,8 +106,24 @@ export default [
   },
 
   {
-    files: ['scripts/home.js', 'scripts/admin.js', 'scripts/leaderboard.js'],
-    languageOptions: { globals: globals.browser },
+    files: ['scripts/*.ts'],
+    languageOptions: { parser: tsParser, globals: globals.browser },
+    plugins: { '@typescript-eslint': tsPlugin },
+    rules: {
+      'no-undef': 'off',
+      'no-unused-vars': 'off',
+      'no-shadow': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { args: 'none', caughtErrors: 'none', ignoreRestSiblings: true },
+      ],
+      '@typescript-eslint/no-shadow': 'error',
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/ban-ts-comment': [
+        'error',
+        { 'ts-ignore': true, 'ts-nocheck': true, 'ts-expect-error': true },
+      ],
+    },
   },
   {
     files: ['scripts/client-bootstrap.js'],
