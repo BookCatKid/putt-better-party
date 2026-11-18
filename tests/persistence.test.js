@@ -235,3 +235,102 @@ test('host ownership and the hand-over record survive a restart', () => {
   room.dispose();
   store.close();
 });
+
+test('a daily hole that later became private is still excluded from random selection', async () => {
+  // The published daily listing is a view over currently playable courses, so a
+  // featured hole that was made private drops out of it entirely. Its day still
+  // exists in the archive, so exclusion has to be driven by the catalog pages it
+  // actually selects from: a private hole cannot be selected in the first place,
+  // and a public hole that was featured keeps its scheduledDay and is excluded.
+  const holes = [
+    { id: 'was-featured', scheduledDay: 8 },
+    { id: 'never-featured' },
+    { id: 'future-featured', scheduledDay: 40 },
+    { id: 'plain' },
+  ];
+  const requests = [];
+  const browse = async (player) => {
+    requests.push(player);
+    const list = player.daily ? holes.filter((hole) => hole.scheduledDay !== undefined) : holes;
+    return {
+      total: list.length,
+      holes: list.slice(player.offset, player.offset + 24),
+      nextOffset: null,
+    };
+  };
+  const picked = await chooseRandom({
+    browse,
+    count: 2,
+    excludeDaily: true,
+    currentDay: 10,
+    pick: () => 0,
+  });
+  // The featured hole is skipped, the future-scheduled one is still playable,
+  // and the private course never appears because the catalog does not list it.
+  expect(picked.ids).toEqual(['never-featured', 'future-featured']);
+});
+
+test('a daily entry with no scheduledDay is treated as already featured', async () => {
+  // A course can be featured and later lose its scheduledDay while remaining
+  // public and listed. The daily listing is the authority on what has run, so a
+  // dateless entry in it still counts as featured.
+  const holes = [
+    { id: 'featured-dateless' },
+    { id: 'featured-dated', scheduledDay: 5 },
+    { id: 'open-one' },
+    { id: 'open-two' },
+  ];
+  const browse = async (player) => {
+    const list = player.daily ? holes.slice(0, 2) : holes;
+    return {
+      total: list.length,
+      holes: list.map((hole) => (player.daily ? { ...hole } : { ...hole })),
+      nextOffset: null,
+    };
+  };
+  const picked = await chooseRandom({
+    browse,
+    count: 2,
+    excludeDaily: true,
+    currentDay: 10,
+    pick: () => 0,
+  });
+  expect(picked.ids).toEqual(['open-one', 'open-two']);
+});
+
+test('daily exclusion spans every page and prefers the newest listing over a cached one', async () => {
+  // The listing paginates, and a partial read would silently let recent dailies
+  // back into the pool. Every page is requested fresh so a cached page from
+  // before today's hole cannot hide it.
+  const holes = Array.from({ length: 40 }, (unused, index) => ({ id: 'open' + index }));
+  const featured = [
+    ...Array.from({ length: 24 }, (unused, index) => ({ id: 'featured' + index, scheduledDay: 1 })),
+    { id: 'open0', scheduledDay: 9 },
+    { id: 'open1', scheduledDay: 9 },
+    { id: 'open2', scheduledDay: 9 },
+    { id: 'open3', scheduledDay: 9 },
+  ];
+  const requests = [];
+  const browse = async (player) => {
+    requests.push(player);
+    const list = player.daily ? featured : holes;
+    return {
+      total: list.length,
+      holes: list.slice(player.offset, player.offset + 24),
+      nextOffset: player.offset + 24 < list.length ? player.offset + 24 : null,
+    };
+  };
+  const picked = await chooseRandom({
+    browse,
+    count: 2,
+    excludeDaily: true,
+    currentDay: 9,
+    pick: (maximum) => maximum - 1,
+  });
+  // The four featured courses are the first positions, so the tail of the deck
+  // is drawn and the featured ones are skipped only when they come up.
+  expect(picked.ids).toEqual(['open39', 'open38']);
+  const dailyRequests = requests.filter((player) => player.daily);
+  expect(dailyRequests.map((player) => player.offset)).toEqual([0, 24]);
+  expect(dailyRequests.every((player) => player.fresh === true)).toBe(true);
+});
