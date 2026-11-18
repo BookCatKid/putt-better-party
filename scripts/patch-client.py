@@ -73,6 +73,12 @@ patch("party._code-D3a-IB4-.js", route_patch)
 
 
 def transport_patch(source):
+    # Preserve completed-run recording when the server has no deadline.
+    source = replace_once(
+        source,
+        "Date.now()<r.timerEndsAt",
+        "(!r.timerEndsAt||Date.now()<r.timerEndsAt)",
+    )
     # The original Zn adapter owns only the party socket and state-store bindings.
     # Leave the surrounding rendering, input and simulation functions untouched.
     start = source.index("function Zn(")
@@ -190,6 +196,8 @@ patch("GameCanvas-C5hQh1sR.js", transport_patch)
 
 
 def runtime_patch(s):
+    # The original playable gate treats timerEndsAt=0 as unlimited.
+    s = replace_once(s, "&&n?n+e.timerMs:0", "&&n&&e.timerMs?n+e.timerMs:0")
     s = replace_once(
         s,
         "active:!0,code:e,hostToken:n,self:t,selfRole:",
@@ -222,6 +230,7 @@ patch("runtime-DL2fiDAQ.js", runtime_patch)
 
 
 def game_patch(s):
+    s = replace_once(s, "children:Pt(c)", "children:i?Pt(c):`∞`")
     s = 'import{bpHostAction,bpPickerBusy,bpLeaveParty,bpCastVote}from"./runtime-DL2fiDAQ.js";' + s
     a = s.index("function At(")
     b = s.index("function jt(", a)

@@ -483,7 +483,8 @@ export class Room {
       player.joinAfterHole !== undefined &&
       !player.participated &&
       (this.phase === 'countdown' ||
-        (this.phase === 'playing' && Date.now() < this.startsAt + this.roundTimerMs)) &&
+        (this.phase === 'playing' &&
+          (!this.roundTimerMs || Date.now() < this.startsAt + this.roundTimerMs))) &&
       (this.config.lateJoin === LATE_JOIN.ALWAYS ||
         (this.phase === 'countdown' && player.joinAfterHole < this.holeIndex))
     ) {
@@ -929,7 +930,7 @@ export class Room {
       }
     }
     if (
-      !isIntegerInRange(candidate.timerMs, 20000, 300000) ||
+      !isIntegerInRange(candidate.timerMs, 0, 86_400_000) ||
       typeof candidate.elimination !== 'boolean' ||
       !isIntegerInRange(candidate.maxPlayers, 1, 50) ||
       typeof candidate.locked !== 'boolean' ||
@@ -1199,11 +1200,13 @@ export class Room {
     this.startsAt = Date.now();
     this.phase = 'playing';
     this.audit('round_started', {
-      deadline: this.startsAt + this.roundTimerMs,
+      deadline: this.roundTimerMs ? this.startsAt + this.roundTimerMs : null,
       awaitingPlayers: waiting.length,
     });
     this.state();
-    this.schedule(() => this.endHole(), this.roundTimerMs);
+    if (this.roundTimerMs) {
+      this.schedule(() => this.endHole(), this.roundTimerMs);
+    }
   }
   /**
    * Every identity the current hole can legitimately be known by. The catalog
@@ -1407,14 +1410,14 @@ export class Room {
       player.alive &&
       player.participated &&
       !player.done &&
-      Date.now() <= this.startsAt + this.roundTimerMs
+      (!this.roundTimerMs || Date.now() <= this.startsAt + this.roundTimerMs)
     );
   }
   elapsedHoleMs() {
     if (this.phase === 'countdown') {
       return 0;
     }
-    return Math.max(0, Math.min(this.roundTimerMs, Date.now() - this.startsAt));
+    return Math.max(0, Math.min(this.roundTimerMs || Infinity, Date.now() - this.startsAt));
   }
   finish(player: Player, success: boolean) {
     player.holeTimeMs = this.elapsedHoleMs();
@@ -1499,7 +1502,10 @@ export class Room {
       typeof message.seconds === 'number' &&
       [15, 30, 60].includes(message.seconds)
     ) {
-      this.roundTimerMs = Math.min(900000, this.roundTimerMs + message.seconds * 1000);
+      if (!this.roundTimerMs) {
+        return true; // An unlimited round cannot be extended.
+      }
+      this.roundTimerMs = Math.min(86_400_000, this.roundTimerMs + message.seconds * 1000);
       this.schedule(
         () => this.endHole(),
         Math.max(0, this.startsAt + this.roundTimerMs - Date.now()),
@@ -1617,7 +1623,7 @@ export class Room {
         uid: player.uid,
         strokes: Math.max(player.strokes, this.specs[this.holeIndex].par + 5),
         status: 'timeout',
-        timeMs: this.roundTimerMs,
+        timeMs: this.roundTimerMs || player.holeTimeMs || this.elapsedHoleMs(),
       };
     });
     this.recordRound('completed', scores);
@@ -1633,7 +1639,7 @@ export class Room {
         player.role = 'spectator';
       } else {
         player.totalStrokes += Math.max(player.strokes, this.specs[this.holeIndex].par + 5);
-        player.holeTimeMs = this.roundTimerMs;
+        player.holeTimeMs = this.roundTimerMs || player.holeTimeMs;
         player.totalTimeMs = (player.totalTimeMs ?? 0) + player.holeTimeMs;
         player.holesSurvived++;
       }

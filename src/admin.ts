@@ -62,7 +62,8 @@ export function adminRoom(room: Room) {
     currentHole: room.phase === 'lobby' ? null : room.holeIndex + 1,
     course: room.specs[room.holeIndex]?.name ?? null,
     holes: room.config.holes,
-    timerEndsAt: room.phase === 'playing' ? room.startsAt + room.roundTimerMs : null,
+    timerEndsAt:
+      room.phase === 'playing' && room.roundTimerMs ? room.startsAt + room.roundTimerMs : null,
     elimination: room.config.elimination,
     locked: room.config.locked,
     lateJoin: room.config.lateJoin,

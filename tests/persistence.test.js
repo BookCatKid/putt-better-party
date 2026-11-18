@@ -456,7 +456,8 @@ test('a checkpoint missing a required field is rejected instead of half-restorin
 
 test('configuration outside the bounds the room itself enforces is rejected', () => {
   const invalidConfigs = [
-    { timerMs: 1000 },
+    { timerMs: -1 },
+    { timerMs: 86401000 },
     { timerMs: 60000.5 },
     { timerMs: '60000' },
     { maxPlayers: 51 },

@@ -42,8 +42,8 @@ const MAX_RANDOM_HOLES = 10_000;
  * hostile row to allocate an unbounded configuration.
  */
 const MAX_HOLE_COUNT = 500;
-const MIN_TIMER_MS = 20_000;
-const MAX_TIMER_MS = 300_000;
+const MIN_TIMER_MS = 0;
+const MAX_TIMER_MS = 86_400_000;
 const MAX_PLAYERS = 50;
 /**
  * Course ids are short slugs upstream; the saved-playlist API accepts at most

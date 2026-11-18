@@ -80,7 +80,10 @@ function BpLobbyDashboard() {
         ]),
       ]
     : [
-        readOnly('Time per hole', Math.round(config.timerMs / 1000) + 's'),
+        readOnly(
+          'Time per hole',
+          config.timerMs ? Math.round(config.timerMs / 1000) + 's' : 'Unlimited',
+        ),
         readOnly('Mode', config.elimination ? 'Elimination' : 'Stroke play'),
       ];
 
@@ -112,8 +115,8 @@ function BpLobbyDashboard() {
     config.holes +
     (config.holes === 1 ? ' hole' : ' holes') +
     ' · ' +
-    Math.round(config.timerMs / 1000) +
-    's · ' +
+    (config.timerMs ? Math.round(config.timerMs / 1000) + 's' : 'Unlimited') +
+    ' · ' +
     (config.elimination ? 'Elimination' : 'Stroke play');
   const startLabel = busy ? 'Loading courses…' : 'Start party';
 

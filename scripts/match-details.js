@@ -9,8 +9,8 @@ function BpGuestPlaylist() {
       { className: 'mb-2 text-sm font-bold' },
       config.holes +
         ' holes · ' +
-        Math.round(config.timerMs / 1000) +
-        's · ' +
+        (config.timerMs ? Math.round(config.timerMs / 1000) + 's' : 'Unlimited') +
+        ' · ' +
         (config.elimination ? 'Elimination' : 'Stroke play'),
     ),
     config.mapSource === 'picked'
@@ -234,14 +234,15 @@ function BpNumericField({
   unit,
   sliderStep = 1,
   inputMax = max,
+  inputMin = min,
 }) {
   const createElement = BetterPartyReact.createElement;
   const [draft, setDraft] = BetterPartyReact.useState(String(value));
-  const [slider, setSlider] = BetterPartyReact.useState(value);
+  const [slider, setSlider] = BetterPartyReact.useState(Math.max(min, Math.min(value, max)));
   const cancel = BetterPartyReact.useRef(false);
   BetterPartyReact.useEffect(() => {
     setDraft(String(value));
-    setSlider(Math.min(value, max));
+    setSlider(Math.max(min, Math.min(value, max)));
   }, [value]);
   function commit() {
     if (cancel.current) {
@@ -250,12 +251,12 @@ function BpNumericField({
       return;
     }
     const number = Number(draft);
-    if (draft.trim() && Number.isInteger(number) && number >= min && number <= inputMax) {
+    if (draft.trim() && Number.isInteger(number) && number >= inputMin && number <= inputMax) {
       if (number !== value) {
         apply(number);
       }
       setDraft(String(number));
-      setSlider(Math.min(number, max));
+      setSlider(Math.max(min, Math.min(number, max)));
     } else {
       setDraft(String(value));
     }
@@ -286,7 +287,7 @@ function BpNumericField({
         createElement('input', {
           type: 'number',
           'aria-label': label,
-          min,
+          min: inputMin,
           max: inputMax,
           step: 1,
           value: draft,
@@ -334,6 +335,8 @@ function BpNumericSettings({ section } = {}) {
         value: Math.round(configuration.timerMs / 1000),
         min: 20,
         max: 300,
+        inputMin: 0,
+        inputMax: 86400,
         apply: (number) => updateBetterPartyConfig({ timerMs: number * 1000 }),
         disabled,
         unit: 's',

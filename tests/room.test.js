@@ -436,8 +436,10 @@ test('manual playlists exceed nine holes, random count is independent, and custo
   expect(room.config.holes).toBe(18);
   room.handle(host.ws, { t: 'config', config: { holes: 10001 } });
   expect(room.config.holes).toBe(18);
-  room.handle(host.ws, { t: 'config', config: { timerMs: 301000 } });
-  expect(room.config.timerMs).toBe(127000);
+  room.handle(host.ws, { t: 'config', config: { timerMs: 1800000 } });
+  expect(room.config.timerMs).toBe(1800000);
+  room.handle(host.ws, { t: 'config', config: { timerMs: 86401000 } });
+  expect(room.config.timerMs).toBe(1800000);
   room.dispose();
 });
 test('lazy manual map preparation reaches later rounds and can be interrupted safely', async () => {
@@ -1830,5 +1832,23 @@ test("no outbound frame ever carries a session secret or another player's crown"
       }
     }
   }
+  room.dispose();
+});
+
+test('unlimited rounds remain playable without a timeout and retain elapsed scoring time', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, {
+    t: 'config',
+    config: { timerMs: 0, mapSource: 'picked', selectedHoleIds: ['p'], elimination: false },
+  });
+  expect(room.config.timerMs).toBe(0);
+  room.handle(host.ws, { t: 'start' });
+  await delay(25);
+  expect(room.phase).toBe('playing');
+  expect(room.playable(host.player)).toBe(true);
+  expect(room.elapsedHoleMs()).toBeGreaterThan(0);
+  room.handle(host.ws, { f: 1, s: 1, p: 3 });
+  expect(host.player.holeTimeMs).toBeGreaterThan(0);
   room.dispose();
 });
