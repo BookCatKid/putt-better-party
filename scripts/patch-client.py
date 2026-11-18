@@ -1,5 +1,6 @@
 """Apply hash-pinned changes to copies of the original client bundles."""
 
+import hashlib
 import json
 import os
 import re
@@ -404,6 +405,43 @@ for path in json.loads((root / "scripts/client-lock.json").read_text()):
         shutil.copyfile(source, validation / source.name)
 (validation / "index-DFMxt6BL.js").write_text(
     "export const Xt={state:{active:false}}; export const A=new Map();"
+)
+# A build stamp, so a prepared client can say which source produced it. Without
+# one, a `web/` left over from an earlier checkout starts silently and serves a
+# client whose patches do not match the server that is running - the failure shows
+# up as a broken button rather than an error. The hash is over the patcher's own
+# inputs: the Python patcher and every snippet it splices, so any change to the
+# client build changes the stamp.
+build_inputs = [root / "scripts" / "patch-client.py"] + sorted(
+    root / "scripts" / name
+    for name in (
+        "client-bootstrap.js",
+        "party-loading.js",
+        "party-overlay.js",
+        "party-entry.js",
+        "party-route.js",
+        "party-runtime.js",
+        "party-transport.js",
+        "picker.js",
+        "lobby.js",
+        "match-details.js",
+        "host-menu.js",
+        "better-party.css",
+    )
+)
+build_hash = hashlib.sha256()
+for path in build_inputs:
+    build_hash.update(path.name.encode())
+    build_hash.update(path.read_bytes())
+(web / "build.json").write_text(
+    json.dumps(
+        {
+            "clientBuild": build_hash.hexdigest()[:16],
+            "assets": len(json.loads((root / "scripts/client-lock.json").read_text())),
+        },
+        indent=2,
+    )
+    + "\n"
 )
 print(
     "Patched isolated browser bootstrap, local join, local catalog, original validation; Party transport, scene readiness, and initial ball placement patched; shot physics unchanged."

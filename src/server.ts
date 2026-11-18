@@ -33,6 +33,7 @@ import {
   readJsonObject,
 } from './request-guards.js';
 import { ClientScriptAssets } from './client-scripts.js';
+import { readClientBuild } from './client-build.js';
 import { VERSION } from './version.js';
 import { randomInt } from 'node:crypto';
 import path from 'node:path';
@@ -209,6 +210,7 @@ async function handleRequest(
     return response({
       ok: true,
       version: VERSION,
+      client: await readClientBuild(root),
       rooms: rooms.size,
       maps: courseCount(),
       players: connectedPlayers,
