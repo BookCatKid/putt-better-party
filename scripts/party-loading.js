@@ -4,6 +4,9 @@ function PartyLoadingScreen({ code, message, error, onRetry, onEnterName, onRelo
 
   return jsx.jsx('main', {
     className: 'bp-home bp-party-loading',
+    // Marks this as a blocking overlay: while it is up the game scene behind it
+    // must not take input or focus. See scripts/party-overlay.js.
+    'data-bp-blocking-overlay': '',
     children: jsx.jsxs('section', {
       className: 'bp-entry',
       children: [

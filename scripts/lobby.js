@@ -122,6 +122,9 @@ function BpLobbyDashboard() {
     {
       className:
         'bp-dashboard-overlay pointer-events-auto absolute inset-0 z-10 flex items-center justify-center bg-black/55',
+      // While the lobby is up it is the only thing that may take input; the scene
+      // behind it must not hear the keyboard. See scripts/party-overlay.js.
+      'data-bp-blocking-overlay': '',
     },
     createElement(
       'section',

@@ -139,11 +139,25 @@ function PartyRoute() {
     });
   }
 
+  /*
+   * A blocking overlay covers the scene, so the scene behind it must not take
+   * input or focus. The guard runs on `window` because that is where the engine
+   * listens; `inert` alone would leave the keyboard shortcuts live.
+   */
+  const sceneRef = React.useRef(null);
+  usePartyOverlayGuard(sceneRef);
+
   let content = null;
   if (active) {
     content = jsx.jsx('div', {
+      ref: sceneRef,
       className: ready ? 'bp-party-view' : 'bp-party-view bp-party-initializing',
       'aria-busy': !ready,
+      // The scene is a canvas with no read-representation, so it is labelled
+      // rather than left as an unlabelled region in the tab order.
+      role: 'region',
+      'aria-label': 'Party game',
+      tabIndex: -1,
       children: jsx.jsx(PartyGameRoot, { level }, code),
     });
   } else if (!admission.resume) {

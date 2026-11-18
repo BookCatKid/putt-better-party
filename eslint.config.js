@@ -194,12 +194,35 @@ export default [
         PartyEntry: 'readonly',
         usePartyAdmission: 'readonly',
         PartyLoadingScreen: 'readonly',
+        usePartyOverlayGuard: 'readonly',
       },
     },
     rules: {
       'no-unused-vars': [
         'error',
         { varsIgnorePattern: '^PartyRoute$', args: 'none', caughtErrors: 'none' },
+      ],
+    },
+  },
+  {
+    // Inserted into the pinned party route's lexical scope, beside the loading
+    // screen and the route itself.
+    files: ['scripts/party-overlay.js'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        partyRouteReact: 'readonly',
+      },
+    },
+    rules: {
+      'no-unused-vars': [
+        'error',
+        {
+          varsIgnorePattern:
+            '^(usePartyOverlayGuard|partyBlockingOverlay|partyElementsAround|PARTY_[A-Z_]+)$',
+          args: 'none',
+          caughtErrors: 'none',
+        },
       ],
     },
   },
