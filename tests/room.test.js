@@ -1702,3 +1702,57 @@ test('closing the only connection keeps a spectator out of the roster', async ()
   expect(room.players.has(watcher.identity.uid)).toBe(false);
   room.dispose();
 });
+
+test('simultaneous joins for the last slot admit exactly one and refuse the rest', () => {
+  // Two identities are issued while the room still has room, then both sockets
+  // join before either handler finishes. The slot count is read from the live
+  // roster, so the first join takes the last place and every later join is
+  // refused — issuing credentials early must not oversubscribe the room.
+  const room = new Room('ABCDE', maps);
+  enter(room, 'Host', true);
+  room.handle([...room.players.values()].find((player) => player.uid === room.hostUid).ws, {
+    t: 'config',
+    config: { maxPlayers: 2 },
+  });
+  expect(room.config.maxPlayers).toBe(2);
+  const first = room.issue('Racer One');
+  const second = room.issue('Racer Two');
+  const firstSocket = socket();
+  const secondSocket = socket();
+  // Interleave the two joins rather than one after the other.
+  room.handle(firstSocket, { t: 'join', ...first, protocol: 2, instance: 'race-one' });
+  room.handle(secondSocket, { t: 'join', ...second, protocol: 2, instance: 'race-two' });
+  const admitted = [firstSocket, secondSocket].filter(
+    (candidate) => !candidate.closed && candidate.frames.some((frame) => frame.t === 'hello'),
+  );
+  const refused = [firstSocket, secondSocket].filter((candidate) => candidate.closed === true);
+  expect(admitted).toHaveLength(1);
+  expect(refused).toHaveLength(1);
+  expect(refused[0].frames.some((frame) => frame.t === 'error' && frame.code === 'full')).toBe(
+    true,
+  );
+  // The roster agrees with the sockets: exactly host plus one racer.
+  expect([...room.players.values()].filter((player) => player.ws)).toHaveLength(2);
+  expect(room.roster()).toHaveLength(2);
+  room.dispose();
+});
+
+test('a locked party refuses to issue new identities but keeps the ones already admitted', () => {
+  const room = new Room('ABCDE', maps);
+  const host = enter(room, 'Host', true);
+  const guest = enter(room, 'Guest');
+  room.handle(host.ws, { t: 'config', config: { locked: true } });
+  expect(room.config.locked).toBe(true);
+  // The lock is enforced when a credential would be issued, which is the only
+  // point an outsider could become a player at all.
+  expect(() => room.issue('Outsider')).toThrow(/locked/);
+  // The guest already in the party is unaffected, and reconnecting still works:
+  // the lock is about admission, not about the players it was set for.
+  room.close(guest.ws);
+  const again = socket();
+  room.handle(again, { t: 'join', ...guest.identity, protocol: 2, instance: 'again' });
+  expect(again.closed).toBeUndefined();
+  expect(again.frames.some((frame) => frame.t === 'hello')).toBe(true);
+  expect(room.roster()).toHaveLength(2);
+  room.dispose();
+});
