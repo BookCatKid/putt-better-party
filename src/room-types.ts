@@ -103,6 +103,36 @@ export interface BallPosition {
   m: 0 | 1;
   d?: number;
 }
+
+/** One row of the final or mid-round standings, ordered by `rank`. */
+export interface Standing {
+  uid: string;
+  name: string;
+  hue: number;
+  rank: number;
+  holesSurvived: number;
+  totalStrokes: number;
+  totalTimeMs: number;
+  holeTimeMs: number | null;
+  alive: boolean;
+  strokes: number;
+  finished: boolean;
+}
+
+/** One row of the roster frame: who is present and what they may do. */
+export interface RosterEntry {
+  id: string;
+  uid: string;
+  name: string;
+  hue: number;
+  role: 'player' | 'spectator';
+  /** Set when the player is spectating; explains why, for the lobby chip. */
+  spectatorReason: string | null;
+  isHost: boolean;
+  ready: boolean;
+  alive: boolean;
+  connected: boolean;
+}
 export interface PartySnapshot {
   t: 'party';
   recoveryNotice: boolean;

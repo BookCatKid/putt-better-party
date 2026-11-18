@@ -24,7 +24,10 @@ import type {
   RoomCheckpoint,
   BallPosition,
   PartySnapshot,
+  RosterEntry,
+  Standing,
 } from './room-types.js';
+import type { BoardFrame, ServerFrame } from './protocol.js';
 
 const token = () => randomBytes(24).toString('base64url');
 /**
@@ -178,12 +181,12 @@ export class Room {
     this.changed();
     return identity;
   }
-  send(ws: RoomSocket, message: unknown) {
+  send(ws: RoomSocket, message: ServerFrame) {
     try {
       ws.send(JSON.stringify(message));
     } catch {}
   }
-  broadcast(message: unknown) {
+  broadcast(message: ServerFrame) {
     for (const player of this.players.values()) {
       if (player.ws) {
         this.send(player.ws, message);
@@ -267,7 +270,7 @@ export class Room {
     this.audit('late_player_admitted', { uid: player.uid, name: player.name });
   }
 
-  roster() {
+  roster(): RosterEntry[] {
     return [...this.players.values()]
       .filter((player) => player.ws || this.phase !== 'lobby')
       .map((player) => ({
@@ -283,7 +286,7 @@ export class Room {
         connected: !!player.ws,
       }));
   }
-  standings() {
+  standings(): Standing[] {
     return [...this.players.values()]
       .filter((player) => player.participated)
       .sort(
@@ -308,7 +311,7 @@ export class Room {
         finished: player.done,
       }));
   }
-  board() {
+  board(): BoardFrame {
     const rows = [...this.players.values()].filter((player) => player.alive && player.participated);
     return {
       t: 'board',
