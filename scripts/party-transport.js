@@ -6,12 +6,21 @@
  * so the adapter can be exercised offline; production falls back to the bundle globals.
  */
 // Chromium rejects timer globals invoked with a foreign receiver, so production
-// bindings call them without one. Injected test bindings are used as given.
-const globalSetTimeout = (...timerArgs) => setTimeout(...timerArgs);
+// bindings call them directly instead of being handed the global itself. Injected
+// test bindings are used as given.
+/** @param {() => void} handler @param {number} delayMs */
+const globalSetTimeout = (handler, delayMs) => setTimeout(handler, delayMs);
+/** @param {TimerHandle | undefined} handle */
 const globalClearTimeout = (handle) => clearTimeout(handle);
-const globalSetInterval = (...timerArgs) => setInterval(...timerArgs);
+/** @param {() => void} handler @param {number} delayMs */
+const globalSetInterval = (handler, delayMs) => setInterval(handler, delayMs);
+/** @param {TimerHandle | undefined} handle */
 const globalClearInterval = (handle) => clearInterval(handle);
 
+/**
+ * @param {Partial<TransportBindings>} [injected]
+ * @returns {TransportBindings}
+ */
 function resolveTransportBindings(injected) {
   const provided = injected || {};
   return {
@@ -48,6 +57,11 @@ function resolveTransportBindings(injected) {
   };
 }
 
+/**
+ * @param {string} code
+ * @param {{ uid: string; name: string; hue: number; session?: string; instance?: unknown }} identity
+ * @param {TransportOptions} [options]
+ */
 function connectBetterParty(code, identity, options = {}) {
   const bind = resolveTransportBindings(options.bindings);
   const { onError } = options;
@@ -55,9 +69,12 @@ function connectBetterParty(code, identity, options = {}) {
   // move, and a reconnect has to claim with whatever the current host holds.
   let hostToken = options.hostToken;
   const initialRetryDelay = 1000;
+  /** @type {WebSocket | null} */
   let socket = null;
   let disposed = false;
+  /** @type {TimerHandle | undefined} */
   let reconnectTimer;
+  /** @type {TimerHandle | undefined} */
   let handshakeTimer;
   let retryDelay = initialRetryDelay;
   let connectionId = '';
@@ -74,6 +91,7 @@ function connectBetterParty(code, identity, options = {}) {
   let sawMapReadyFalse = false;
   // The attempt sequence the game store held when the round changed. A new
   // attempt has to advance it before progress may be reported again.
+  /** @type {number | null} */
   let attemptAtRoundChange = null;
   let announcedSceneKey = '';
   // A socket can be half-open: the peer is gone but no close event ever arrives,
@@ -85,14 +103,26 @@ function connectBetterParty(code, identity, options = {}) {
     return socket?.readyState === bind.WebSocket.OPEN;
   }
 
+  /**
+   * @param {unknown} message
+   * @param {boolean} [requireSynchronization]
+   * @returns {boolean}
+   */
   function send(message, requireSynchronization = true) {
     if (!socketOpen() || (requireSynchronization && !synchronized)) {
       return false;
     }
-    let packet = message;
-    if (message.t === 'prog' || message.t === 'forfeit' || message.f === 1) {
+    if (typeof message !== 'object' || message === null) {
+      return false;
+    }
+    const frame = /** @type {Record<string, unknown>} */ (message);
+    let packet = frame;
+    if (frame.t === 'prog' || frame.t === 'forfeit' || frame.f === 1) {
       const { matchId, holeIndex } = bind.partyStore.state;
-      packet = { ...message, matchId, holeIndex };
+      packet = { ...frame, matchId, holeIndex };
+    }
+    if (!socket) {
+      return false;
     }
     socket.send(JSON.stringify(packet));
     return true;
@@ -205,6 +235,7 @@ function connectBetterParty(code, identity, options = {}) {
     }
   }
 
+  /** @param {Record<string, any>} message */
   function receiveSnapshot(message) {
     const previous = bind.partyStore.state;
     const sameRound =
@@ -257,6 +288,7 @@ function connectBetterParty(code, identity, options = {}) {
    * Follow a server-side hand-over. Only the crown and, for the new host, the
    * capability change here; the roster arrives in its own frame.
    */
+  /** @param {{ token?: unknown }} message @param {boolean} isHost */
   function adoptHostAuthority(message, isHost) {
     if (isHost) {
       if (typeof message.token === 'string') {
@@ -271,6 +303,7 @@ function connectBetterParty(code, identity, options = {}) {
     bind.setIdentity(isHost, party.count, party.selfRole);
   }
 
+  /** @param {MessageEvent} event */
   function receive(event) {
     let message;
     try {
@@ -444,6 +477,7 @@ function connectBetterParty(code, identity, options = {}) {
     }
     const { ballPos, pointer } = bind.scene;
     const cup = bind.gameStore.state.level?.cup;
+    /** @type {{ x: number; y: number; z: number; px: number; pz: number; c: number; m: number; d?: number }} */
     const position = {
       x: Number(ballPos.x.toFixed(2)),
       y: Number(ballPos.y.toFixed(2)),
@@ -461,7 +495,7 @@ function connectBetterParty(code, identity, options = {}) {
     if (payload !== lastPosition || now - lastPositionAt >= 2000) {
       lastPosition = payload;
       lastPositionAt = now;
-      socket.send(payload);
+      socket?.send(payload);
     }
   }
 
