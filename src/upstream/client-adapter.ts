@@ -3,10 +3,7 @@
  * Export names are recovered from the original bundles. Never format or patch
  * the originals to make TypeScript happy.
  */
-import {
-  a as validate,
-  r as sanitize,
-} from '../../private-client/validation/specValidation-vqop-JBL.js';
+import { a as validate, r as sanitize } from '../../web/validation/specValidation-vqop-JBL.js';
 import { a as dailyNumber } from '../../private-client/assets/date-D4dx3Sc1.js';
 import { n as serverReference } from '../../private-client/assets/createServerFn-BfnFvdmx.js';
 import { isRecord, type CourseSpecification } from '../domain.js';

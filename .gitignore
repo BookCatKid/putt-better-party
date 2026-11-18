@@ -1,5 +1,7 @@
 private-client/
 web/
+.web-staging-*/
+.web-previous-*/
 maps/
 *.log
 node_modules/

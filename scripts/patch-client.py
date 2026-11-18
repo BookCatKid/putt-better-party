@@ -1,18 +1,31 @@
 """Apply hash-pinned changes to copies of the original client bundles."""
 
 import json
+import os
 import re
 import shutil
 from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
-web = root / "web"
 private = root / "private-client"
+
+# Preparation builds into a staging directory and publishes it only when every
+# patch has applied and every patched bundle still parses, so a failed or partial
+# build can never be served. `BP_STAGE_WEB` is that staging directory. It is set
+# by prepare-client.py; running this module directly without it is a mistake that
+# should be loud rather than quietly rewriting the live client.
+_stage = os.environ.get("BP_STAGE_WEB")
+if not _stage:
+    raise SystemExit("patch-client.py must run through prepare-client.py")
+web = Path(_stage)
+if not web.is_dir():
+    raise SystemExit(f"Staging directory does not exist: {web}")
 
 
 # Executed by prepare-client.py after copying immutable bundles.
 def replace_once(s, a, b):
-    assert s.count(a) == 1, (a[:100], s.count(a))
+    count = s.count(a)
+    assert count == 1, (a[:100], count)
     return s.replace(a, b, 1)
 
 
@@ -369,8 +382,11 @@ p.write_text(
     + "\n"
     + (root / "scripts/better-party.css").read_text()
 )
-# Server-side original validator import closure: only index browser dependency stubbed.
-validation = root / "private-client" / "validation"
+# Server-side original validator import closure. This is generated output, so it is
+# written into the staging directory next to the prepared client and published with
+# it. It must never be written under private-client/, which holds the immutable
+# archived originals that the lock hashes.
+validation = web / "validation"
 validation.mkdir(exist_ok=True)
 for path in json.loads((root / "scripts/client-lock.json").read_text()):
     if path.startswith("/assets/") and path.endswith(".js"):
