@@ -14,3 +14,5 @@ All handwritten code must be maintainable and suitable for public review. Functi
 - Install the repository pre-commit hook with `bun run hooks:install`. CI independently runs formatting, linting, strict type checking and tests on every push and pull request.
 
 When changing behavior, document the reason and add regression coverage. If a check cannot run, report that limitation rather than claiming success.
+
+Keep GitHub main authoritative: commit and publish verified project changes before deploying them. Do not leave production fixes only on the server or isolated local branches. Reconcile concurrent development without overwriting unrelated work.

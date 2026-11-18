@@ -47,12 +47,14 @@ Read the [development guide](docs/development.md) for quality checks, testing an
 
 ## Configuration
 
-| Variable | Default              | Description             |
-| -------- | -------------------- | ----------------------- |
-| `PORT`   | `8789`               | HTTP and WebSocket port |
-| `BP_DB`  | `state/rooms.sqlite` | SQLite room database    |
+| Variable           | Default              | Description                                          |
+| ------------------ | -------------------- | ---------------------------------------------------- |
+| `PORT`             | `8789`               | HTTP and WebSocket port                              |
+| `BP_DB`            | `state/rooms.sqlite` | SQLite room database                                 |
+| `BP_PUBLIC_ORIGIN` | Local HTTP origin    | Exact public origin for a reverse-proxied deployment |
+| `BP_EVENT_LOG`     | Unset (disabled)     | Private JSON-lines gameplay event log path           |
 
-The service binds to loopback by default. Review deployment security before exposing it publicly. Room credentials are stored in the database; keep database backups private.
+The service binds to loopback by default. Review deployment security before exposing it publicly. Room credentials are stored in the database; keep database backups private. For persistent gameplay logging, set `BP_EVENT_LOG` to a path under the private state directory. Logs rotate at 8 MiB with six archives and omit authentication credentials. Do not commit logs or runtime state.
 
 ## Compatibility and limitations
 

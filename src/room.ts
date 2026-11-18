@@ -389,6 +389,7 @@ export class Room {
     }
     const previous = this.players.get(fromUid);
     this.hostUid = toUid;
+    this.audit('host_transferred', { fromUid, toUid, reason: 'manual' });
     this.hostTransfer = { fromUid, toUid, at: Date.now() };
     this.clearHostSuccession();
     // Rotate the capability so the previous host's token cannot import maps or
@@ -448,6 +449,11 @@ export class Room {
     }
     const previousUid = this.hostUid;
     this.hostUid = successor.uid;
+    this.audit('host_transferred', {
+      fromUid: previousUid,
+      toUid: successor.uid,
+      reason: 'succession',
+    });
     this.hostTransfer = { fromUid: previousUid ?? '', toUid: successor.uid, at: Date.now() };
     // Nobody can recover the departed host's capability, so rotate it instead.
     this.hostToken = token();
@@ -465,6 +471,15 @@ export class Room {
    */
   leave(ws: RoomSocket, player: Player) {
     const wasHost = player.uid === this.hostUid;
+    this.audit('player_disconnected', {
+      uid: player.uid,
+      name: player.name,
+      connectionId: player.id,
+      role: player.role,
+      strokes: player.strokes,
+      finished: player.done,
+      deliberate: true,
+    });
     this.players.delete(player.uid);
     this.positions.delete(player.id);
     ws.data.uid = null;
@@ -584,9 +599,15 @@ export class Room {
         ) {
           return ack(false, 'The round changed. Try again.');
         }
-        const action = ['end', 'skip', 'time', 'restart', 'retry-next', 'skip-next', 'transfer-host'].includes(
-          String(message.action),
-        )
+        const action = [
+          'end',
+          'skip',
+          'time',
+          'restart',
+          'retry-next',
+          'skip-next',
+          'transfer-host',
+        ].includes(String(message.action))
           ? String(message.action)
           : 'unknown';
         const actionMatch = this.matchId;
@@ -922,7 +943,10 @@ export class Room {
     // The round timer starts when play starts, so nobody loses time to loading.
     this.startsAt = Date.now();
     this.phase = 'playing';
-    this.audit('round_started', { deadline: this.startsAt + this.roundTimerMs, awaitingPlayers: waiting.length });
+    this.audit('round_started', {
+      deadline: this.startsAt + this.roundTimerMs,
+      awaitingPlayers: waiting.length,
+    });
     this.state();
     this.schedule(() => this.endHole(), this.roundTimerMs);
   }
@@ -954,6 +978,7 @@ export class Room {
       return;
     }
     player.sceneReady = true;
+    this.audit('scene_ready', { uid: player.uid });
     if (this.phase === 'countdown') {
       this.startPlay();
     }
