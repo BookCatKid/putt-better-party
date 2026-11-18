@@ -1,4 +1,5 @@
 import { randomUUID, randomBytes, randomInt } from 'node:crypto';
+import { logEvent } from './event-log.js';
 import {
   MAP_SOURCE,
   isRecord,
@@ -120,6 +121,17 @@ export class Room {
     this.loadMap = loadMap;
   }
 
+  private audit(event: string, details: Record<string, unknown> = {}) {
+    logEvent(event, {
+      room: this.code,
+      matchId: this.matchId,
+      holeIndex: this.holeIndex,
+      courseId: this.holeIds[this.holeIndex] ?? null,
+      phase: this.phase,
+      ...details,
+    });
+  }
+
   issue(name: unknown, uid?: unknown, session?: unknown): Identity {
     this.lastActivity = Date.now();
     if (typeof name !== 'string' || !name.trim() || name.trim().length > 24) {
@@ -148,6 +160,7 @@ export class Room {
       hue: randomInt(360),
     };
     this.issued.set(identity.uid, identity);
+    this.audit('identity_issued', { uid: identity.uid, name: identity.name });
     this.changed();
     return identity;
   }
@@ -164,6 +177,7 @@ export class Room {
     }
   }
   error(ws: RoomSocket, code: string, msg: string) {
+    this.audit('room_error', { uid: ws.data.uid ?? null, code });
     this.send(ws, { t: 'error', code, msg });
   }
   playlistTitle(id: string) {
@@ -264,6 +278,8 @@ export class Room {
     this.lastActivity = Date.now();
     let player = this.players.get(identity.uid);
     const reportsSceneReadiness = message.scene === true;
+    const returning = !!player;
+    const replacedSocket = !!player?.ws;
     const reload =
       !!player && player.instance !== undefined && player.instance !== message.instance;
     const claimsHost =
@@ -330,6 +346,16 @@ export class Room {
     player.id = randomUUID();
     player.ws = ws;
     ws.data.uid = player.uid;
+    this.audit('player_joined', {
+      uid: player.uid,
+      name: player.name,
+      connectionId: player.id,
+      host: player.uid === this.hostUid,
+      role: player.role,
+      returning,
+      replacedSocket,
+      reload,
+    });
     this.changed();
     this.send(ws, {
       t: 'hello',
@@ -457,6 +483,14 @@ export class Room {
     if (!player || player.ws !== ws) {
       return;
     }
+    this.audit('player_disconnected', {
+      uid: player.uid,
+      name: player.name,
+      connectionId: player.id,
+      role: player.role,
+      strokes: player.strokes,
+      finished: player.done,
+    });
     player.ws = null;
     this.lastActivity = Date.now();
     this.positions.delete(player.id);
@@ -493,6 +527,10 @@ export class Room {
       ('matchId' in message || 'holeIndex' in message) &&
       (message.matchId !== this.matchId || message.holeIndex !== this.holeIndex)
     ) {
+      this.audit('stale_round_message', {
+        uid: player.uid,
+        kind: message.f === 1 ? 'finish' : message.t,
+      });
       return;
     }
     switch (message.t) {
@@ -500,6 +538,9 @@ export class Room {
         return;
       case 'ready':
         if (this.phase === 'lobby' && typeof message.v === 'boolean') {
+          if (player.ready !== message.v) {
+            this.audit('player_ready', { uid: player.uid, ready: message.v });
+          }
           player.ready = message.v;
           this.rosterBroadcast();
         }
@@ -543,7 +584,26 @@ export class Room {
         ) {
           return ack(false, 'The round changed. Try again.');
         }
+        const action = ['end', 'skip', 'time', 'restart', 'retry-next', 'skip-next', 'transfer-host'].includes(
+          String(message.action),
+        )
+          ? String(message.action)
+          : 'unknown';
+        const actionMatch = this.matchId;
+        const actionHole = this.holeIndex;
+        this.audit('host_action_requested', {
+          uid: player.uid,
+          action,
+          ...(typeof message.seconds === 'number' ? { seconds: message.seconds } : {}),
+        });
         const ok = this.hostAction(ws, message);
+        this.audit('host_action_result', {
+          uid: player.uid,
+          action,
+          accepted: ok === true,
+          previousMatchId: actionMatch,
+          previousHoleIndex: actionHole,
+        });
         return ack(
           ok === true,
           ok === true ? undefined : 'That action is not available right now.',
@@ -561,6 +621,13 @@ export class Room {
         return;
       case 'prog':
         if (this.playable(player) && isIntegerInRange(message.st, 0, 200)) {
+          if (player.strokes !== message.st) {
+            this.audit('stroke_count', {
+              uid: player.uid,
+              previous: player.strokes,
+              strokes: message.st,
+            });
+          }
           player.strokes = message.st;
           this.broadcast(this.board());
         }
@@ -668,6 +735,7 @@ export class Room {
       next.holes = Math.max(1, next.selectedHoleIds.length);
     }
     this.config = next;
+    this.audit('configuration_changed', { uid: ws.data.uid, config: next });
     this.changed();
     this.broadcast(this.snapshot());
   }
@@ -678,6 +746,7 @@ export class Room {
     if (this.starting) {
       return;
     }
+    this.audit('match_prepare_requested', { uid: ws.data.uid, config: this.config });
     const prepareMatch = this.prepareMatch;
     if (prepareMatch) {
       // Preparation is bound to the authenticated host identity, not the
@@ -701,6 +770,7 @@ export class Room {
           }
         })
         .catch((error) => {
+          this.audit('match_prepare_failed', { code: 'map-load-failed' });
           const hostSocket = this.players.get(this.hostUid ?? '')?.ws;
           if (hostSocket) {
             this.error(hostSocket, 'map-load-failed', errorMessage(error));
@@ -764,6 +834,11 @@ export class Room {
       });
     }
     this.initialPlayers = [...this.players.values()].filter((player) => player.participated).length;
+    this.audit('match_started', {
+      config: this.config,
+      courses: this.holeIds.map((id) => ({ id, title: this.playlistTitle(id) })),
+      players: [...this.players.values()].map(({ uid, name, role }) => ({ uid, name, role })),
+    });
     this.begin();
   }
   schedule(callback: () => void, delayMs: number) {
@@ -792,6 +867,12 @@ export class Room {
         player.roundSpectator = false;
       }
     }
+    this.audit('round_countdown', {
+      courseTitle: this.specs[this.holeIndex]?.name,
+      par: this.specs[this.holeIndex]?.par,
+      startsAt: this.startsAt,
+      timerMs: this.roundTimerMs,
+    });
     this.state();
     this.schedule(() => this.startPlay(), this.countdown);
   }
@@ -841,6 +922,7 @@ export class Room {
     // The round timer starts when play starts, so nobody loses time to loading.
     this.startsAt = Date.now();
     this.phase = 'playing';
+    this.audit('round_started', { deadline: this.startsAt + this.roundTimerMs, awaitingPlayers: waiting.length });
     this.state();
     this.schedule(() => this.endHole(), this.roundTimerMs);
   }
@@ -908,6 +990,7 @@ export class Room {
     const completed = this.holeIndex;
     const generation = ++this.nextLoadGeneration;
     const id = this.holeIds[target];
+    this.audit('course_load_started', { target, targetCourseId: id });
     const stale = () =>
       this.closed ||
       this.matchId !== match ||
@@ -920,6 +1003,7 @@ export class Room {
         if (stale()) {
           return;
         }
+        this.audit('course_load_succeeded', { target, targetCourseId: id, name: item.spec.name });
         this.specs[target] = structuredClone(item.spec);
         this.loadingNext = false;
         this.retryingNext = false;
@@ -933,6 +1017,7 @@ export class Room {
         }
         this.loadingNext = false;
         this.retryingNext = false;
+        this.audit('course_load_failed', { target, targetCourseId: id, code: 'map-load-failed' });
         this.nextLoadError = 'Could not load the next public hole: ' + errorMessage(error);
         this.state();
       });
@@ -949,6 +1034,12 @@ export class Room {
   finish(player: Player, success: boolean) {
     player.done = true;
     player.success = success;
+    this.audit(success ? 'player_holed' : 'player_forfeited', {
+      uid: player.uid,
+      name: player.name,
+      strokes: player.strokes,
+      par: this.specs[this.holeIndex]?.par,
+    });
     if (success) {
       this.broadcast({
         t: 'f',
@@ -1077,6 +1168,12 @@ export class Room {
     return false;
   }
   recordRound(status: RoundStatus, rows: RoundScore[]) {
+    this.audit('round_recorded', {
+      status,
+      title: this.specs[this.holeIndex]?.name,
+      par: this.specs[this.holeIndex]?.par,
+      rows,
+    });
     this.roundHistory.push({
       index: this.holeIndex,
       id: this.holeIds[this.holeIndex],
@@ -1092,6 +1189,7 @@ export class Room {
     this.phase = 'final';
     this.state();
     const standings = this.standings();
+    this.audit('match_finalized', { standings, rounds: this.roundHistory });
     this.broadcast({ t: 'final', podium: standings.slice(0, 3), standings });
   }
   endHole() {
@@ -1140,6 +1238,7 @@ export class Room {
       }
     }
     this.phase = 'hole-results';
+    this.audit('round_results', { standings: this.standings(), scores });
     this.state();
     this.schedule(() => {
       const alive = [...this.players.values()].filter(
@@ -1156,6 +1255,7 @@ export class Room {
     }, this.results);
   }
   reset() {
+    this.audit('match_reset', { standings: this.standings() });
     clearTimeout(this.timer);
     this.loadingNext = false;
     this.nextLoadError = null;
@@ -1247,8 +1347,13 @@ export class Room {
     // A restarted process cannot recover the original client physics state.
     // Restore as a lobby rather than resuming a partially scored round.
     this.phase = 'lobby';
+    this.audit('room_recovered', {
+      previousPhase: data.phase,
+      recoveryNotice: this.recoveryNotice,
+    });
   }
   dispose() {
+    this.audit('room_disposed', { standings: this.standings() });
     this.closed = true;
     clearTimeout(this.timer);
     this.clearHostSuccession();
