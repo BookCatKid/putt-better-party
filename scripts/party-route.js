@@ -13,6 +13,7 @@ function PartyRoute() {
   const currentMap = usePartyState((state) => state.currentMap);
   const matchId = usePartyState((state) => state.matchId);
   const phase = usePartyState((state) => state.phase);
+  const openingVote = usePartyState((state) => state.vote?.target === 0);
   const error = usePartyState((state) => state.error);
   const nextError = usePartyState((state) => state.nextError);
   const connected = usePartyState((state) => state.bpConnected);
@@ -40,6 +41,14 @@ function PartyRoute() {
     setPartyMapReady(false);
     setMapError('');
     setLoadingMap(true);
+
+    if (openingVote) {
+      // Keep the neutral lobby scene until the opening ballot chooses a map.
+      // Showing the ballot must not wait for a candidate course to load.
+      setLevel(defaultPartyLevel);
+      setLoadingMap(false);
+      return;
+    }
 
     async function loadLevel() {
       if (currentMap) {
@@ -74,7 +83,7 @@ function PartyRoute() {
     return () => {
       cancelled = true;
     };
-  }, [active, holeId, holeIndex, matchId, currentMap, retry]);
+  }, [active, holeId, holeIndex, matchId, currentMap, retry, openingVote]);
 
   React.useEffect(() => () => resetPartyRuntime(), []);
   React.useEffect(() => {
@@ -97,7 +106,9 @@ function PartyRoute() {
     (phase !== 'final' || final);
   const correctLevel = !currentMap || currentMap.id === level.id;
   const ready =
-    stateReady && mapReady && !loadingMap && !mapError && correctLevel && sceneReady === level.id;
+    stateReady &&
+    (openingVote ||
+      (mapReady && !loadingMap && !mapError && correctLevel && sceneReady === level.id));
   const [takingTooLong, setTakingTooLong] = React.useState(false);
 
   React.useEffect(() => {

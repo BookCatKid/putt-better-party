@@ -65,7 +65,7 @@ export async function prepareMatch(
   if (config.mapSource === MAP_SOURCE.RANDOM) {
     const selection = await chooseRandom({
       browse,
-      count: voting ? 1 + 3 * (config.holes - 1) : config.holes,
+      count: voting ? 3 * config.holes : config.holes,
       seen,
       excludeDaily: config.excludeDaily,
       currentDay: currentDailyNumber(),
@@ -94,12 +94,9 @@ export async function prepareMatch(
   }
 
   if (voting) {
-    const ballots = [
-      [specifications[0]],
-      ...Array.from({ length: config.holes - 1 }, (_unused, index) =>
-        specifications.slice(1 + index * 3, 4 + index * 3),
-      ),
-    ];
+    const ballots = Array.from({ length: config.holes }, (_unused, index) =>
+      specifications.slice(index * 3, index * 3 + 3),
+    );
     return {
       ids: ballots.map((choices) => choices[0].id),
       specs: ballots.map((choices) => structuredClone(choices[0].spec)),

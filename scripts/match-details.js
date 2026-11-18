@@ -31,7 +31,7 @@ function BpGuestPlaylist() {
       : createElement(
           'p',
           { className: 'text-xs text-white/70' },
-          config.courseVoting ? 'Random courses · vote between holes' : 'Random holes',
+          config.courseVoting ? 'Random courses · vote before every hole' : 'Random holes',
         ),
     createElement(
       'p',
@@ -176,17 +176,6 @@ function BpLobbyOptions() {
         ].map(([value, label]) => createElement('option', { key: value, value }, label)),
       ),
     ]),
-    config.mapSource === 'random' &&
-      createElement('label', {}, [
-        createElement('span', {}, 'Vote on next course'),
-        createElement('input', {
-          type: 'checkbox',
-          'aria-label': 'Vote on next course',
-          checked: !!config.courseVoting,
-          disabled: preparing || !connected,
-          onChange: (event) => updateBetterPartyConfig({ courseVoting: event.target.checked }),
-        }),
-      ]),
     createElement('label', {}, [
       createElement('span', {}, 'Lock party'),
       createElement('input', {

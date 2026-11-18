@@ -598,7 +598,7 @@ test('a random match still refuses a withdrawn course even when other details su
 });
 
 test('voting prepares distinct public candidates with ratings and uses the original validator for all options', async () => {
-  const holes = Array.from({ length: 7 }, (_unused, index) => ({
+  const holes = Array.from({ length: 9 }, (_unused, index) => ({
     id: 'vote-' + index,
     title: 'Option ' + index,
     author: 'Maker',
@@ -623,10 +623,10 @@ test('voting prepares distinct public candidates with ratings and uses the origi
     },
     [],
   );
-  expect(prepared.ballots.map((choices) => choices.length)).toEqual([1, 3, 3]);
-  expect(new Set(prepared.ballots.flat().map((course) => course.id)).size).toBe(7);
+  expect(prepared.ballots.map((choices) => choices.length)).toEqual([3, 3, 3]);
+  expect(new Set(prepared.ballots.flat().map((course) => course.id)).size).toBe(9);
   expect(prepared.ballots[1][0]).toMatchObject({ ratingAvg: 4.2, ratingCount: 10, par: 2 });
   expect(prepared.ids).toHaveLength(3);
-  expect(upstream.requests.detail).toHaveLength(7);
-  expect(validation.requests).toHaveLength(7);
+  expect(upstream.requests.detail).toHaveLength(9);
+  expect(validation.requests).toHaveLength(9);
 });

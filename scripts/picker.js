@@ -334,6 +334,16 @@ function CommunityCoursePicker({ config }) {
           onChange: (item) => updateBetterPartyConfig({ excludeDaily: item.target.checked }),
         }),
       ]),
+      createElement('label', { className: 'bp-number-row mt-3' }, [
+        createElement('span', {}, 'Course voting'),
+        createElement('input', {
+          type: 'checkbox',
+          'aria-label': 'Course voting',
+          checked: !!config.courseVoting,
+          disabled: busy || preparing,
+          onChange: (item) => updateBetterPartyConfig({ courseVoting: item.target.checked }),
+        }),
+      ]),
     ]);
   }
   function card(courseIndex, index) {

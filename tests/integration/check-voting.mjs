@@ -45,8 +45,15 @@ try {
     '[...document.querySelectorAll("button")].find(b=>b.textContent==="Join").click()',
   );
   await state('s.isHost && s.mapReady && s.bpConnected');
-  const choice = 'document.querySelector(\'input[aria-label="Vote on next course"]\')';
+  const choice = 'document.querySelector(\'input[aria-label="Course voting"]\')';
   await waitFor(client, '!!' + choice);
+  assert.equal(
+    await client.evalJS(
+      'document.querySelector(\'input[aria-label="Exclude daily holes"]\').closest("label").nextElementSibling.querySelector(\'input[aria-label="Course voting"]\')!==null',
+    ),
+    true,
+  );
+
   assert.equal(await client.evalJS(choice + '.checked'), false);
   await client.evalJS(choice + '.click()');
   await state('s.config.courseVoting===true');
@@ -76,7 +83,26 @@ try {
   await client.evalJS(
     '[...document.querySelectorAll("button")].find(b=>b.textContent==="Start party").click()',
   );
+  await state('s.vote?.target===0 && document.querySelectorAll(".bp-vote-course").length===3');
+  assert.equal(
+    await client.evalJS('document.querySelector(".bp-course-vote h3").textContent'),
+    'Vote for hole 1',
+  );
+  assert.equal(await client.evalJS('document.body.innerText.includes("Hole 1 of 2 done")'), false);
+  const first = await client.evalJS('(async()=>(' + runtime + ').E.state.vote.choices[2].id)()');
+  await client.evalJS('document.querySelectorAll(".bp-vote-course")[2].click()');
+  await waitFor(
+    client,
+    'document.querySelectorAll(".bp-vote-course")[2].getAttribute("aria-pressed")==="true"',
+  );
+  send({ t: 'course-vote', voteId: snapshot.vote.id, courseId: first });
+  await waitFor(
+    client,
+    'document.querySelectorAll(".bp-vote-tally")[2].textContent.includes("2 votes")',
+  );
+  console.log('PASS opening ballot before first hole');
   await state('s.phase==="playing"&&!!document.querySelector(".bp-hole-clock")');
+  assert.equal(await client.evalJS('(async()=>(' + runtime + ').E.state.holeIds[0])()'), first);
   const initial = await client.evalJS('document.querySelector(".bp-hole-clock").textContent');
   await pause(500);
   assert.notEqual(

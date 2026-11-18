@@ -362,6 +362,13 @@ def game_patch(s):
         "(0,J.jsx)(`p`,{className:`text-sm font-semibold text-white/60`,children:R.state.preparing?",
         "bpVote?(0,J.jsx)(BpCourseVote,{}):(0,J.jsx)(`p`,{className:`text-sm font-semibold text-white/60`,children:R.state.preparing?",
     )
+    # The original results HUD normally assumes a completed round. An opening
+    # ballot must never say that hole one is already done or announce winners.
+    s = replace_once(
+        s,
+        "if(!e||t!==`hole-results`)return null;let s=n?.standings",
+        "if(!e||t!==`hole-results`)return null;if(bpVote?.target===0)return(0,J.jsx)(`div`,{className:`pointer-events-auto absolute inset-0 z-10 flex items-center justify-center bg-black/50`,children:(0,J.jsx)(`div`,{className:`mx-6 max-h-[88dvh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-[#11272b]/95 p-6 text-center shadow-2xl`,children:(0,J.jsx)(BpCourseVote,{})})});let s=n?.standings",
+    )
     for name, total in [("Ft", False), ("Lt", False), ("Ht", True)]:
         a = s.index("function " + name + "(")
         b = s.index("function ", a + 10)

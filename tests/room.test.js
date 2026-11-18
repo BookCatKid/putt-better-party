@@ -1418,7 +1418,7 @@ const votingCourse = (id) => ({
   spec: { ...spec, id, name: id },
 });
 const votingBallots = [
-  [votingCourse('first')],
+  ['first-a', 'first-b', 'first-c'].map(votingCourse),
   ['option-a', 'option-b', 'option-c'].map(votingCourse),
   ['option-d', 'option-e', 'option-f'].map(votingCourse),
 ];
@@ -1452,7 +1452,22 @@ test('optional course voting accepts one revisable vote per connected identity, 
     });
     expect(room.config.courseVoting).toBe(true);
     room.handle(host.ws, { t: 'start' });
+    await waitForRoom(() => room.vote?.target === 0);
+    expect(room.snapshot().currentMap).toBeNull();
+    expect(room.roundHistory).toEqual([]);
+    expect(room.snapshot().vote.choices.map((choice) => choice.id)).toEqual([
+      'first-a',
+      'first-b',
+      'first-c',
+    ]);
+    const firstVoteId = room.vote.id;
+    room.handle(host.ws, { f: 1, s: 1, p: 3 });
+    expect(host.player.done).toBe(false);
+    room.handle(host.ws, { t: 'course-vote', voteId: firstVoteId, courseId: 'first-c' });
+    room.resolveVote();
     await waitForRoom(() => room.phase === 'playing');
+    expect(room.holeIds[0]).toBe('first-c');
+    expect(room.snapshot().currentMap.id).toBe('first-c');
     room.handle(host.ws, { f: 1, s: 1, p: 3 });
     room.handle(guest.ws, { f: 1, s: 2, p: 3 });
     await waitForRoom(() => !!room.vote);
@@ -1516,5 +1531,34 @@ test('manual playlists disable course voting and saved randomized voting recover
   } finally {
     room.dispose();
     restored.dispose();
+  }
+});
+
+test('a one-hole voting party votes before play, admits an opening voter even if late joining is disabled, and ends normally', async () => {
+  const room = votingRoom();
+  try {
+    const host = enter(room, 'Host', true);
+    room.handle(host.ws, {
+      t: 'config',
+      config: { courseVoting: true, holes: 1, lateJoin: 'never', elimination: false },
+    });
+    room.handle(host.ws, { t: 'start' });
+    await waitForRoom(() => room.vote?.target === 0);
+    const guest = enter(room, 'Opening guest');
+    expect(guest.player.role).toBe('player');
+    expect(room.initialPlayers).toBe(2);
+    room.handle(guest.ws, { t: 'course-vote', voteId: room.vote.id, courseId: 'first-b' });
+    room.resolveVote();
+    await waitForRoom(() => room.phase === 'playing');
+    expect(room.holeIds).toEqual(['first-b']);
+    expect(room.vote).toBeNull();
+    expect(room.roundHistory).toEqual([]);
+    room.handle(host.ws, { f: 1, s: 2, p: 3 });
+    room.handle(guest.ws, { f: 1, s: 1, p: 3 });
+    await waitForRoom(() => room.phase === 'final');
+    expect(room.roundHistory).toHaveLength(1);
+    expect(room.roundHistory[0].id).toBe('first-b');
+  } finally {
+    room.dispose();
   }
 });

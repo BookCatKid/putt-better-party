@@ -213,7 +213,7 @@ export class Room {
       phase: this.phase,
       holeIndex: this.holeIndex,
       holeIds: this.holeIds,
-      currentMap: this.specs[this.holeIndex] ?? null,
+      currentMap: this.vote?.target === 0 ? null : (this.specs[this.holeIndex] ?? null),
       matchId: this.matchId,
       config: structuredClone(this.config),
       startsAt: this.startsAt,
@@ -379,6 +379,11 @@ export class Room {
       ) {
         player.joinAfterHole = this.holeIndex;
       }
+    }
+    if (this.vote?.target === 0 && !player.participated) {
+      // No hole has started yet: allow new arrivals to join the opening vote
+      // and play from hole one, regardless of the mid-match admission policy.
+      this.admitLatePlayer(player);
     }
     if (
       player.joinAfterHole !== undefined &&
@@ -880,8 +885,8 @@ export class Room {
               (!ballots ||
                 ballots.length !== configuration.holes ||
                 ballots.some(
-                  (choices, index) =>
-                    choices.length !== (index === 0 ? 1 : 3) ||
+                  (choices) =>
+                    choices.length !== 3 ||
                     new Set(choices.map((course) => course.id)).size !== choices.length,
                 ))
             ) {
@@ -911,6 +916,9 @@ export class Room {
           }
         });
       return;
+    }
+    if (this.config.courseVoting) {
+      return this.error(ws, 'map-load-failed', 'Course voting requires a prepared public catalog.');
     }
     const source = [...this.catalog.keys()];
     if (!source.length) {
@@ -958,8 +966,10 @@ export class Room {
         holesSurvived: 0,
         totalStrokes: 0,
         totalTimeMs: 0,
+        holeTimeMs: undefined,
         strokes: 0,
         done: false,
+        success: false,
         ready: false,
       });
     }
@@ -976,6 +986,10 @@ export class Room {
       courses: this.holeIds.map((id) => ({ id, title: this.playlistTitle(id) })),
       players: [...this.players.values()].map(({ uid, name, role }) => ({ uid, name, role })),
     });
+    if (this.config.courseVoting && this.voteCourses[0]?.length === 3) {
+      this.openVote(0);
+      return;
+    }
     this.begin();
   }
   schedule(callback: () => void, delayMs: number) {
