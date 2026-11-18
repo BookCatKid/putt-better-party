@@ -32,9 +32,9 @@ function CommunityCoursePicker({ config, holeSettings }) {
   }, []);
   const [saved, setSaved] = BetterPartyReact.useState(() => {
     try {
-      const item = JSON.parse(localStorage.getItem('bp.playlists.v1') || '[]');
-      return Array.isArray(item)
-        ? item
+      const stored = JSON.parse(localStorage.getItem('bp.playlists.v1') || '[]');
+      return Array.isArray(stored)
+        ? stored
             .filter(
               (playlist) =>
                 typeof playlist.name === 'string' &&
@@ -106,11 +106,11 @@ function CommunityCoursePicker({ config, holeSettings }) {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ ...auth, id, saved: true }),
         });
-        const data = await response.json();
+        const imported = await response.json();
         if (!response.ok) {
-          throw Error(data.error || 'Could not load playlist');
+          throw Error(imported.error || 'Could not load playlist');
         }
-        items.push(data);
+        items.push(imported);
         setProgress(
           'Loading ' + items.length + ' of ' + new Set(selected.ids).size + ' unique courses…',
         );
@@ -162,8 +162,12 @@ function CommunityCoursePicker({ config, holeSettings }) {
     'rounded-full border border-[var(--line)] px-3.5 py-1.5 text-sm font-bold text-[var(--sea-ink-soft)] hover:border-emerald-500';
   const green =
     'rounded-full bg-emerald-500 px-4 py-1.5 font-bold text-emerald-950 hover:bg-emerald-400 disabled:opacity-50';
-  const btn = (label, onClick, disabled = false, cls = pill, extra = {}) =>
-    createElement('button', { type: 'button', onClick, disabled, className: cls, ...extra }, label);
+  const actionButton = (label, onClick, disabled = false, classNames = pill, extra = {}) =>
+    createElement(
+      'button',
+      { type: 'button', onClick, disabled, className: classNames, ...extra },
+      label,
+    );
   async function generatorRequest(action, filters) {
     const state = betterPartyStore.state;
     const response = await fetch('/api/generate-playlist', {
@@ -354,7 +358,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
             ['0–2 over par', { min: '0', max: '2' }],
             ['2+ over par', { min: '2' }],
           ].map(([label, bounds]) =>
-            btn(
+            actionButton(
               label,
               () => setGenRanges((previous) => ({ ...previous, overPar: bounds })),
               busy || preparing,
@@ -405,15 +409,15 @@ function CommunityCoursePicker({ config, holeSettings }) {
         ),
         error && createElement('p', { role: 'alert', className: 'text-xs text-red-300' }, error),
         createElement('div', { className: 'flex flex-wrap gap-2' }, [
-          btn(
+          actionButton(
             genMode === 'append' ? 'Generate & append' : 'Generate & replace',
             generate,
             busy || preparing,
             green,
           ),
           job?.status === 'running'
-            ? btn('Cancel generation', cancelGeneration, false, pill)
-            : btn('Close', () => setGeneratorOpen(false), false, pill),
+            ? actionButton('Cancel generation', cancelGeneration, false, pill)
+            : actionButton('Close', () => setGeneratorOpen(false), false, pill),
         ]),
         createElement(
           'p',
@@ -456,8 +460,8 @@ function CommunityCoursePicker({ config, holeSettings }) {
         const catalogPage = await fetchCatalogPage(0, abortController.signal);
         if (!abortController.signal.aborted && requestGeneration === generation.current) {
           setPage(catalogPage);
-          setNames((prev) => ({
-            ...prev,
+          setNames((previous) => ({
+            ...previous,
             ...Object.fromEntries(catalogPage.holes.map((course) => [course.id, course.title])),
           }));
         }
@@ -494,12 +498,12 @@ function CommunityCoursePicker({ config, holeSettings }) {
         holes: [
           ...old.holes,
           ...catalogPage.holes.filter(
-            (item) => !old.holes.some((positionY) => positionY.id === item.id),
+            (candidate) => !old.holes.some((existing) => existing.id === candidate.id),
           ),
         ],
       }));
-      setNames((prev) => ({
-        ...prev,
+      setNames((previous) => ({
+        ...previous,
         ...Object.fromEntries(catalogPage.holes.map((course) => [course.id, course.title])),
       }));
     } catch (err) {
@@ -554,8 +558,8 @@ function CommunityCoursePicker({ config, holeSettings }) {
     if (index + destination < 0 || index + destination >= source.length) {
       return;
     }
-    const [item] = source.splice(index, 1);
-    source.splice(index + destination, 0, item);
+    const [moved] = source.splice(index, 1);
+    source.splice(index + destination, 0, moved);
     update(source);
   }
   function formatCourseAge(timestamp) {
@@ -578,15 +582,15 @@ function CommunityCoursePicker({ config, holeSettings }) {
       year: 'numeric',
     });
   }
-  const image = (id, title, cls, eager = false) =>
+  const image = (courseId, title, classNames, eager = false) =>
     createElement('img', {
-      src: '/api/preview/' + encodeURIComponent(id),
+      src: '/api/preview/' + encodeURIComponent(courseId),
       alt: title,
       loading: eager ? 'eager' : 'lazy',
       decoding: 'async',
-      className: cls,
-      onError: (ev) => {
-        ev.currentTarget.style.opacity = '.35';
+      className: classNames,
+      onError: (event) => {
+        event.currentTarget.style.opacity = '.35';
       },
     });
   const mode = createElement(
@@ -598,7 +602,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
         'select',
         {
           value: config.mapSource,
-          onChange: (item) => updateBetterPartyConfig({ mapSource: item.target.value }),
+          onChange: (event) => updateBetterPartyConfig({ mapSource: event.target.value }),
           disabled: busy || preparing,
           style: { background: '#0a1c21', color: '#fff', padding: '8px', borderRadius: 6 },
           'aria-label': 'Party map selection',
@@ -621,7 +625,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
           'aria-label': 'Exclude daily holes',
           checked: !!config.excludeDaily,
           disabled: busy || preparing,
-          onChange: (item) => updateBetterPartyConfig({ excludeDaily: item.target.checked }),
+          onChange: (event) => updateBetterPartyConfig({ excludeDaily: event.target.checked }),
         }),
       ]),
       createElement('label', { className: 'bp-number-row mt-3' }, [
@@ -631,17 +635,17 @@ function CommunityCoursePicker({ config, holeSettings }) {
           'aria-label': 'Course voting',
           checked: !!config.courseVoting,
           disabled: busy || preparing,
-          onChange: (item) => updateBetterPartyConfig({ courseVoting: item.target.checked }),
+          onChange: (event) => updateBetterPartyConfig({ courseVoting: event.target.checked }),
         }),
       ]),
     ]);
   }
-  function card(courseIndex, index) {
-    const count = picked.filter((id) => id === courseIndex.id).length;
+  function card(course, index) {
+    const count = picked.filter((id) => id === course.id).length;
     return createElement(
       'li',
       {
-        key: courseIndex.id,
+        key: course.id,
         className:
           'overflow-hidden rounded-2xl border bg-white/5 transition ' +
           (count ? 'border-emerald-500/50 ring-1 ring-emerald-500/15' : 'border-[var(--line)]'),
@@ -650,18 +654,13 @@ function CommunityCoursePicker({ config, holeSettings }) {
         createElement(
           'a',
           {
-            href: 'https://putt.day/h/' + encodeURIComponent(courseIndex.id),
+            href: 'https://putt.day/h/' + encodeURIComponent(course.id),
             target: '_blank',
             rel: 'noopener noreferrer',
             className: 'relative block',
           },
           [
-            image(
-              courseIndex.id,
-              courseIndex.title,
-              'aspect-[1200/630] w-full object-cover',
-              index < 4,
-            ),
+            image(course.id, course.title, 'aspect-[1200/630] w-full object-cover', index < 4),
             count > 0 &&
               createElement(
                 'span',
@@ -678,83 +677,78 @@ function CommunityCoursePicker({ config, holeSettings }) {
             createElement(
               'a',
               {
-                href: 'https://putt.day/h/' + encodeURIComponent(courseIndex.id),
+                href: 'https://putt.day/h/' + encodeURIComponent(course.id),
                 target: '_blank',
                 rel: 'noopener noreferrer',
                 className: 'font-bold text-[var(--sea-ink)] no-underline hover:underline',
               },
-              courseIndex.title,
+              course.title,
             ),
-            courseIndex.scheduledDay != null &&
+            course.scheduledDay != null &&
               createElement(
                 'a',
                 {
-                  href: 'https://putt.day/day/' + courseIndex.scheduledDay,
+                  href: 'https://putt.day/day/' + course.scheduledDay,
                   target: '_blank',
                   rel: 'noopener noreferrer',
                   className:
                     'shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold text-emerald-300 no-underline',
                 },
-                'Daily #' + courseIndex.scheduledDay,
+                'Daily #' + course.scheduledDay,
               ),
           ]),
           createElement('p', { className: 'mt-0.5 text-xs text-[var(--sea-ink-soft)]' }, [
             'by ',
-            courseIndex.creatorId
+            course.creatorId
               ? createElement(
                   'button',
                   {
                     type: 'button',
                     className: 'underline',
-                    onClick: () =>
-                      setMaker({ id: courseIndex.creatorId, name: courseIndex.author }),
+                    onClick: () => setMaker({ id: course.creatorId, name: course.author }),
                   },
-                  courseIndex.author,
+                  course.author,
                 )
-              : courseIndex.author,
+              : course.author,
             ' · ',
             createElement(
               'span',
-              { title: new Date(courseIndex.createdAt).toLocaleString() },
-              formatCourseAge(courseIndex.createdAt),
+              { title: new Date(course.createdAt).toLocaleString() },
+              formatCourseAge(course.createdAt),
             ),
           ]),
           createElement(
             'div',
             { className: 'mt-2 flex items-center gap-3 text-xs text-[var(--sea-ink-soft)]' },
             [
-              Number.isFinite(courseIndex.ratingAvg)
+              Number.isFinite(course.ratingAvg)
                 ? createElement('span', {}, [
                     createElement('span', { className: 'text-amber-500' }, [
-                      '★'.repeat(Math.max(0, Math.min(5, Math.round(courseIndex.ratingAvg)))),
+                      '★'.repeat(Math.max(0, Math.min(5, Math.round(course.ratingAvg)))),
                       createElement(
                         'span',
                         { className: 'text-[var(--line)]' },
-                        '★'.repeat(Math.max(0, 5 - Math.round(courseIndex.ratingAvg))),
+                        '★'.repeat(Math.max(0, 5 - Math.round(course.ratingAvg))),
                       ),
                     ]),
-                    ' ' +
-                      courseIndex.ratingAvg.toFixed(1) +
-                      ' (' +
-                      (courseIndex.ratingCount ?? 0) +
-                      ')',
+                    ' ' + course.ratingAvg.toFixed(1) + ' (' + (course.ratingCount ?? 0) + ')',
                   ])
                 : createElement('span', { className: 'opacity-70' }, 'unrated'),
               createElement(
                 'span',
                 { title: 'Number of completions' },
-                '⛳ ' + (courseIndex.completionsBucket ?? '—'),
+                '⛳ ' + (course.completionsBucket ?? '—'),
               ),
             ],
           ),
           createElement('div', { className: 'mt-3 flex gap-2 text-xs' }, [
-            btn(
+            actionButton(
               count ? 'Add again' : 'Add to playlist',
-              () => add(courseIndex),
+              () => add(course),
               busy || preparing,
               green,
               {
-                'aria-label': 'Add ' + courseIndex.title,
+                'aria-label': 'Add ' + course.title,
               },
             ),
           ]),
@@ -770,7 +764,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
         { className: 'text-xs text-white/70' },
         picked.length + (picked.length === 1 ? ' course selected' : ' courses selected'),
       ),
-      btn(
+      actionButton(
         'Edit playlist',
         () => setPickerOpen(true),
         busy || preparing,
@@ -798,7 +792,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
               { id: 'bp-playlist-title', className: 'text-xl font-black' },
               'Choose a playlist',
             ),
-            btn(
+            actionButton(
               'Done',
               () => setPickerOpen(false),
               busy || preparing,
@@ -812,7 +806,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                 ['trending', 'Trending'],
                 ['top', 'Top rated'],
               ].map(([value, label]) =>
-                btn(
+                actionButton(
                   label,
                   () => setSort(value),
                   false,
@@ -823,7 +817,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
               ),
               createElement('input', {
                 value: search,
-                onChange: (item) => setSearch(item.target.value),
+                onChange: (event) => setSearch(event.target.value),
                 placeholder: 'Search title or maker…',
                 'aria-label': 'Find party holes',
                 className:
@@ -835,7 +829,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                 'select',
                 {
                   value: rating,
-                  onChange: (item) => setRating(Number(item.target.value)),
+                  onChange: (event) => setRating(Number(event.target.value)),
                   'aria-label': 'Minimum rating',
                   className: 'rounded-full border border-[var(--line)] bg-black/20 px-3 py-1.5',
                 },
@@ -847,7 +841,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                   createElement('option', { key: value, value: value }, label),
                 ),
               ),
-              btn(
+              actionButton(
                 'Ran as a daily',
                 () => setDaily(!daily),
                 false,
@@ -855,14 +849,14 @@ function CommunityCoursePicker({ config, holeSettings }) {
                 { 'aria-pressed': daily },
               ),
               maker &&
-                btn(
+                actionButton(
                   'by ' + maker.name + ' ✕',
                   () => setMaker(null),
                   false,
                   'rounded-full bg-violet-600 px-3 py-1.5 font-semibold text-white',
                 ),
             ]),
-            btn(
+            actionButton(
               'Auto-generate playlist',
               () => setGeneratorOpen(!generatorOpen),
               busy || preparing,
@@ -899,7 +893,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                     (page.total ?? 0) + ' holes',
                   ),
                   page.nextOffset != null &&
-                    btn(
+                    actionButton(
                       loading ? 'Loading…' : 'Load more',
                       more,
                       loading,
@@ -924,20 +918,20 @@ function CommunityCoursePicker({ config, holeSettings }) {
                           key: index + ':' + id,
                           className: 'bp-playlist-item' + (drag === index ? ' bp-dragging' : ''),
                           draggable: !busy && !preparing,
-                          onDragStart: (ev) => {
+                          onDragStart: (event) => {
                             setDrag(index);
-                            ev.dataTransfer.effectAllowed = 'move';
-                            ev.dataTransfer.setData('text/plain', String(index));
+                            event.dataTransfer.effectAllowed = 'move';
+                            event.dataTransfer.setData('text/plain', String(index));
                           },
-                          onDragOver: (ev) => {
+                          onDragOver: (event) => {
                             if (drag !== null) {
-                              ev.preventDefault();
-                              ev.dataTransfer.dropEffect = 'move';
+                              event.preventDefault();
+                              event.dataTransfer.dropEffect = 'move';
                             }
                           },
                           onDragEnd: () => setDrag(null),
-                          onDrop: (ev) => {
-                            ev.preventDefault();
+                          onDrop: (event) => {
+                            event.preventDefault();
                             if (drag !== null && drag !== index) {
                               move(drag, index - drag);
                             }
@@ -953,7 +947,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                               index + 1 + '. ' + (names[id] ?? titles[id] ?? id),
                             ),
                             createElement('div', { className: 'bp-playlist-actions' }, [
-                              btn(
+                              actionButton(
                                 '↑',
                                 () => move(index, -1),
                                 index === 0 || busy || preparing,
@@ -962,7 +956,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                                   'aria-label': 'Move hole up',
                                 },
                               ),
-                              btn(
+                              actionButton(
                                 '↓',
                                 () => move(index, 1),
                                 index === picked.length - 1 || busy || preparing,
@@ -971,7 +965,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                                   'aria-label': 'Move hole down',
                                 },
                               ),
-                              btn(
+                              actionButton(
                                 '×',
                                 () => update(picked.filter((unused, entry) => entry !== index)),
                                 busy || preparing,
@@ -992,7 +986,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                   ],
                 ),
                 picked.length > 0 &&
-                  btn('Clear', () => update([]), busy || preparing, pill + ' mt-3'),
+                  actionButton('Clear', () => update([]), busy || preparing, pill + ' mt-3'),
                 createElement('div', { className: 'bp-saved-playlists' }, [
                   createElement('input', {
                     'aria-label': 'Playlist name',
@@ -1001,9 +995,15 @@ function CommunityCoursePicker({ config, holeSettings }) {
                     maxLength: 60,
                     onChange: (event) => setSaveName(event.target.value),
                   }),
-                  btn('Save', save, !saveName.trim() || !picked.length || busy || preparing, pill, {
-                    'aria-label': 'Save playlist',
-                  }),
+                  actionButton(
+                    'Save',
+                    save,
+                    !saveName.trim() || !picked.length || busy || preparing,
+                    pill,
+                    {
+                      'aria-label': 'Save playlist',
+                    },
+                  ),
                   createElement(
                     'select',
                     {
@@ -1022,10 +1022,10 @@ function CommunityCoursePicker({ config, holeSettings }) {
                       ),
                     ],
                   ),
-                  btn('Load', loadSaved, !savedId || busy || preparing, pill, {
+                  actionButton('Load', loadSaved, !savedId || busy || preparing, pill, {
                     'aria-label': 'Load saved playlist',
                   }),
-                  btn(
+                  actionButton(
                     'Delete',
                     () => {
                       store(saved.filter((playlist) => playlist.id !== savedId));

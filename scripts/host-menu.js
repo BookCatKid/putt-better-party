@@ -58,14 +58,14 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
       setPending(false);
     }
   };
-  const btn = (label, fn, disabled = false, cls = '') =>
+  const actionButton = (label, onClick, disabled = false, classNames = '') =>
     createElement(
       'button',
       {
         type: 'button',
-        onClick: fn,
+        onClick,
         disabled: disabled || pending,
-        className: 'bp-host-item ' + cls,
+        className: 'bp-host-item ' + classNames,
       },
       label,
     );
@@ -145,8 +145,8 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
             ? createElement('div', { className: 'bp-host-confirm' }, [
                 createElement('p', {}, confirmationMessages[confirm]),
                 createElement('div', { className: 'bp-host-time' }, [
-                  btn('Cancel', () => setConfirm(null)),
-                  btn('Confirm', () => run(confirm), false, 'bp-danger'),
+                  actionButton('Cancel', () => setConfirm(null)),
+                  actionButton('Confirm', () => run(confirm), false, 'bp-danger'),
                 ]),
               ])
             : [
@@ -155,13 +155,17 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
                   'div',
                   { className: 'bp-host-time' },
                   [15, 30, 60].map((seconds) =>
-                    btn('+' + seconds + 's', () => run('time', seconds), phase !== 'playing'),
+                    actionButton(
+                      '+' + seconds + 's',
+                      () => run('time', seconds),
+                      phase !== 'playing',
+                    ),
                   ),
                 ),
-                btn('Skip level', () => setConfirm('skip'), !live),
-                btn('Restart level', () => setConfirm('restart'), !live),
-                nextError && btn('Retry next hole', () => run('retry-next')),
-                nextError && btn('Skip unloaded hole', () => setConfirm('skip-next')),
+                actionButton('Skip level', () => setConfirm('skip'), !live),
+                actionButton('Restart level', () => setConfirm('restart'), !live),
+                nextError && actionButton('Retry next hole', () => run('retry-next')),
+                nextError && actionButton('Skip unloaded hole', () => setConfirm('skip-next')),
                 successors.length > 0 &&
                   createElement('div', { className: 'bp-host-transfer' }, [
                     createElement(
@@ -170,12 +174,12 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
                       'Make someone else host',
                     ),
                     successors.map((member) =>
-                      btn(member.name + (member.ready ? ' ✅' : ''), () =>
+                      actionButton(member.name + (member.ready ? ' ✅' : ''), () =>
                         run('transfer-host', member.uid),
                       ),
                     ),
                   ]),
-                btn('End party', () => setConfirm('end'), false, 'bp-danger'),
+                actionButton('End party', () => setConfirm('end'), false, 'bp-danger'),
               ],
         ],
       ),

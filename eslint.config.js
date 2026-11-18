@@ -43,6 +43,37 @@ export default [
     },
   },
   {
+    /*
+     * Authored sources only: keep minifier-style and mechanically misnamed
+     * identifiers out. These are the names the backlog called out - `btn` and
+     * `cls` for a button and its classes, `prev` for any previous value, and the
+     * short forms that make a reader stop and decode a name instead of reading it.
+     *
+     * Deliberately not applied to `tests/`, where `fn`, `res` and `btn` appear
+     * legitimately in worker callbacks and in-page probe strings. `properties` is
+     * ignored so a wire field or a third-party option with one of these names
+     * stays legal; this is about what we choose to call our own values.
+     */
+    files: ['src/**/*.ts', 'scripts/**/*.js', 'scripts/**/*.ts'],
+    rules: {
+      'id-denylist': [
+        'error',
+        'btn',
+        'cls',
+        'prev',
+        'tmp',
+        'temp',
+        'val',
+        'obj',
+        'arr',
+        'ev',
+        'idx',
+        'resp',
+        'fn',
+      ],
+    },
+  },
+  {
     files: ['src/**/*.ts'],
     languageOptions: { parser: tsParser },
     plugins: { '@typescript-eslint': tsPlugin },

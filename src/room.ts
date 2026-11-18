@@ -1267,12 +1267,16 @@ export class Room {
       this.nextLoadGeneration !== generation;
     Promise.resolve()
       .then(() => loadMap(id))
-      .then((item) => {
+      .then((loadedCourse) => {
         if (stale()) {
           return;
         }
-        this.audit('course_load_succeeded', { target, targetCourseId: id, name: item.spec.name });
-        this.specs[target] = structuredClone(item.spec);
+        this.audit('course_load_succeeded', {
+          target,
+          targetCourseId: id,
+          name: loadedCourse.spec.name,
+        });
+        this.specs[target] = structuredClone(loadedCourse.spec);
         this.loadingNext = false;
         this.retryingNext = false;
         this.nextLoadError = null;
