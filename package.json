@@ -14,6 +14,7 @@
     "check": "bun run format:check && bun run lint && bun run typecheck && bun test",
     "test:browser": "bash tests/integration/run-browser-test.sh",
     "test:catalog": "bun tests/integration/check-live-catalog.mjs",
+    "test:catalog:original": "BP_TEST_ORIGINAL_VALIDATOR=1 bun test tests/catalog.test.js",
     "test:recovery": "bun tests/integration/check-recovery.mjs",
     "test:protocol": "bun tests/integration/check-room-lifecycle.mjs",
     "typecheck": "tsc --noEmit",

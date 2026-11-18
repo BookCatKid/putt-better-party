@@ -13,7 +13,7 @@ bun run lint
 bun run check
 ```
 
-The quality check runs Prettier, ESLint, Ruff, ShellCheck, strict TypeScript checking and the offline unit tests. CI uses the same check. The installed pre-commit hook formats and lints staged source, runs the type checker and runs the unit tests. Generated assets and room data are excluded from source control and formatting.
+The quality check runs Prettier, ESLint, Ruff, ShellCheck, strict TypeScript checking and the offline unit tests. CI uses the same check. The installed pre-commit hook formats and lints staged source, runs the type checker and runs the unit tests. Generated assets and room data are excluded from source control and formatting. Catalog unit tests use an explicit test-only adapter for course validation, date calculation and public response transport, while exercising the real catalog and public detail parser. They require neither network access nor a prepared client. To exercise the same catalog scenarios with the original pinned validator and date helper, prepare the client and run `bun run test:catalog:original`. This mode requires the pinned assets and never silently falls back to the fixture validator.
 
 ## Integration tests
 
