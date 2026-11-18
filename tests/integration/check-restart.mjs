@@ -157,8 +157,20 @@ try {
   const addFirst =
     '[...document.querySelectorAll("dialog button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add "))';
   await waitFor(host, '!!' + addFirst, 25000);
-  await host.evalJS(addFirst + '.click()');
-  await expectState(host, 's.config.selectedHoleIds?.length===1');
+  // The import endpoint proxies a live fetch to putt.day and can fail
+  // transiently; the picker surfaces the error and re-enables the button, so a
+  // single failed click is not a product fault.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await host.evalJS(addFirst + '.click()');
+    try {
+      await expectState(host, 's.config.selectedHoleIds?.length===1', 20000);
+      break;
+    } catch {
+      if (attempt === 3) {
+        throw Error('Adding the first course kept failing');
+      }
+    }
+  }
   await host.evalJS(
     '(async()=>{(await import("/assets/runtime-DL2fiDAQ.js")).D({timerMs:120000,elimination:false})})()',
   );
