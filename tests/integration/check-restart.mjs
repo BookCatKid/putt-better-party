@@ -147,8 +147,15 @@ try {
   await host.evalJS(
     `(()=>{let x=document.querySelector("select[aria-label='Party map selection']");x.value="picked";x.dispatchEvent(new Event("change",{bubbles:true}));})()`,
   );
+  // The playlist editor is a modal behind "Edit playlist", so the catalogue is not
+  // in the DOM until a host opens it.
+  const editPlaylist =
+    '[...document.querySelectorAll("button")].find(b=>b.textContent==="Edit playlist")';
+  await waitFor(host, '!!' + editPlaylist, 25000);
+  await host.evalJS(editPlaylist + '.click()');
+  await waitFor(host, '!!document.querySelector(\'dialog [aria-label^="Add "]\')', 25000);
   const addFirst =
-    '[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add "))';
+    '[...document.querySelectorAll("dialog button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add "))';
   await waitFor(host, '!!' + addFirst, 25000);
   await host.evalJS(addFirst + '.click()');
   await expectState(host, 's.config.selectedHoleIds?.length===1');

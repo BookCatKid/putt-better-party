@@ -143,9 +143,43 @@ async function stroke(client, pullDown = PULL_DOWN_PX) {
 /** Pick the live public course through the real picker, then start the party. */
 async function startOneCourseParty(client) {
   await focus(client);
+  await waitFor(
+    client,
+    '!!document.querySelector("select[aria-label=\\"Party map selection\\"]")',
+    30000,
+  );
   await client.evalJS(
     `(()=>{let x=document.querySelector("select[aria-label='Party map selection']");x.value="picked";x.dispatchEvent(new Event("change",{bubbles:true}));})()`,
   );
+  /*
+   * Open the playlist editor the way a host does. It is a modal dialog behind
+   * "Edit playlist", so the catalogue is not in the DOM until it opens and waiting
+   * for the search field first would never resolve.
+   */
+  await waitFor(
+    client,
+    '!![...document.querySelectorAll("button")].find(b=>b.textContent==="Edit playlist")',
+    30000,
+  );
+  await client.evalJS(
+    '[...document.querySelectorAll("button")].find(b=>b.textContent==="Edit playlist").click()',
+  );
+  /*
+   * Search for the course instead of assuming it is on the first catalog page.
+   * The live catalog is a moving list, so a course that was on page one can drift
+   * off it between runs and this test would then fail for a reason with nothing to
+   * do with the code under test.
+   */
+  await waitFor(
+    client,
+    '!!document.querySelector("input[aria-label=\\"Find party holes\\"]")',
+    30000,
+  );
+  await client.evalJS(`(()=>{
+    const input=document.querySelector('input[aria-label="Find party holes"]');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(COURSE)});
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+  })()`);
   await waitFor(
     client,
     '!![...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add "))',
@@ -159,12 +193,18 @@ async function startOneCourseParty(client) {
     button.click();
     return true;
   })()`);
-  assert(added, 'the live catalog must still list the ' + COURSE + ' course');
+  assert(added, 'searching the live catalog must still find the ' + COURSE + ' course');
   await expectState(client, 's.config.selectedHoleIds?.length===1');
   const ids = await client.evalJS(
     `(async()=>{const s=${store};return s.config.selectedHoleIds})()`,
   );
   assert.deepEqual(ids.length, 1, 'the playlist must hold exactly the one course');
+  // Close the modal so the host controls underneath are reachable again.
+  await client.evalJS(`(()=>{
+    const done=[...document.querySelectorAll("dialog button")].find(b=>b.textContent==="Done");
+    if(done){done.click();}
+  })()`);
+  await waitFor(client, '!document.querySelector(\'input[aria-label="Find party holes"]\')', 15000);
   await client.evalJS(
     '(async()=>{(await import("/assets/runtime-DL2fiDAQ.js")).D({timerMs:180000,elimination:false})})()',
   );
