@@ -32,7 +32,8 @@ function courseSpec(overrides = {}) {
 
 /** Replaced per test; the adapter mock dispatches POST to `detail`. */
 const upstream = {
-  requests: { list: [], detail: [] },
+  requests: { list: [], detail: [], stats: [] },
+  statsAnswer: async () => ({ avgStrokes: 4.2, exact: { played: 100, completions: 80 } }),
   detailAnswer: async (id) => ({ id, public: false }),
   listAnswer: async () => ({ holes: [], total: 0, offset: 0, nextOffset: null }),
 };
@@ -51,6 +52,10 @@ mock.module(adapterPath, () => ({
   },
   // Fake the network answers while preserving the original validator.
   invokePublicFunction: (identifier, method, data) => {
+    if (identifier === '49e860e80c9478a9875955d36bf5de9158615b51135baa8e2a76cfd2b0f39599') {
+      upstream.requests.stats.push({ method, data });
+      return upstream.statsAnswer(data.id);
+    }
     if (method === 'POST') {
       const id = data.id;
       upstream.requests.detail.push(id);
@@ -65,6 +70,7 @@ mock.module(adapterPath, () => ({
 async function catalogWith({ detail: detailAnswer, list: listAnswer } = {}) {
   upstream.requests.detail.length = 0;
   upstream.requests.list.length = 0;
+  upstream.requests.stats.length = 0;
   validation.requests.length = 0;
   validation.failure = null;
   upstream.detailAnswer = detailAnswer ?? (async (id) => ({ id, public: false }));
@@ -629,4 +635,20 @@ test('voting prepares distinct public candidates with ratings and uses the origi
   expect(prepared.ids).toHaveLength(3);
   expect(upstream.requests.detail).toHaveLength(9);
   expect(validation.requests).toHaveLength(9);
+});
+
+test('public difficulty statistics use the archived GET function with only a public course ID and never expose admin fields', async () => {
+  await catalogWith({
+    list: async () => ({
+      holes: [{ id: 'stats-public', title: 'Public' }],
+      total: 1,
+      offset: 0,
+      nextOffset: null,
+    }),
+  });
+  const { browse, publicStats } = await import('../src/upstream.js');
+  await browse({ fresh: true });
+  expect(await publicStats('stats-public')).toEqual({ avgStrokes: 4.2 });
+  expect(upstream.requests.stats).toEqual([{ method: 'GET', data: { id: 'stats-public' } }]);
+  await expect(publicStats('unknown-stats')).rejects.toThrow('public catalog');
 });

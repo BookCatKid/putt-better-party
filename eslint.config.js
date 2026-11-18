@@ -91,7 +91,7 @@ export default [
   },
 
   {
-    files: ['scripts/home.js', 'scripts/admin.js'],
+    files: ['scripts/home.js', 'scripts/admin.js', 'scripts/leaderboard.js'],
     languageOptions: { globals: globals.browser },
   },
   {

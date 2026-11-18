@@ -12,6 +12,21 @@ function CommunityCoursePicker({ config }) {
   const [busy, setBusy] = BetterPartyReact.useState(false);
   const [progress, setProgress] = BetterPartyReact.useState('');
   const [error, setError] = BetterPartyReact.useState('');
+  const [generatorOpen, setGeneratorOpen] = BetterPartyReact.useState(false);
+  const [genSearch, setGenSearch] = BetterPartyReact.useState('');
+  const [genDaily, setGenDaily] = BetterPartyReact.useState('any');
+  const [genSort, setGenSort] = BetterPartyReact.useState('new');
+  const [genMode, setGenMode] = BetterPartyReact.useState('replace');
+  const [genRanges, setGenRanges] = BetterPartyReact.useState({});
+  const [genJob, setGenJob] = BetterPartyReact.useState(null);
+  const generatorActive = BetterPartyReact.useRef(false);
+  const mounted = BetterPartyReact.useRef(true);
+  BetterPartyReact.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [saved, setSaved] = BetterPartyReact.useState(() => {
     try {
       const item = JSON.parse(localStorage.getItem('bp.playlists.v1') || '[]');
@@ -135,6 +150,234 @@ function CommunityCoursePicker({ config }) {
     'rounded-full bg-emerald-600 px-4 py-1.5 font-bold text-white hover:bg-emerald-500 disabled:opacity-50';
   const btn = (label, onClick, disabled = false, cls = pill, extra = {}) =>
     createElement('button', { type: 'button', onClick, disabled, className: cls, ...extra }, label);
+  async function generatorRequest(action, filters) {
+    const state = betterPartyStore.state;
+    const response = await fetch('/api/generate-playlist', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        filters,
+        code: state.code,
+        uid: state.self.uid,
+        session: state.self.session,
+        host: sessionStorage.getItem('bp.host.' + state.code),
+      }),
+    });
+    const job = await response.json();
+    if (!response.ok) {
+      throw Error(job.error || 'Could not generate playlist');
+    }
+    return job;
+  }
+
+  async function generate() {
+    if (busy || preparing || generatorActive.current) {
+      return;
+    }
+    const ranges = Object.fromEntries(
+      Object.entries(genRanges).map(([metric, bounds]) => [
+        metric,
+        Object.fromEntries(
+          Object.entries(bounds)
+            .filter(([_bound, value]) => value !== '')
+            .map(([bound, value]) => [bound, Number(value)]),
+        ),
+      ]),
+    );
+    generatorActive.current = true;
+    setBusy(true);
+    setError('');
+    setGenJob(null);
+    bpPickerBusy(true);
+    try {
+      let job = await generatorRequest('start', {
+        search: genSearch,
+        daily: genDaily,
+        sort: genSort,
+        mode: genMode,
+        ranges,
+      });
+      while (mounted.current) {
+        setGenJob(job);
+        if (job?.status !== 'running') {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        if (!mounted.current) {
+          break;
+        }
+        job = await generatorRequest('status');
+      }
+      if (mounted.current && job?.status === 'failed') {
+        setError(job.error || 'Playlist generation failed');
+      }
+    } catch (err) {
+      if (mounted.current) {
+        setError(err.message);
+      }
+    } finally {
+      generatorActive.current = false;
+      if (mounted.current) {
+        setBusy(false);
+        bpPickerBusy(false);
+        setProgress('');
+      }
+    }
+  }
+
+  async function cancelGeneration() {
+    try {
+      setGenJob(await generatorRequest('cancel'));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function generatorPanel() {
+    const fields = [
+      ['rating', 'Average rating', 0, 5, 0.1],
+      ['ratings', 'Rating count', 0, 1000000, 1],
+      ['par', 'Par', 1, 200, 1],
+      ['average', 'Average strokes', 0, 200, 0.1],
+      ['overPar', 'Difficulty (avg strokes − par)', -200, 200, 0.1],
+    ];
+    const select = (label, value, change, options) =>
+      createElement('label', { className: 'bp-gen-field' }, [
+        createElement('span', {}, label),
+        createElement(
+          'select',
+          {
+            value,
+            disabled: busy || preparing,
+            onChange: (event) => change(event.target.value),
+            'aria-label': label,
+          },
+          options.map(([key, title]) => createElement('option', { key, value: key }, title)),
+        ),
+      ]);
+    const job = genJob;
+    let message =
+      'Blank bounds are unrestricted. All specified ranges must match. Courses without the requested statistics are excluded.';
+    if (job?.status === 'running') {
+      message =
+        'Scanned ' +
+        job.progress.scanned +
+        ' of ' +
+        (job.progress.total || '…') +
+        ' · ' +
+        job.progress.matched +
+        ' matching';
+    } else if (job?.status === 'complete') {
+      message = job.progress.matched
+        ? job.progress.matched + ' matching courses added to the playlist.'
+        : 'No matching courses. Your playlist is unchanged.';
+    } else if (job?.status === 'cancelled') {
+      message = 'Generation cancelled. Your playlist is unchanged.';
+    } else if (job?.status === 'failed') {
+      message = job.error || 'Generation failed. Your playlist is unchanged.';
+    }
+    return createElement(
+      'section',
+      { className: 'bp-generator', 'aria-label': 'Playlist generator' },
+      [
+        createElement('h3', { className: 'font-bold' }, 'Generate playlist'),
+        createElement('label', { className: 'bp-gen-field' }, [
+          createElement('span', {}, 'Title or maker'),
+          createElement('input', {
+            value: genSearch,
+            maxLength: 100,
+            disabled: busy || preparing,
+            onChange: (event) => setGenSearch(event.target.value),
+            placeholder: 'Any',
+            'aria-label': 'Playlist search',
+          }),
+        ]),
+        createElement('div', { className: 'bp-gen-ranges' }, [
+          createElement('span', {}, 'Filter'),
+          createElement('span', {}, 'Min'),
+          createElement('span', {}, 'Max'),
+          ...fields.flatMap(([metric, label, lower, upper, step]) => [
+            createElement('span', { key: metric }, label),
+            ...['min', 'max'].map((bound) =>
+              createElement('input', {
+                key: metric + bound,
+                type: 'number',
+                min: lower,
+                max: upper,
+                step,
+                value: genRanges[metric]?.[bound] ?? '',
+                placeholder: 'Any',
+                'aria-label': label + ' ' + bound,
+                disabled: busy || preparing,
+                onChange: (event) =>
+                  setGenRanges((previous) => ({
+                    ...previous,
+                    [metric]: { ...previous[metric], [bound]: event.target.value },
+                  })),
+              }),
+            ),
+          ]),
+        ]),
+        createElement('div', { className: 'bp-gen-presets' }, [
+          createElement('span', {}, 'Difficulty presets'),
+          ...[
+            ['Any', {}],
+            ['At or below par', { max: '0' }],
+            ['0–2 over par', { min: '0', max: '2' }],
+            ['2+ over par', { min: '2' }],
+          ].map(([label, bounds]) =>
+            btn(
+              label,
+              () => setGenRanges((previous) => ({ ...previous, overPar: bounds })),
+              busy || preparing,
+              pill,
+              { key: label },
+            ),
+          ),
+        ]),
+        createElement('div', { className: 'bp-gen-options' }, [
+          select('Daily holes', genDaily, setGenDaily, [
+            ['any', 'Any'],
+            ['exclude', 'Exclude past dailies'],
+            ['only', 'Past dailies only'],
+          ]),
+          select('Order', genSort, setGenSort, [
+            ['new', 'Newest first'],
+            ['top', 'Top rated'],
+            ['trending', 'Trending'],
+            ['shuffle', 'Shuffle'],
+          ]),
+          select('Playlist action', genMode, setGenMode, [
+            ['replace', 'Replace playlist'],
+            ['append', 'Append unique courses'],
+          ]),
+        ]),
+        createElement(
+          'p',
+          { className: 'text-xs text-[var(--sea-ink-soft)]', role: 'status' },
+          message,
+        ),
+        createElement('div', { className: 'flex flex-wrap gap-2' }, [
+          btn(
+            genMode === 'append' ? 'Generate & append' : 'Generate & replace',
+            generate,
+            busy || preparing,
+            green,
+          ),
+          job?.status === 'running'
+            ? btn('Cancel generation', cancelGeneration, false, pill)
+            : btn('Close', () => setGeneratorOpen(false), false, pill),
+        ]),
+        createElement(
+          'p',
+          { className: 'text-xs text-[var(--sea-ink-soft)]' },
+          'Scanning all matching courses can take a while, especially for average strokes or par. Nothing changes until the full scan succeeds.',
+        ),
+      ],
+    );
+  }
+
   const params = (offset) =>
     new URLSearchParams({
       search,
@@ -539,6 +782,14 @@ function CommunityCoursePicker({ config }) {
             'rounded-full bg-violet-600 px-3 py-1.5 font-semibold text-white',
           ),
       ]),
+      btn(
+        'Auto-generate playlist',
+        () => setGeneratorOpen(!generatorOpen),
+        busy || preparing,
+        green,
+        { 'aria-expanded': generatorOpen },
+      ),
+      generatorOpen && generatorPanel(),
       createElement('div', { className: 'bp-catalog-layout' }, [
         createElement('section', { className: 'bp-catalog-scroll' }, [
           error &&

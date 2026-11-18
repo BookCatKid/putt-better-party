@@ -6,6 +6,8 @@ import { PacedRequestQueue } from './upstream/request-queue.js';
 // The DETAIL POST retrieves a public hole; it does not mutate upstream data.
 const LIST_FUNCTION = 'f97883d5e5a6b99b27465e8906c5bb388ff1314417b2b803d49645320e231be7';
 const DETAIL_FUNCTION = 'fd5b893e239211c8e662cb5e9d4f489b73a752eaf01715a1a8c41808babe622d';
+// HoleStats and the community list both call the same public GET with {id}.
+const STATS_FUNCTION = '49e860e80c9478a9875955d36bf5de9158615b51135baa8e2a76cfd2b0f39599';
 const ORIGIN = 'https://putt.day';
 const REQUEST_INTERVAL_MS = 350;
 const MAX_ACTIVE_REQUESTS = 3;
@@ -16,6 +18,7 @@ const MAX_PREVIEW_BYTES = 2_000_000;
 const publicOperations = new Map<string, 'GET' | 'POST'>([
   [LIST_FUNCTION, 'GET'],
   [DETAIL_FUNCTION, 'POST'],
+  [STATS_FUNCTION, 'GET'],
 ]);
 
 interface CacheEntry<Value> {
@@ -147,6 +150,23 @@ function evictOldest<Key, Value>(cache: Map<Key, Value>, maximumSize: number): v
       cache.delete(oldest.value);
     }
   }
+}
+
+/** Public hole statistics only. Never request or expose the admin-only exact fields. */
+export async function publicStats(id: string) {
+  if (!listedCourses.has(id)) {
+    throw new Error('Choose a hole from the public catalog first');
+  }
+  const result = await callPublicFunction(STATS_FUNCTION, { id });
+  if (!isRecord(result) || !('avgStrokes' in result)) {
+    throw new Error('Unexpected public hole statistics');
+  }
+  return {
+    avgStrokes:
+      typeof result.avgStrokes === 'number' && Number.isFinite(result.avgStrokes)
+        ? result.avgStrokes
+        : null,
+  };
 }
 
 export function publicRating(id: string) {

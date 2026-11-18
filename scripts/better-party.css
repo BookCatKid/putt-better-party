@@ -788,3 +788,134 @@ body:has(> #app) {
     align-self: center;
   }
 }
+
+.bp-generator {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.bp-gen-ranges {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(65px, 100px) minmax(65px, 100px);
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+.bp-gen-field {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.bp-gen-field input,
+.bp-gen-field select,
+.bp-gen-ranges input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  color: var(--sea-ink);
+  font-size: 13px;
+}
+.bp-gen-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.bp-gen-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.bp-leaderboard-link {
+  display: inline-block;
+  color: #a7f3d0;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.bp-leaderboard-link:hover {
+  background: #ffffff12;
+}
+.bp-leaderboard {
+  max-width: 840px;
+  padding: 28px 20px;
+  margin: 0 auto;
+  color: white;
+}
+.bp-leaderboard h1 {
+  font-size: 28px;
+  font-weight: 900;
+  margin: 20px 0 8px;
+}
+.bp-leaderboard p {
+  color: #ffffffa8;
+  font-size: 13px;
+}
+.bp-leaderboard-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 22px 0;
+}
+.bp-leaderboard-tabs button {
+  padding: 8px 14px;
+  border-radius: 9px;
+  background: #ffffff12;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bp-leaderboard-tabs button[aria-pressed='true'] {
+  background: #059669;
+  color: white;
+}
+.bp-leaderboard-search {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+.bp-leaderboard-search input {
+  min-width: 0;
+  background: #0003;
+  border: 1px solid #ffffff20;
+  border-radius: 9px;
+  color: white;
+  padding: 9px 12px;
+}
+.bp-leaderboard-table {
+  overflow: auto;
+}
+.bp-leaderboard table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+.bp-leaderboard td,
+.bp-leaderboard th {
+  text-align: left;
+  padding: 12px 10px;
+  border-bottom: 1px solid #ffffff17;
+  white-space: nowrap;
+}
+.bp-leaderboard th {
+  color: #ffffffa8;
+  font-size: 12px;
+}
+.bp-leaderboard td:nth-child(3) {
+  font-weight: 700;
+  color: #a7f3d0;
+}
+.bp-leaderboard-note {
+  margin-top: 20px;
+}

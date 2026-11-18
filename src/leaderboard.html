@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Leaderboard · Better Party</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="/assets/styles-S28F_fms.css" />
+  <body class="bp-page">
+    <main class="bp-leaderboard">
+      <a class="bp-leaderboard-link" href="/home">← Better Party</a>
+      <h1>All-time leaderboard</h1>
+      <p>
+        Personal best stroke totals in completed random parties. Equal scores are ranked by total
+        time.
+      </p>
+      <div id="counts" class="bp-leaderboard-tabs" aria-label="Number of holes"></div>
+      <label class="bp-leaderboard-search"
+        >Search players <input type="search" id="search" maxlength="24" placeholder="Username"
+      /></label>
+      <div id="status" role="status"></div>
+      <div class="bp-leaderboard-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Player</th>
+              <th>Strokes</th>
+              <th>Time</th>
+              <th>Achieved</th>
+            </tr>
+          </thead>
+          <tbody id="scores"></tbody>
+        </table>
+      </div>
+      <button id="more" class="bp-leaderboard-link" type="button" hidden>Load more</button>
+      <p class="bp-leaderboard-note">
+        Only random parties count; custom playlists, unfinished runs, skipped and restarted holes do
+        not. Records are grouped by display name, not verified accounts.
+      </p>
+    </main>
+    <script src="/assets/bp-leaderboard.js" defer></script>
+  </body>
+</html>

@@ -66,6 +66,7 @@ export interface RoomOptions {
   votingMs?: number;
   onIdle?: (room: Room) => void;
   onChange?: (room: Room) => void;
+  onFinalize?: (room: Room) => void;
   prepareMatch?: PrepareMatch | null;
   loadMap?: LoadCourse | null;
 }

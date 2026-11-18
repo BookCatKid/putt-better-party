@@ -42,3 +42,5 @@ for path in hashes:
 
 subprocess.run([sys.executable, str(root / "scripts/patch-client.py")], check=True)
 shutil.copyfile(root / "scripts/home.js", web / "assets/bp-home.js")
+
+shutil.copyfile(root / "scripts/leaderboard.js", web / "assets/bp-leaderboard.js")

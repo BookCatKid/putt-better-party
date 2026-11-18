@@ -71,6 +71,8 @@ export class Room {
   vote: { id: string; target: number; endsAt: number; ballots: Map<string, string> } | null = null;
   readonly onIdle: (room: Room) => void;
   readonly onChange: (room: Room) => void;
+  readonly onFinalize: (room: Room) => void;
+  recordEligible = true;
   readonly prepareMatch: PrepareMatch | null;
   readonly loadMap: LoadCourse | null;
   starting = false;
@@ -116,6 +118,7 @@ export class Room {
       votingMs = 15000,
       onIdle = () => {},
       onChange = () => {},
+      onFinalize = () => {},
       prepareMatch = null,
       loadMap = null,
     }: RoomOptions = {},
@@ -127,6 +130,7 @@ export class Room {
     this.votingMs = votingMs;
     this.onIdle = onIdle;
     this.onChange = onChange;
+    this.onFinalize = onFinalize;
     this.prepareMatch = prepareMatch;
     this.loadMap = loadMap;
   }
@@ -946,6 +950,7 @@ export class Room {
     this.startPrepared();
   }
   startPrepared() {
+    this.recordEligible = true;
     this.matchId = randomUUID();
     this.holeIndex = 0;
     this.roundHistory = [];
@@ -1389,6 +1394,7 @@ export class Room {
       return true;
     }
     if (message.action === 'restart' && ['countdown', 'playing'].includes(this.phase)) {
+      this.recordEligible = false;
       // New match identity forces the original route to reload even when the map ID is unchanged.
       this.matchId = randomUUID();
       this.begin();
@@ -1460,6 +1466,7 @@ export class Room {
     this.vote = null;
     this.voteCourses = [];
     this.phase = 'final';
+    this.onFinalize(this);
     this.state();
     const standings = this.standings();
     this.audit('match_finalized', { standings, rounds: this.roundHistory });

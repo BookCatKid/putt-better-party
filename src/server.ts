@@ -1,10 +1,13 @@
+import { Leaderboard } from './leaderboard.js';
+import { PlaylistJobs, parseFilters } from './playlist-generator.js';
+import { currentDailyNumber, validateCourse } from './upstream/client-adapter.js';
 import { createAdmin } from './admin.js';
 import { Room } from './room.js';
 import { logEvent } from './event-log.js';
 import { RoomStore } from './room-store.js';
 import { courseIndex, courseCount, fetchPublicMap, prepareMatch } from './catalog.js';
 import { isRecord, errorMessage, MAP_SOURCE } from './domain.js';
-import { browse, preview, rememberPublicMetadata } from './upstream.js';
+import { browse, detail, publicStats, preview, rememberPublicMetadata } from './upstream.js';
 import { randomInt } from 'node:crypto';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -31,7 +34,17 @@ const loadMap = (id: string) => {
   }
   return fetchPublicMap(id, { saved: true });
 };
-const rooms = store.load(courseIndex, { prepareMatch, loadMap });
+const leaderboard = new Leaderboard(store.db);
+const playlistJobs = new PlaylistJobs();
+const onFinalize = (room: Room) => {
+  try {
+    leaderboard.record(room);
+  } catch (error) {
+    console.error('Could not record leaderboard result:', errorMessage(error));
+    logEvent('leaderboard_record_failed', { room: room.code });
+  }
+};
+const rooms = store.load(courseIndex, { prepareMatch, loadMap, onFinalize });
 for (const id of courseIndex.keys()) {
   rememberPublicMetadata(id, courseIndex.get(id)?.title);
 }
@@ -144,6 +157,7 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
           prepareMatch,
           loadMap,
           onChange: (changedRoom) => store.save(changedRoom),
+          onFinalize,
         });
         rooms.set(code, room);
         store.save(room);
@@ -224,6 +238,93 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
           courses: items.map(({ id }) => id),
         });
         return response({ holes: items.map(({ spec, ...meta }) => meta) });
+      }
+      if (pathname === '/api/generate-playlist' && req.method === 'POST') {
+        const body = await jsonBody(req);
+        const room = rooms.get(typeof body.code === 'string' ? body.code : '');
+        const player = room?.players.get(typeof body.uid === 'string' ? body.uid : '');
+        const authorized = () =>
+          room &&
+          player?.ws &&
+          room.hostUid === player.uid &&
+          body.host === room.hostToken &&
+          body.session === room.issued.get(player.uid)?.session &&
+          room.players.get(player.uid) === player;
+        if (!room || !player || !authorized()) {
+          return response({ error: 'Only a connected host may generate playlists' }, 403);
+        }
+        if (body.action === 'status') {
+          return response(playlistJobs.get(room.code));
+        }
+        if (body.action === 'cancel') {
+          return response(playlistJobs.cancel(room.code));
+        }
+        if (
+          body.action !== 'start' ||
+          room.phase !== 'lobby' ||
+          room.starting ||
+          room.config.mapSource !== MAP_SOURCE.PICKED
+        ) {
+          return response({ error: 'Choose a custom playlist in the lobby first' }, 409);
+        }
+        const filters = parseFilters(body.filters);
+        const configuration = room.config;
+        const allowed = () =>
+          !!authorized() &&
+          !room.closed &&
+          room.phase === 'lobby' &&
+          !room.starting &&
+          room.config === configuration;
+        const job = playlistJobs.start(
+          room.code,
+          filters,
+          {
+            browse,
+            stats: publicStats,
+            currentDay: currentDailyNumber,
+            allowed,
+            specification: async (id) => {
+              const course = await detail(id);
+              return validateCourse(course.spec, course.title);
+            },
+          },
+          (holes) => {
+            for (const hole of holes) {
+              courseIndex.set(hole.id, { id: hole.id, title: hole.title });
+            }
+            const ids = holes.map((hole) => hole.id);
+            const selected =
+              filters.mode === 'append'
+                ? [
+                    ...configuration.selectedHoleIds,
+                    ...ids.filter((id) => !configuration.selectedHoleIds.includes(id)),
+                  ]
+                : ids;
+            room.configure(player.ws!, { mapSource: MAP_SOURCE.PICKED, selectedHoleIds: selected });
+            logEvent('playlist_generated', { room: room.code, count: selected.length });
+          },
+        );
+        return response(job);
+      }
+      if (pathname === '/api/leaderboard' && req.method === 'GET') {
+        const holes = Number(url.searchParams.get('holes') ?? 3);
+        const offset = Number(url.searchParams.get('offset') ?? 0);
+        if (
+          !Number.isInteger(holes) ||
+          holes < 1 ||
+          holes > 9 ||
+          !Number.isInteger(offset) ||
+          offset < 0 ||
+          offset > 100000
+        ) {
+          return response({ error: 'Invalid leaderboard selection' }, 400);
+        }
+        return response(
+          leaderboard.list(holes, (url.searchParams.get('search') ?? '').slice(0, 24), offset),
+        );
+      }
+      if (pathname === '/leaderboard' && req.method === 'GET') {
+        return page(await Bun.file(new URL('./leaderboard.html', import.meta.url)).text());
       }
       if (pathname === '/api/catalog') {
         const catalogPage = await browse(Object.fromEntries(url.searchParams));
