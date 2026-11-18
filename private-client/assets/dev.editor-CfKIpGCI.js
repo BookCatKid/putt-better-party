@@ -1,0 +1,1 @@
+import{t as e}from"./jsx-runtime-DsKLSDJq.js";import{t}from"./Editor3D-ChGV4LRh.js";var n=e();function r(){return(0,n.jsx)(`div`,{className:`h-dvh w-full overflow-hidden`,children:(0,n.jsx)(t,{playtestStorageKey:`dev:editor`,onSave:e=>{console.log(`LevelEditor onSave`,e)}})})}export{r as component};

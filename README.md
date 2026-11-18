@@ -30,11 +30,11 @@ bun run prepare:client
 bun run start
 ```
 
-Open [http://localhost:8789](http://localhost:8789), create a party and share its invite code. Course metadata and specifications are retrieved from the public putt.day catalog; The exact hash-pinned client bundles are retained in this private repository so they survive upstream updates. Stock media is fetched separately when preparing the browser client.
+Open [http://localhost:8789](http://localhost:8789), create a party and share its invite code. Course metadata and specifications are retrieved from the public putt.day catalog; All original client assets from the reviewed snapshot are retained in this private repository so they survive upstream updates. Preparation verifies their SHA-256 hashes and builds the patched client entirely offline.
 
 ## Architecture
 
-Better Party implements its own room authority, WebSocket transport and persistent settings while retaining the original physics and rendering engine. The client preparation process verifies pinned upstream bundle hashes and applies narrowly scoped compatibility changes to generated copies.
+Better Party implements its own room authority, WebSocket transport and persistent settings while retaining the original physics and rendering engine. The client preparation process verifies every archived upstream asset hash and applies narrowly scoped compatibility changes to generated copies.
 
 | Directory  | Purpose                                                |
 | ---------- | ------------------------------------------------------ |
@@ -58,6 +58,6 @@ The service binds to loopback by default. Review deployment security before expo
 
 ## Compatibility and limitations
 
-Better Party is an independent project and is not affiliated with putt.day. The archived original client and other game assets belong to their respective rights holders. The bundle archive is for private development and is not independently licensed by this project. Obtain appropriate permission before redistribution or public deployment.
+Better Party is an independent project and is not affiliated with putt.day. The archived original client and game assets belong to their respective rights holders. The asset archive is for private development and is not independently licensed by this project. Obtain appropriate permission before redistribution or public deployment.
 
 Room settings and sessions survive restarts; interrupted matches return to the lobby. Scoring penalties and tie-breaking are independent policies, and physics results are client-reported. Upstream changes can require a compatibility update. See [architecture and operation](docs/architecture.md) for details.

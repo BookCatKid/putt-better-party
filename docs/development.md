@@ -13,7 +13,7 @@ bun run lint
 bun run check
 ```
 
-The quality check runs Prettier, ESLint, Ruff, ShellCheck, strict TypeScript checking and the offline unit tests. CI uses the same check. The installed pre-commit hook formats and lints staged source, runs the type checker and runs the unit tests. Generated assets and room data are excluded from source control and formatting. The private repository preserves only the original bundles listed in `scripts/client-lock.json`, with exact SHA-256 hashes. The quality check and pre-commit hook run `bun run prepare:bundles` to reconstruct the original validator and patched client offline. Catalog unit tests mock only public network answers and exercise the original pinned validator; neither media downloads nor a live public server are required.
+The quality check runs Prettier, ESLint, Ruff, ShellCheck, strict TypeScript checking and the offline unit tests. CI uses the same check. The installed pre-commit hook formats and lints staged source, runs the type checker and runs the unit tests. Generated assets and room data are excluded from source control and formatting. The complete original asset snapshot is stored under `private-client/`, with every file listed by exact SHA-256 in `scripts/client-lock.json`. The quality check and pre-commit hook run `bun run prepare:client` to reconstruct the original validator and patched browser client offline. Catalog unit tests mock only public network answers and exercise the original pinned validator. No asset downloads or live public server are required.
 
 ## Integration tests
 
@@ -46,11 +46,8 @@ bun run capture:client
 
 The capture script discovers the current public entry modules, traverses literal imports, inspects stock asset registries and GLB texture references, and stages the downloaded artifacts and hash manifest in a timestamped capture directory. It does not collect account credentials, HAR files or private party traffic.
 
-Compare the new capture against `scripts/client-lock.json`. If modules changed, reverse-engineer the changed bundles to establish the new protocol and patch bindings before updating the lock. Check both unit tests and browser integration before adopting a new build. For a byte-compatible capture:
+Capture and preparation are intentionally separate. `capture:client` discovers and saves candidate upstream releases under `captures/`; it never applies them to the archive or generated build. `prepare:client` reads only the committed snapshot, verifies every hash before touching generated output, and rebuilds `web/` and `private-client/validation/`. Missing or modified originals are errors: restore them from Git rather than downloading replacements.
 
-```sh
-bun run capture:client --apply-compatible
-bun run prepare:client
-```
+Compare a capture's manifest against `scripts/client-lock.json`. Reverse-engineer changed bundles before updating patch bindings or protocol assumptions. When adopting a reviewed release, update the complete asset lock and corresponding original files together, remove superseded tracked paths, and stage only the verified originals with `git add -f`. Check both unit tests and browser integration before adopting it. Do not make the repository or archived assets public without appropriate permission.
 
-When adopting a new upstream build, update the lock and archive the corresponding exact files together. Explicitly stage only the lock-listed originals with `git add -f`; other downloaded and generated files stay ignored. Do not make the repository or archived bundles public without appropriate permission. Keep exact match anchors in the Python patcher. Write substantial new JavaScript in separately formatted and linted source files. Upstream lexical bindings are documented in the ESLint config; do not disable linting for the whole patch.
+Keep exact match anchors in the Python patcher. Write substantial new JavaScript in separately formatted and linted source files. Upstream lexical bindings are documented in the ESLint config; do not disable linting for the whole patch.

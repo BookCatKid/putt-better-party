@@ -8,7 +8,5 @@ node_modules/
 *.har
 *.sqlite*
 bun.lock
-scripts/assets.txt
-scripts/media-paths.txt
 
 .ruff_cache/

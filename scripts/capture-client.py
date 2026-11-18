@@ -171,11 +171,6 @@ def main():
         default=ROOT / "captures" / datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
         help="Staged snapshot directory (never the running client)",
     )
-    ap.add_argument(
-        "--apply-compatible",
-        action="store_true",
-        help="Install only if every pinned bundle is byte-identical",
-    )
     args = ap.parse_args()
     dest = args.output.resolve()
     if (
@@ -230,23 +225,10 @@ def main():
                 files[entry].decode(errors="replace"),
             )
         )
-        old_names = (ROOT / "scripts/assets.txt").read_text().splitlines()
-        stems = {logical(p) for p in old_names} | {
-            "_site.holes.js",
-            "h._id.js",
-            "party.index.js",
-            "party._code.js",
-            "runtimeVersion.js",
-        }
-        requested = (
-            {p for p in candidates if logical(p) in stems}
-            | {
-                p
-                for p in set().union(*map(set, routes.values()))
-                if p.endswith((".js", ".css", ".ico", ".png"))
-            }
-            | {entry, "/favicon.ico"}
-        )
+        lock = json.loads((ROOT / "scripts/client-lock.json").read_text())
+        # Capture the complete discovered entry manifest, not just modules
+        # that happened to exist in our previous snapshot.
+        requested = candidates | {entry, "/favicon.ico", "/logo192.png"}
         batch(requested)
         while True:
             deps = set().union(*(imports(d) for p, d in files.items() if p.endswith(".js")))
@@ -255,9 +237,9 @@ def main():
                 break
             batch(todo)
         # The manifest supplements paths built dynamically; registry derivation captures new stock assets.
-        media = registry_media(files) | set(
-            (ROOT / "scripts/media-paths.txt").read_text().splitlines()
-        )
+        media = registry_media(files) | {
+            path for path in lock if path.startswith(("/models/", "/sky/", "/sfx/"))
+        }
         batch(media)
         while True:
             deps = set().union(*(textures(p, d) for p, d in files.items() if p.endswith(".glb")))
@@ -265,16 +247,25 @@ def main():
             if not todo:
                 break
             batch(todo)
-        lock = json.loads((ROOT / "scripts/client-lock.json").read_text())
-        old = {logical(p): p for p in lock}
-        new = {
-            logical(p): p for p in files if p.startswith("/assets/") and p.endswith((".js", ".css"))
-        }
+        # Compare exact paths first. Several independent chunks can share a
+        # logical stem (for example slim.js), so do not collapse them into
+        # one arbitrary dictionary entry when reporting changed bundles.
+        by_stem = {}
+        for path in files:
+            if path.startswith("/assets/"):
+                by_stem.setdefault(logical(path), []).append(path)
         changes = []
-        for stem, name in old.items():
-            p = new.get(stem)
-            if p != name or p not in files or sha(files[p]) != lock[name]:
-                changes.append({"module": stem, "previous": name, "captured": p})
+        for previous, digest in sorted(lock.items()):
+            if previous in files and sha(files[previous]) == digest:
+                continue
+            candidates = (
+                sorted(by_stem.get(logical(previous), []))
+                if previous.startswith("/assets/")
+                else [previous]
+                if previous in files
+                else []
+            )
+            changes.append({"previous": previous, "captured_candidates": candidates})
         manifest = {
             "source": ORIGIN,
             "captured_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -282,7 +273,7 @@ def main():
             "routes": routes,
             "assets": {p: {"sha256": sha(d), "bytes": len(d)} for p, d in sorted(files.items())},
             "missing": missing,
-            "changed_pinned_modules": changes,
+            "changed_archived_assets": changes,
         }
         (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         if dest.exists():
@@ -295,22 +286,12 @@ def main():
                     "assets": len(files),
                     "bytes": sum(map(len, files.values())),
                     "missing": missing,
-                    "changed_pinned_modules": changes,
+                    "changed_archived_assets": changes,
                 },
                 indent=2,
             ),
             flush=True,
         )
-        if args.apply_compatible:
-            if changes or missing:
-                raise RuntimeError(
-                    "Capture has missing assets or changed pinned modules; review and reverse-engineer before updating"
-                )
-            for p in files:
-                target = ROOT / "private-client" / p.lstrip("/")
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(dest / p.lstrip("/"), target)
-            print("Compatible assets installed; run prepare-client.py to regenerate patched client")
     finally:
         if stage.exists():
             shutil.rmtree(stage)

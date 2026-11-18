@@ -6,20 +6,19 @@
     "start": "bun src/server.ts",
     "test": "bun test",
     "prepare:client": "python3 scripts/prepare-client.py",
-    "prepare:bundles": "python3 scripts/prepare-client.py --bundles-only",
     "capture:client": "python3 scripts/capture-client.py",
     "format": "prettier --write . && ruff format scripts",
     "format:check": "prettier --check . && ruff format --check scripts",
     "lint": "eslint . --max-warnings 0 && ruff check scripts && shellcheck tests/integration/*.sh",
     "lint:fix": "eslint . --fix && ruff check scripts --fix",
-    "check": "bun run prepare:bundles && bun run format:check && bun run lint && bun run typecheck && bun test",
+    "check": "bun run prepare:client && bun run format:check && bun run lint && bun run typecheck && bun test",
     "test:browser": "bash tests/integration/run-browser-test.sh",
     "test:catalog": "bun tests/integration/check-live-catalog.mjs",
     "test:recovery": "bun tests/integration/check-recovery.mjs",
     "test:protocol": "bun tests/integration/check-room-lifecycle.mjs",
     "typecheck": "tsc --noEmit",
     "hooks:install": "git config --local core.hooksPath .githooks",
-    "precommit": "lint-staged && bun run prepare:bundles && bun run typecheck && bun test"
+    "precommit": "lint-staged && bun run prepare:client && bun run typecheck && bun test"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

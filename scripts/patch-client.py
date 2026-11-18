@@ -1,5 +1,6 @@
 """Apply hash-pinned changes to copies of the original client bundles."""
 
+import json
 import re
 import shutil
 from pathlib import Path
@@ -336,8 +337,10 @@ p.write_text(
 # Server-side original validator import closure: only index browser dependency stubbed.
 validation = root / "private-client" / "validation"
 validation.mkdir(exist_ok=True)
-for source in (private / "assets").glob("*.js"):
-    shutil.copyfile(source, validation / source.name)
+for path in json.loads((root / "scripts/client-lock.json").read_text()):
+    if path.startswith("/assets/") and path.endswith(".js"):
+        source = private / path.lstrip("/")
+        shutil.copyfile(source, validation / source.name)
 (validation / "index-DFMxt6BL.js").write_text(
     "export const Xt={state:{active:false}}; export const A=new Map();"
 )
