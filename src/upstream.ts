@@ -255,10 +255,21 @@ interface PreviewImage {
 const previewCache = new Map<string, CacheEntry<PreviewImage>>();
 let activePreviewRequests = 0;
 const previewWaiters: Array<() => void> = [];
+/**
+ * How many preview requests may wait for a slot. Like the catalog queue, the
+ * waiting half is the one that looks free and therefore grows: a client that
+ * keeps asking while upstream is slow would otherwise hold a closure and a
+ * promise per request for as long as it kept asking. Refusing instead lets the
+ * caller answer its own client rather than leave it waiting indefinitely.
+ */
+const MAXIMUM_WAITING_PREVIEWS = 64;
 
 // Limit concurrency to four requests; waiting requests inherit a released slot.
 async function withPreviewSlot<Value>(operation: () => Promise<Value>): Promise<Value> {
   if (activePreviewRequests >= 4) {
+    if (previewWaiters.length >= MAXIMUM_WAITING_PREVIEWS) {
+      throw new Error('Too many preview requests are already waiting');
+    }
     await new Promise<void>((resolve) => previewWaiters.push(resolve));
   } else {
     activePreviewRequests++;
