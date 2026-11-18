@@ -348,3 +348,22 @@ export async function preview(id: string): Promise<Response> {
     },
   });
 }
+
+/**
+ * What the upstream surface looks like right now, for the health report.
+ *
+ * These are counts and cache sizes rather than per-request detail, so reading
+ * this cannot itself grow memory or leak what anybody looked at. No course id,
+ * title or author is included: the catalog a client browses is its own business,
+ * and a health endpoint is often the least protected surface on a service.
+ */
+export function upstreamMetrics() {
+  return {
+    queue: requestQueue.metrics(),
+    caches: {
+      catalogPages: catalogCache.size,
+      knownCourses: listedCourses.size,
+      previews: previewCache.size,
+    },
+  };
+}

@@ -9,7 +9,14 @@ import { logEvent } from './event-log.js';
 import { RoomStore } from './room-store.js';
 import { courseIndex, courseCount, fetchPublicMap, prepareMatch } from './catalog.js';
 import { errorMessage, MAP_SOURCE } from './domain.js';
-import { browse, detail, publicStats, preview, rememberPublicMetadata } from './upstream.js';
+import {
+  browse,
+  detail,
+  publicStats,
+  preview,
+  rememberPublicMetadata,
+  upstreamMetrics,
+} from './upstream.js';
 import {
   MAX_JSON_BODY_BYTES,
   SizeLimitExceededError,
@@ -176,7 +183,38 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
       if (!readOnly) {
         return methodNotAllowed(READ_METHODS);
       }
-      return response({ ok: true, rooms: rooms.size, maps: courseCount() });
+      // Enough to answer "is it healthy, and is upstream the problem?" without
+      // exposing anything a caller could not already see. Counts and durations
+      // only: no room code, course, player name or credential appears here, since
+      // a health endpoint is often the least protected surface on a service.
+      const memory = process.memoryUsage();
+      let connectedPlayers = 0;
+      let activeMatches = 0;
+      for (const room of rooms.values()) {
+        for (const player of room.players.values()) {
+          if (player.ws) {
+            connectedPlayers += 1;
+          }
+        }
+        if (room.phase !== 'lobby') {
+          activeMatches += 1;
+        }
+      }
+      return response({
+        ok: true,
+        rooms: rooms.size,
+        maps: courseCount(),
+        players: connectedPlayers,
+        activeMatches,
+        uptimeSeconds: Math.round(process.uptime()),
+        memory: {
+          // Heap is the number that matters for leak detection; RSS includes
+          // memory we cannot release anyway.
+          rssBytes: memory.rss,
+          heapUsedBytes: memory.heapUsed,
+        },
+        upstream: upstreamMetrics(),
+      });
     }
     if (req.method === 'POST' && !config.allowedOrigins.includes(req.headers.get('origin') ?? '')) {
       return response({ error: 'Invalid origin' }, 403);

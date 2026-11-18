@@ -92,10 +92,59 @@ database file.
 
 ## Health and readiness
 
-`GET /health` answers `{"ok":true,"rooms":N,"maps":M}`. It is a liveness signal,
-not a readiness one: it does not check upstream reachability, because the catalog
-is a live remote dependency and a transient upstream failure should not restart a
-healthy process with live rooms. Use it to confirm the listener is up.
+`GET /health` is a liveness and shape signal, not a readiness one: it does not
+check upstream reachability, because the catalog is a live remote dependency and
+a transient upstream failure should not restart a healthy process with live
+rooms. Use it to confirm the listener is up and to see whether upstream is the
+reason something is slow.
+
+```json
+{
+  "ok": true,
+  "rooms": 3,
+  "maps": 0,
+  "players": 0,
+  "activeMatches": 0,
+  "uptimeSeconds": 8,
+  "memory": { "rssBytes": 44318720, "heapUsedBytes": 3529601 },
+  "upstream": {
+    "queue": {
+      "running": 0,
+      "waiting": 0,
+      "started": 0,
+      "failed": 0,
+      "averageLatencyMs": null,
+      "slowestLatencyMs": 0
+    },
+    "caches": { "catalogPages": 0, "knownCourses": 0, "previews": 0 }
+  }
+}
+```
+
+What each field is for:
+
+- `rooms` is the number of live parties and is the check to make after a
+  restore. `players` counts connected sockets rather than issued identities, so a
+  room full of offline players who may reconnect does not inflate it.
+  `activeMatches` counts rooms past the lobby.
+- `memory.heapUsedBytes` is the number that matters for spotting a leak;
+  `rssBytes` includes memory the runtime will not return anyway. Neither is a
+  budget: the service has no heap ceiling, so watch the trend rather than the
+  value.
+- `upstream.queue.started` and `failed` are lifetime counters since this process
+  started, and reset on restart. A failure is counted in **both**, because it did
+  start and it did cost latency; keeping it in the average but out of `failed`
+  would hide a run of failures behind a plausible duration.
+  `averageLatencyMs` is `null` until the first request finishes, because `0`
+  would be indistinguishable from an instant response.
+- Latency is measured around the upstream operation alone, not around the wait
+  for a pacing slot. The wait is a consequence of the service's own pacing, so
+  including it would make a slow upstream look healthy.
+- `upstream.caches` reports sizes only, never contents. No room code, course,
+  player name or credential appears in this response, because a health endpoint
+  is often the least protected surface on a service.
+
+`/health` accepts `GET` and `HEAD` and answers `405` otherwise.
 
 ## Backups
 

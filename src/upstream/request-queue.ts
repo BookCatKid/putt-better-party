@@ -14,6 +14,15 @@ export class PacedRequestQueue {
   private readonly waiters: Array<() => void> = [];
   private startQueue = Promise.resolve();
   private lastStartedAt = -Infinity;
+  /**
+   * Lifetime counters for the health report. They are deliberately coarse: a
+   * count and a slowest-case duration answer "is upstream healthy" without
+   * carrying per-request detail that would grow with traffic.
+   */
+  private started = 0;
+  private failed = 0;
+  private totalLatencyMs = 0;
+  private slowestLatencyMs = 0;
 
   constructor(
     private readonly maximumActive: number,
@@ -24,6 +33,27 @@ export class PacedRequestQueue {
   /** Requests queued and not yet started, for a health or metrics read. */
   get waiting(): number {
     return this.waiters.length;
+  }
+
+  /** Running requests, for a health or metrics read. */
+  get running(): number {
+    return this.active;
+  }
+
+  /**
+   * What upstream access has looked like, as counters rather than samples.
+   * `average` is `null` until at least one request has finished, because a zero
+   * would read as "instant" rather than "no data".
+   */
+  metrics() {
+    return {
+      running: this.active,
+      waiting: this.waiters.length,
+      started: this.started,
+      failed: this.failed,
+      averageLatencyMs: this.started ? Math.round(this.totalLatencyMs / this.started) : null,
+      slowestLatencyMs: this.slowestLatencyMs,
+    };
   }
 
   async run<Value>(operation: () => Promise<Value>): Promise<Value> {
@@ -48,7 +78,29 @@ export class PacedRequestQueue {
       });
       this.startQueue = start;
       await start;
-      return await operation();
+      // Latency is measured around the operation alone, not around the wait for a
+      // slot: the wait is a consequence of our own pacing, and mixing the two
+      // would hide a slow upstream behind a healthy-looking average.
+      const operationStarted = performance.now();
+      this.started += 1;
+      let succeeded = false;
+      try {
+        const result = await operation();
+        succeeded = true;
+        return result;
+      } finally {
+        const elapsed = performance.now() - operationStarted;
+        this.totalLatencyMs += elapsed;
+        if (elapsed > this.slowestLatencyMs) {
+          this.slowestLatencyMs = Math.round(elapsed);
+        }
+        if (!succeeded) {
+          // A failed request still cost its latency, so it stays in the average;
+          // it is counted separately so a run of failures is visible rather than
+          // hidden behind a plausible-looking duration.
+          this.failed += 1;
+        }
+      }
     } finally {
       const next = this.waiters.shift();
       if (next) {
