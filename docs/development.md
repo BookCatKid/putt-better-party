@@ -38,6 +38,48 @@ The next-course failure regression (`check-next-failure.mjs`) starts its own ser
 
 Recovery tests start an isolated process with a temporary database. A browser debugging disconnection is a test failure, not a successful result.
 
+### Known limits of the browser suite
+
+These are measured limits of the test harness and the pinned client, not open
+product bugs. They are recorded so a future failure is compared against them
+rather than re-diagnosed from scratch.
+
+- **A second themed course can wedge the headless renderer.** `check-voting` is
+  the one suite that does not complete. Reproduced at HEAD: it passes
+  "opening ballot keeps the neutral scene and never blocks on a candidate" and
+  "opening ballot before first hole", then fails with
+  `error: CDP timeout: Runtime.evaluate` while waiting for the second ballot's
+  round to reach `playing`. The failure is a DevTools timeout, not a server
+  error, which is what distinguishes a wedged renderer from a product fault;
+  the server side was verified directly, with ballot 1 opening at `target 0` and
+  ballot 2 at `target 1` with three choices. The same limit is why water,
+  out-of-bounds and moving-obstacle behaviour is covered offline rather than in
+  a browser.
+- **Generator filters in browser tests must be metadata only.** A filter over
+  strokes or par forces a per-course detail fetch across the whole live catalog
+  and wedges the same renderer. Rating count plus a maximum course count
+  completes in about six seconds and is what the playlist suites use.
+- **`check-admin` needs its own configuration.** It requires
+  `BP_TEST_ADMIN_PASSWORD` and a service started with `BP_ADMIN_PASSWORD_HASH`
+  (generate one with
+  `bun -e "console.log(await Bun.password.hash(process.argv[1]))" 'password'`).
+  Run on its own against a service without a hash, it fails with an assertion
+  saying so rather than passing quietly, which would be the dangerous outcome.
+  A full sweep that cannot provide the hash therefore reports it as skipped;
+  that is a limitation of the sweep's configuration, not evidence about the
+  admin surface. Verified passing against a service started with a hash: unlock,
+  wrong password, live room rendering, safe player names, session reload, logout
+  and access revocation. The admin API also has offline coverage in
+  `tests/admin.test.js`.
+- **The live catalog is a moving list.** Drive a test by title search, never by
+  position, and do not assert a total count; the pool has been observed at 276,
+  428 and 370 courses. Imports also proxy a live fetch to putt.day and can fail
+  transiently, so suites retry the same card rather than treating one failure as
+  a product fault.
+- **An occluded headless renderer freezes.** Every DevTools evaluation must bring
+  the page to the front first, or the renderer is throttled and the evaluation
+  never returns.
+
 ## Updating the upstream client
 
 ```sh
