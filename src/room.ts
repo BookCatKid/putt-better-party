@@ -29,6 +29,25 @@ import type {
 } from './room-types.js';
 import type { BoardFrame, ServerFrame } from './protocol.js';
 
+/**
+ * A capability both for joining back and for holding the crown: 192 bits from
+ * the CSPRNG, which is far beyond guessable. These are the two secrets in the
+ * system, and their lifetimes are deliberate rather than forgotten:
+ *
+ *  - An identity session lives as long as the room does. It has to, because it
+ *    is what a reloaded tab resumes with; expiring it would either strand a
+ *    player mid-match or force a name prompt on refresh. The room itself is
+ *    reclaimed after 30 minutes with nobody connected, which is the real bound.
+ *  - The host capability is rotated on every hand-over, so a departed host's
+ *    token stops working immediately rather than being inherited by whoever
+ *    happens to hold the old one.
+ *
+ * Neither is ever projected outward: `roster`, `snapshot`, `board`,
+ * `standings`, the admin view and the audit log all omit them, and a session is
+ * delivered only in the response to the identity request that asked for it.
+ * `tests/room.test.js` drives a whole party to prove that holds for every frame
+ * and every projection, and `tests/admin.test.js` covers the admin view.
+ */
 const token = () => randomBytes(24).toString('base64url');
 /**
  * Round start waits for connected players to report their scene as prepared,

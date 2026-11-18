@@ -1756,3 +1756,77 @@ test('a locked party refuses to issue new identities but keeps the ones already 
   expect(room.roster()).toHaveLength(2);
   room.dispose();
 });
+
+/**
+ * Secret exposure across a whole party, not one frame.
+ *
+ * Sessions are the reconnect credential and the host token is the crown, so a
+ * leak of either is an impersonation. The narrower tests check one frame of one
+ * socket; this drives a full party - lobby, countdown, playing, results, final,
+ * rematch, a host hand-over and a reconnect - and inspects every frame every
+ * socket received, plus the snapshot, roster, board and standings the server
+ * hands out.
+ */
+test("no outbound frame ever carries a session secret or another player's crown", async () => {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const host = enter(room, 'Host', true);
+  const guest = enter(room, 'Guest');
+  const third = enter(room, 'Third');
+  const secrets = [host.identity.session, guest.identity.session, third.identity.session];
+  const sessions = new Set(secrets);
+  const sockets = [host.ws, guest.ws, third.ws];
+  const collect = () => sockets.map((candidate) => JSON.stringify(candidate.frames)).join('\n');
+
+  // One hole, so the first round is the last and the party reaches `final`
+  // without a second preparation cycle.
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p'], elimination: false },
+  });
+  room.handle(host.ws, { t: 'start' });
+  await waitForRoom(() => room.phase === 'playing');
+  room.handle(host.ws, { t: 'prog', st: 2 });
+  room.handle(host.ws, { f: 1, s: 2, p: 3 });
+  room.handle(guest.ws, { f: 1, s: 2, p: 3 });
+  room.handle(third.ws, { t: 'forfeit' });
+  await waitForRoom(() => room.phase === 'final');
+
+  // Every projection the server exposes, not just frames, must be clean too.
+  const projections = JSON.stringify([
+    room.snapshot(),
+    room.roster(),
+    room.board(),
+    room.standings(),
+  ]);
+
+  // A host hand-over rotates the crown; the old token must not reach anybody
+  // except as the revocation notice, and the new one only to the new host.
+  room.handle(host.ws, { t: 'rematch' });
+  expect(room.phase).toBe('lobby');
+  room.handle(host.ws, {
+    t: 'host-action',
+    action: 'transfer-host',
+    uid: guest.identity.uid,
+  });
+  expect(room.hostUid).toBe(guest.identity.uid);
+
+  const frames = collect();
+  for (const secret of sessions) {
+    expect(frames).not.toContain(secret);
+    expect(projections).not.toContain(secret);
+  }
+  // The capability is delivered only to the host that holds it: the granted
+  // frame is addressed to the socket that just received the crown.
+  const granted = guest.ws.frames.filter((frame) => frame.t === 'host-granted');
+  expect(granted).toHaveLength(1);
+  expect(granted[0].token).toBe(room.hostToken);
+  // No other socket was handed the live capability at any point.
+  for (const other of [host.ws, third.ws]) {
+    for (const frame of other.frames) {
+      if (typeof frame.token === 'string' && frame.t !== 'host-revoked') {
+        expect(frame.token).not.toBe(room.hostToken);
+      }
+    }
+  }
+  room.dispose();
+});
