@@ -59,6 +59,79 @@ async function connectRoom() {
 const manualParty = await connectRoom();
 try {
   const course = page.holes[0];
+  // A guest in the same lobby is a real, connected member with its own session.
+  // Authorization to import is the crown's, not membership's: the guest must be
+  // refused even though every other part of the request is valid. The guest has
+  // to hold a live socket here, otherwise the "connected player" guard would
+  // reject it for the wrong reason and the host rule would go untested.
+  const guestIdentity = await post('/api/join', {
+    code: manualParty.r.code,
+    name: 'Catalog guest',
+  });
+  const guestSocket = new WebSocket(
+    base.replace('http', 'ws') + '/ws/party/' + manualParty.r.code,
+    { headers: { origin: base } },
+  );
+  await new Promise((resolve, reject) => {
+    guestSocket.onopen = resolve;
+    guestSocket.onerror = reject;
+  });
+  guestSocket.send(
+    JSON.stringify({ t: 'join', ...guestIdentity, protocol: 2, instance: 'catalog-guest' }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const guestAttempt = (overrides) =>
+    fetch(base + '/api/import', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        code: manualParty.r.code,
+        uid: guestIdentity.uid,
+        session: guestIdentity.session,
+        host: manualParty.r.hostToken,
+        id: course.id,
+        ...overrides,
+      }),
+    });
+  try {
+    assert.equal(
+      (await guestAttempt({})).status,
+      403,
+      'a connected guest may not import, even while holding the host capability',
+    );
+    assert.equal(
+      (
+        await guestAttempt({
+          uid: manualParty.j.uid,
+          session: guestIdentity.session,
+        })
+      ).status,
+      403,
+      "a guest's session may not stand in for the host's",
+    );
+  } finally {
+    guestSocket.close();
+  }
+  // The host mirroring the same request succeeds, so the refusal above is about
+  // who is asking rather than the request being malformed.
+  assert.equal(
+    (
+      await fetch(base + '/api/import', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          code: manualParty.r.code,
+          uid: manualParty.j.uid,
+          session: manualParty.j.session,
+          host: manualParty.r.hostToken,
+          id: course.id,
+        }),
+      })
+    ).status,
+    200,
+    'the host request must still be admitted',
+  );
+  console.log('PASS only the host may import, even with a valid identity and capability');
   await post('/api/import', {
     code: manualParty.r.code,
     uid: manualParty.j.uid,
