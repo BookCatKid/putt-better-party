@@ -4,6 +4,7 @@ import { currentDailyNumber, validateCourse } from './upstream/client-adapter.js
 import { createAdmin } from './admin.js';
 import { Room } from './room.js';
 import { readServerConfig } from './config.js';
+import { shutdownResources } from './shutdown.js';
 import { logEvent } from './event-log.js';
 import { RoomStore } from './room-store.js';
 import { courseIndex, courseCount, fetchPublicMap, prepareMatch } from './catalog.js';
@@ -549,13 +550,13 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
     },
   },
 });
-setInterval(() => {
+const tick = setInterval(() => {
   for (const room of rooms.values()) {
     room.tick();
   }
 }, 100);
 // Reclaim empty rooms, including never-joined rooms, after 30 minutes.
-setInterval(() => {
+const reclaim = setInterval(() => {
   for (const [code, room] of rooms) {
     if (
       ![...room.players.values()].some((player) => player.ws) &&
@@ -567,5 +568,45 @@ setInterval(() => {
     }
   }
 }, 60000);
+
+/**
+ * Stop accepting work, settle what is in flight, and release everything this
+ * process owns. The order lives in `shutdown.ts`, where it can be asserted; this
+ * function only supplies the real resources and decides the exit code.
+ */
+let shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  logEvent('server_stopping', { signal, rooms: rooms.size });
+  const result = await shutdownResources(
+    {
+      stopListener: () => server.stop(),
+      rooms: () => rooms.values(),
+      checkpoint: (room) => store.save(room),
+      disposeRoom: (room) => room.dispose(),
+      closeDatabase: () => store.close(),
+      cancelTimers: () => {
+        clearInterval(tick);
+        clearInterval(reclaim);
+      },
+      log: logEvent,
+    },
+    signal,
+  );
+  process.exit(result.ok ? 0 : 1);
+}
+// `SIGINT` is Ctrl-C and `SIGTERM` is what a service manager sends. Both mean
+// the same thing here, so both take the same path.
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    void shutdown(signal);
+    // A stuck step must not keep the process alive past the point where it is
+    // useful; the checkpoint above is the only thing that really matters.
+    setTimeout(() => process.exit(1), 10_000).unref();
+  });
+}
 logEvent('server_started', { hostname: config.hostname, port: config.port });
 console.log('Better Party local only:', server.url.href);
