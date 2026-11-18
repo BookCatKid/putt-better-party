@@ -4,7 +4,7 @@ The HTTP service exposes room creation, session issuance, catalog browsing and c
 
 ## Course selection
 
-Manual playlists contain public course IDs. Maps are fetched and validated from the public API as needed; no playable map is stored permanently. Random selection tracks per-room history and avoids repeats until the available pool is exhausted. The daily exclusion option refreshes the public featured-hole metadata at the beginning of each random match.
+Manual playlists contain public course IDs. Maps are fetched and validated from the public API as needed; no playable map is stored permanently. Random selection tracks per-room history and avoids repeats until the available pool is exhausted. The daily exclusion option refreshes every page of public featured-hole metadata at the beginning of each random match. Random selection draws only as many positions as are still needed and overlaps independent page reads, then processes their results in draw order. Every randomly selected specification must still pass the original validator before the match starts; manual playlists still load later holes on demand. Public catalog reads share a FIFO queue with at most three in-flight requests and a minimum 350 ms interval between starts. The interval is a local protective pacing choice, not a documented upstream rate limit.
 
 ## Room lifecycle
 

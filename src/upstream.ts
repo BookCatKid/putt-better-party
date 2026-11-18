@@ -1,12 +1,14 @@
 import { isRecord, type BrowseOptions, type CatalogPage, type PublicHole } from './domain.js';
 import { invokePublicFunction } from './upstream/client-adapter.js';
+import { PacedRequestQueue } from './upstream/request-queue.js';
 
 // Pinned, read-only server functions recovered from the original client.
 // The DETAIL POST retrieves a public hole; it does not mutate upstream data.
 const LIST_FUNCTION = 'f97883d5e5a6b99b27465e8906c5bb388ff1314417b2b803d49645320e231be7';
 const DETAIL_FUNCTION = 'fd5b893e239211c8e662cb5e9d4f489b73a752eaf01715a1a8c41808babe622d';
 const ORIGIN = 'https://putt.day';
-const REQUEST_INTERVAL_MS = 700;
+const REQUEST_INTERVAL_MS = 350;
+const MAX_ACTIVE_REQUESTS = 3;
 const CATALOG_CACHE_TTL_MS = 120_000;
 const PREVIEW_CACHE_TTL_MS = 300_000;
 const MAX_PREVIEW_BYTES = 2_000_000;
@@ -23,8 +25,7 @@ interface CacheEntry<Value> {
 
 const catalogCache = new Map<string, CacheEntry<CatalogPage>>();
 const listedCourses = new Map<string, PublicHole>();
-let requestQueue: Promise<void> = Promise.resolve();
-let lastRequestAt = 0;
+const requestQueue = new PacedRequestQueue(MAX_ACTIVE_REQUESTS, REQUEST_INTERVAL_MS);
 
 async function publicFetch(relative: string, options: RequestInit): Promise<Response> {
   const url = new URL(relative, ORIGIN);
@@ -43,10 +44,7 @@ async function publicFetch(relative: string, options: RequestInit): Promise<Resp
   headers.delete('authorization');
   headers.set('referer', ORIGIN + '/holes');
 
-  const fetchOne = async () => {
-    const delay = Math.max(0, REQUEST_INTERVAL_MS - Date.now() + lastRequestAt);
-    await new Promise((resolve) => setTimeout(resolve, delay));
-    lastRequestAt = Date.now();
+  return requestQueue.run(async () => {
     const response = await fetch(url, {
       ...options,
       headers,
@@ -57,14 +55,7 @@ async function publicFetch(relative: string, options: RequestInit): Promise<Resp
       throw new Error('Public catalog unavailable (HTTP ' + response.status + ')');
     }
     return response;
-  };
-
-  const pending = requestQueue.then(fetchOne);
-  requestQueue = pending.then(
-    () => {},
-    () => {},
-  );
-  return pending;
+  });
 }
 
 async function callPublicFunction(identifier: string, data: unknown): Promise<unknown> {
@@ -139,7 +130,9 @@ export async function browse({
   const promise = callPublicFunction(LIST_FUNCTION, options)
     .then(parseCatalogPage)
     .catch((error: unknown) => {
-      catalogCache.delete(key);
+      if (catalogCache.get(key)?.promise === promise) {
+        catalogCache.delete(key);
+      }
       throw error;
     });
   evictOldest(catalogCache, 128);

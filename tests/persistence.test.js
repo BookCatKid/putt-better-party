@@ -334,3 +334,34 @@ test('daily exclusion spans every page and prefers the newest listing over a cac
   expect(dailyRequests.map((player) => player.offset)).toEqual([0, 24]);
   expect(dailyRequests.every((player) => player.fresh === true)).toBe(true);
 });
+
+test('random selection overlaps only required catalog pages and retains the draw order', async () => {
+  const holes = Array.from({ length: 72 }, (_unused, index) => ({ id: 'hole' + index }));
+  const gate = Promise.withResolvers();
+  const requests = [];
+  const picks = [24, 47];
+  const selection = chooseRandom({
+    browse: async ({ offset }) => {
+      requests.push(offset);
+      if (offset !== 0) {
+        await gate.promise;
+      }
+      return {
+        total: holes.length,
+        holes: holes.slice(offset, offset + 24),
+        nextOffset: offset + 24 < holes.length ? offset + 24 : null,
+      };
+    },
+    count: 2,
+    pick: () => picks.shift(),
+  });
+  try {
+    await Bun.sleep(0);
+    expect(requests).toEqual([0, 24, 48]);
+  } finally {
+    gate.resolve();
+    await selection;
+  }
+  expect(await selection).toEqual({ ids: ['hole24', 'hole48'], seen: ['hole24', 'hole48'] });
+  expect(requests).toEqual([0, 24, 48]);
+});

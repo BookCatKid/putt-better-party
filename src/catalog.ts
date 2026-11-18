@@ -31,20 +31,24 @@ export function courseCount(): number {
   return courseEntries.size;
 }
 
-export async function fetchPublicMap(
-  id: string,
-  options?: { saved?: boolean },
-): Promise<PublicCourse> {
+async function retrievePublicMap(id: string, options?: { saved?: boolean }): Promise<PublicCourse> {
   const mapDetail = await detail(id, options);
   const specification = validateCourse(mapDetail.spec, mapDetail.title);
 
-  const course: PublicCourse = {
+  return {
     id: mapDetail.id,
     title: mapDetail.title,
     author: mapDetail.author || '',
     par: specification.par,
     spec: specification,
   };
+}
+
+export async function fetchPublicMap(
+  id: string,
+  options?: { saved?: boolean },
+): Promise<PublicCourse> {
+  const course = await retrievePublicMap(id, options);
   courseEntries.set(id, course);
   return course;
 }
@@ -71,15 +75,19 @@ export async function prepareMatch(
   // Manual playlists load future holes on demand; the random playlist is bounded.
   const manual = config.mapSource === MAP_SOURCE.PICKED;
   const initialIds = manual ? selectedIds.slice(0, 1) : selectedIds;
-  const fetchedCourses = new Map<string, PublicCourse>();
+  // The request queue limits concurrency globally. Wait for every required
+  // detail and retain the selected order even when responses finish out of
+  // order. A refused course still aborts preparation before a match starts.
+  const results = await Promise.allSettled(
+    initialIds.map((id) => retrievePublicMap(id, { saved: manual })),
+  );
   const specifications = [];
-
-  for (const id of initialIds) {
-    let course = fetchedCourses.get(id);
-    if (!course) {
-      course = await fetchPublicMap(id, { saved: manual });
-      fetchedCourses.set(id, course);
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      throw result.reason;
     }
+    const course = result.value;
+    courseEntries.set(course.id, course);
     specifications.push(structuredClone(course.spec));
   }
 

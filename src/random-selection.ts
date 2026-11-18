@@ -70,41 +70,52 @@ export async function chooseRandom({
   }
 
   const history = new Set(seen);
-  const pages = new Map<number, CatalogPage>([[0, firstPage]]);
+  const pages = new Map<number, Promise<CatalogPage>>([[0, Promise.resolve(firstPage)]]);
   const selectedIds: string[] = [];
   const availablePositions = Array.from({ length: total }, (_unused, index) => index);
   const deferredIds: string[] = [];
 
   while (selectedIds.length < count && availablePositions.length) {
-    const position = availablePositions.splice(pick(availablePositions.length), 1)[0];
-    const offset = Math.floor(position / PAGE_SIZE) * PAGE_SIZE;
-
-    let page = pages.get(offset);
-    if (!page) {
-      page = await getPage(offset);
-      pages.set(offset, page);
-    }
-    const hole = page.holes[position - offset];
-    const id = hole?.id;
-    if (!id) {
-      continue;
-    }
-    const scheduledDay = hole.scheduledDay;
-    const wasFeatured =
-      typeof scheduledDay === 'number' &&
-      Number.isFinite(scheduledDay) &&
-      scheduledDay <= currentDay;
-    if (excludeDaily && (excluded.has(id) || wasFeatured)) {
-      continue;
-    }
-    if (selectedIds.includes(id) || deferredIds.includes(id)) {
-      continue;
-    }
-    if (history.has(id)) {
-      deferredIds.push(id);
-    } else {
-      selectedIds.push(id);
-      history.add(id);
+    // Draw no more positions than we still need. Even if every draw is
+    // eligible, none would be skipped by the original sequential algorithm.
+    // Fetch distinct required pages together, then process draws in order.
+    const drawCount = Math.min(count - selectedIds.length, availablePositions.length);
+    const positions = Array.from({ length: drawCount }, () => {
+      return availablePositions.splice(pick(availablePositions.length), 1)[0];
+    });
+    const holes = await Promise.all(
+      positions.map(async (position) => {
+        const offset = Math.floor(position / PAGE_SIZE) * PAGE_SIZE;
+        let page = pages.get(offset);
+        if (!page) {
+          page = getPage(offset);
+          pages.set(offset, page);
+        }
+        return (await page).holes[position - offset];
+      }),
+    );
+    for (const hole of holes) {
+      const id = hole?.id;
+      if (!id) {
+        continue;
+      }
+      const scheduledDay = hole.scheduledDay;
+      const wasFeatured =
+        typeof scheduledDay === 'number' &&
+        Number.isFinite(scheduledDay) &&
+        scheduledDay <= currentDay;
+      if (excludeDaily && (excluded.has(id) || wasFeatured)) {
+        continue;
+      }
+      if (selectedIds.includes(id) || deferredIds.includes(id)) {
+        continue;
+      }
+      if (history.has(id)) {
+        deferredIds.push(id);
+      } else {
+        selectedIds.push(id);
+        history.add(id);
+      }
     }
   }
 

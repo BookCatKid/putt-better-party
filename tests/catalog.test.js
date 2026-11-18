@@ -522,3 +522,77 @@ test('a blank or whitespace title is a missing identity, refused at the boundary
     expect(catalog.courseIndex.has('untitled-course')).toBe(false);
   }
 });
+
+test('random course details overlap but every specification retains its selected position', async () => {
+  const gates = [Promise.withResolvers(), Promise.withResolvers(), Promise.withResolvers()];
+  const requested = [];
+  const catalog = await catalogWith({
+    list: async ({ daily }) =>
+      daily
+        ? { holes: [], total: 0, offset: 0, nextOffset: null }
+        : {
+            holes: [1, 2, 3].map((number) => ({
+              id: 'parallel-' + number,
+              title: 'Course ' + number,
+            })),
+            total: 3,
+            offset: 0,
+            nextOffset: null,
+          },
+    detail: async (id) => {
+      const index = requested.push(id) - 1;
+      await gates[index].promise;
+      return { id, public: true, title: id, spec: courseSpec() };
+    },
+  });
+  const preparation = catalog.prepareMatch(
+    { ...pickedConfig([]), mapSource: 'random', holes: 3, randomHoles: 3, excludeDaily: true },
+    [],
+  );
+  try {
+    await Bun.sleep(0);
+    expect(requested).toHaveLength(3);
+    gates[2].resolve();
+    gates[1].resolve();
+    await Bun.sleep(0);
+    // Later answers cannot publish a partial, out-of-order match.
+    expect(catalog.courseIndex.has(requested[2])).toBe(false);
+  } finally {
+    gates.forEach((gate) => gate.resolve());
+    await preparation;
+  }
+  const prepared = await preparation;
+  expect(prepared.ids).toEqual(requested);
+  expect(prepared.specs.map((specification) => specification.name)).toEqual(requested);
+  expect(validation.requests).toHaveLength(3);
+});
+
+test('a random match still refuses a withdrawn course even when other details succeed', async () => {
+  const requested = [];
+  const catalog = await catalogWith({
+    list: async ({ daily }) =>
+      daily
+        ? { holes: [], total: 0, offset: 0, nextOffset: null }
+        : {
+            holes: [1, 2].map((number) => ({
+              id: 'withdrawn-test-' + number,
+              title: 'Course ' + number,
+            })),
+            total: 2,
+            offset: 0,
+            nextOffset: null,
+          },
+    detail: async (id) => {
+      requested.push(id);
+      return { id, public: requested.length !== 1, title: id, spec: courseSpec() };
+    },
+  });
+  await expect(
+    catalog.prepareMatch(
+      { ...pickedConfig([]), mapSource: 'random', holes: 2, randomHoles: 2, excludeDaily: true },
+      [],
+    ),
+  ).rejects.toThrow('Map is unavailable or not public');
+  expect(requested).toHaveLength(2);
+  expect(requested.every((id) => !catalog.courseIndex.has(id))).toBe(true);
+});
