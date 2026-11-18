@@ -1,0 +1,40 @@
+# Nothing that is not this project's own source belongs in an image build context.
+#
+# The proprietary client assets are the important entry here. `private-client/` is
+# the archived original game client and `web/` is its prepared derivative; both are
+# excluded so they can never be copied by a `COPY` that forgot to be specific, and
+# the send to the daemon stays small. The runtime mounts the prepared client
+# instead, which is why the image has an empty `web/`.
+private-client/
+web/
+maps/
+captures/
+state/
+.env
+.env.*
+
+# Build tooling and its caches. None of it is needed to run the service, and
+# `node_modules` in particular would add ~100 MB (and, at 97% disk on the host this
+# was verified on, would simply not fit).
+node_modules/
+.ruff_cache/
+__pycache__/
+
+# Development-only material.
+tests/
+docs/
+.github/
+.git/
+.githooks/
+*.log
+*.pid
+*.proof.png
+*.png
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.har
+
+# Editor and OS noise.
+.DS_Store
+*.swp

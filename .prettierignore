@@ -9,4 +9,9 @@ node_modules/
 *.sqlite*
 bun.lock
 
-.ruff_cache/
+*.ruff_cache/
+
+# No Prettier parser exists for these, and naming them keeps an explicit
+# `prettier --check <file>` from failing on something it cannot format.
+Dockerfile
+.dockerignore

@@ -325,3 +325,129 @@ The first should show HSTS and the permissions policy, the second should report
 `ok`, and the third should be refused because only the proxy may talk to the
 port. A `403` on the third is the check that the proxy is authoritative rather
 than decorative.
+
+## Running in a container
+
+`Dockerfile` and `docker-compose.yml` build a runtime image and run the service
+as a non-root user with a read-only filesystem. Both were built and run on an
+`aarch64` Ubuntu 24.04 host to confirm the architecture claim below.
+
+### Why the client is not in the image
+
+This is the detail that matters most, and it is also the one most likely to be
+"simplified" by someone who has not read the licensing position. The service
+serves a client derived from the original game's bundles. Those bundles are
+archived in `private-client/` and are **not independently licensed**, so an image
+containing them would make every pull of that image a redistribution.
+
+The image therefore carries this project's own source and nothing else. The
+build verified this directly: `/app/web` and `/app/private-client` contain **zero
+files** in the finished image, and `/app/private-client` does not exist at all
+unless it is mounted. The prepared client and the three original bundles are bind
+mounts.
+
+Those three bundles are needed because the server's upstream adapter imports them
+directly by relative path — `date-*.js` and `createServerFn-*.js`, the latter
+pulling in `redirect-*.js`. Without them the process does not start, and the
+error names the missing module rather than failing obscurely:
+
+```
+error: Cannot find module '../../web/validation/specValidation-vqop-JBL.js'
+```
+
+That is deliberate: an image missing its mount fails at startup instead of
+serving a broken page.
+
+### Prepare the host
+
+```sh
+sudo mkdir -p /srv/party/state /srv/party/web /srv/party/private-client/assets
+sudo chown -R 10001:10001 /srv/party/state
+```
+
+`10001` is the runtime user, fixed numerically so a data directory prepared once
+does not need re-chowning after a rebuild. Only `state` is writable by it;
+`web` and the archived bundles are read-only.
+
+The prepared client needs the generated validation closure as well as the
+patched bundles, because the adapter imports from `web/validation`. The supported
+way to produce the whole thing is `bun run prepare:client`, which fails offline
+rather than fetching anything and verifies every archived hash first. Copy the
+resulting `web/` and the three bundled files above into the mount points.
+
+### Run
+
+```sh
+docker compose up -d --build
+```
+
+Set `PARTY_PORT` if something already holds 8789, which on a busy host is often
+a proxy:
+
+```sh
+PARTY_PORT=8797 docker compose up -d
+```
+
+Without compose, the equivalent:
+
+```sh
+docker build -t better-party:local .
+docker run -d --name party \
+  --read-only \
+  --mount type=bind,src=/srv/party/state,dst=/app/state \
+  --mount type=bind,src=/srv/party/web,dst=/app/web,readonly \
+  --mount type=bind,src=/srv/party/private-client/assets,dst=/app/private-client/assets,readonly \
+  -p 127.0.0.1:8789:8789 \
+  better-party:local
+```
+
+### What was verified
+
+Run through compose on the ARM64 host, against a prepared client mounted
+read-only:
+
+- The container reaches **healthy** on its own health check.
+- It serves a real page and a real client asset (`200`), and the client scripts
+  are transpiled from their TypeScript sources at request time inside the
+  container, so the image does not need a build step for them.
+- With `BP_PUBLIC_ORIGIN` set, a loopback `Host` is refused with `403` and the
+  public one gets `200`, so the proxy remains authoritative.
+- `strict-transport-security`, `permissions-policy` and `x-frame-options` are
+  all present.
+- The root filesystem is read-only: writing to `/app/src` and `/app/web` fails
+  with `Read-only file system`, while `/app/state` is writable. The writable
+  surface is exactly the one directory that needs it.
+- A room created inside the container is written to the host mount as `0600`
+  files.
+- `docker stop` takes the ordered shutdown path: exit code `0`, and the
+  41232-byte write-ahead log is folded into a 24576-byte main file with no `-wal`
+  left behind. Restarting the container restores that room from the mount.
+
+### The health check
+
+`scripts/container-health.js` runs inside the container, because `curl` is not in
+the runtime image. It is not a plain `fetch('/health')`: the service refuses any
+request whose `Host` is not configured, so a probe sending `127.0.0.1` would get
+`403` from a perfectly healthy proxied deployment. The probe derives `Host` from
+`BP_PUBLIC_ORIGIN` when set and falls back to loopback otherwise. Verified in
+three states: `0` when healthy, `0` on a local run, and `1` both when the server
+is down and when a proxied deployment is probed with the wrong `Host`.
+
+### Architecture
+
+The image is `linux/arm64` when built on the ARM64 host and `linux/amd64` when
+built on x86. Nothing in it is architecture specific — there are no compiled
+addons, no native modules and no runtime npm dependencies at all, since every
+import is relative or a `bun:`/`node:` builtin. The base is `oven/bun:1.4.2-alpine`
+at a pinned tag, which is the only version pin that matters here precisely
+because there is no dependency tree to freeze.
+
+### Least privilege
+
+The process runs as uid/gid `10001`, the filesystem is read-only apart from one
+mounted directory, `no-new-privileges` is set in the compose file, and `EXPOSE`
+publishes nothing on its own — the compose port is bound to `127.0.0.1` so a TLS
+proxy is still required to reach it. Use the exec form of `CMD` (as the
+Dockerfile does) so the process is PID 1 and receives `SIGTERM` directly; a shell
+wrapper would swallow the signal and the ordered shutdown would run into its
+timeout instead.

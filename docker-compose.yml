@@ -1,0 +1,74 @@
+# A local or single-host deployment of the party service as a container.
+#
+# The two bind mounts are the point of this file, not boilerplate. The image
+# deliberately carries no client assets, because they are original game material
+# that is not independently licensed; the prepared client is prepared on the host
+# and mounted read-only. See `docs/operations.md`.
+#
+#   docker compose up -d --build
+#
+# The published host port defaults to 8789; set `PARTY_PORT` to move it, which
+# matters on a host where something else (often a proxy) already holds 8789:
+#
+#   PARTY_PORT=8797 docker compose up -d
+#
+# Before the first run, create the host directories and give them to the
+# container's user, which is uid 10001:
+#
+#   sudo mkdir -p /srv/party/state /srv/party/web /srv/party/private-client/assets
+#   sudo chown -R 10001:10001 /srv/party/state
+#
+services:
+  party:
+    build: .
+    image: better-party:local
+    restart: unless-stopped
+    # The process needs to write one database and one optional event log. Nothing
+    # else in the filesystem is writable, so a compromised request cannot alter
+    # code or assets.
+    read_only: true
+    # A small tmpfs for anything that insists on a temp file. The server itself
+    # writes none, but this keeps `read_only` from breaking an unexpected path.
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    # The service writes only to `/app/state`, so the writable surface is one
+    # directory that the operator controls and can back up.
+    volumes:
+      - /srv/party/state:/app/state
+      # The prepared client and the original bundles the adapter imports. Both
+      # read-only: the server never writes to either.
+      - /srv/party/web:/app/web:ro
+      - /srv/party/private-client/assets:/app/private-client/assets:ro
+    ports:
+      # Published on loopback only. Put a TLS-terminating proxy in front, which
+      # is what makes this an HTTPS deployment; see the operations guide. The
+      # host port is configurable so a trial run does not collide with whatever
+      # already listens on 8789, which on a busy host is often a proxy.
+      - '127.0.0.1:${PARTY_PORT:-8789}:8789'
+    environment:
+      # A public origin is what makes a proxy authoritative and enables HSTS.
+      # Replace it, or remove it for a purely local run.
+      BP_PUBLIC_ORIGIN: 'https://party.example.com'
+      BP_EVENT_LOG: /app/state/events/gameplay.jsonl
+      # Generate with:
+      #   bun -e "console.log(await Bun.password.hash(process.argv[1]))" 'password'
+      # BP_ADMIN_PASSWORD_HASH: ''
+    # Drop everything not needed. The server opens no privileged ports, creates
+    # no devices and needs no new privileges beyond what Docker grants by default.
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ['CMD', 'bun', '/app/scripts/container-health.js']
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    # Give the ordered shutdown room to checkpoint every room before the container
+    # is killed. The service's own path is well under a second for a normal room
+    # count, so this is a ceiling rather than an expectation.
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
