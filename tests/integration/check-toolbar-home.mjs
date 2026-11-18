@@ -113,6 +113,11 @@ try {
   await setNumber('Holes', 7);
   await expect('s.config.holes===7');
   const code = await client.evalJS(`(async()=>${state}.code)()`);
+  // The toolbar is behind the lobby dashboard, which is a blocking overlay by
+  // design, so "Back to home" is only reachable once the party is running. Start
+  // it first; the settings below are what the resume path has to bring back.
+  await click('Start party');
+  await expect('s.phase==="playing"&&s.mapReady');
   assert.equal(
     await client.evalJS(
       '[...document.querySelectorAll("a,button")].filter(x=>x.getAttribute("aria-label")==="Back to home").length',

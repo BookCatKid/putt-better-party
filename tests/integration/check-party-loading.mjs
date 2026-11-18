@@ -78,7 +78,7 @@ try {
   );
   await waitFor(
     client,
-    '!document.querySelector(".bp-party-loading") && !!document.querySelector(".bp-lobby")',
+    '!document.querySelector(".bp-party-loading") && !!document.querySelector(".bp-dashboard-overlay")',
   );
   assert.equal(
     await client.evalJS(

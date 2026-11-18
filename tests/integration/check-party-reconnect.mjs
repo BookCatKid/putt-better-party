@@ -25,9 +25,11 @@ const monitorSockets = {
 };
 
 async function waitForLobby(client) {
+  // `.bp-lobby` is not in the built client; the lobby the pinned bundle renders
+  // is the dashboard overlay inside the scene.
   await waitFor(
     client,
-    '!!document.querySelector(".bp-lobby") && !document.querySelector(".bp-party-loading")',
+    '!!document.querySelector(".bp-dashboard-overlay") && !document.querySelector(".bp-party-loading")',
     30000,
   );
 }

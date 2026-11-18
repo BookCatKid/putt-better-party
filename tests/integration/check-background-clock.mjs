@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { connect, waitFor, pause } from './cdp.mjs';
+import { closePlaylistEditor, openPlaylistEditor } from './playlist-editor.mjs';
 
 /**
  * Background simulation on a version 2 course.
@@ -88,11 +89,13 @@ try {
   await page.evalJS(
     `(()=>{let x=document.querySelector("select[aria-label='Party map selection']");x.value="picked";x.dispatchEvent(new Event("change",{bubbles:true}));})()`,
   );
+  await openPlaylistEditor(page);
   const addFirst =
     '[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add "))';
   await waitFor(page, '!!' + addFirst, 25000);
   await page.evalJS(addFirst + '.click()');
   await waitFor(page, `(async()=>${store}.config.selectedHoleIds?.length===1)()`);
+  await closePlaylistEditor(page);
   await page.evalJS(
     '(async()=>{(await import("/assets/runtime-DL2fiDAQ.js")).D({timerMs:120000,elimination:false})})()',
   );

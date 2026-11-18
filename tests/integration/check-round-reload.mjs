@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { connect, waitFor, pause } from './cdp.mjs';
+import { closePlaylistEditor, openPlaylistEditor } from './playlist-editor.mjs';
 
 /**
  * A full page reload during an active round.
@@ -84,9 +85,11 @@ try {
   );
   const addFirst =
     '[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add "))';
+  await openPlaylistEditor(host);
   await waitFor(host, '!!' + addFirst, 25000);
   await host.evalJS(addFirst + '.click()');
   await expectState(host, 's.config.selectedHoleIds?.length===1');
+  await closePlaylistEditor(host);
   await host.evalJS(
     '(async()=>{(await import("/assets/runtime-DL2fiDAQ.js")).D({timerMs:90000,elimination:false})})()',
   );

@@ -7,9 +7,13 @@ const client = await connect(targets.find((target) => target.type === 'page'));
 const partyState = '(await import("/assets/runtime-DL2fiDAQ.js")).E.state';
 
 async function waitForLobby() {
+  // The lobby the pinned bundle renders is the dashboard overlay inside the
+  // scene; `.bp-lobby` was an older container and is not in the built client, so
+  // waiting for it waits forever. The loading screen has to be gone as well,
+  // because the dashboard is already mounted underneath it while it loads.
   await waitFor(
     client,
-    '!!document.querySelector(".bp-lobby") && !document.querySelector(".bp-party-loading")',
+    '!!document.querySelector(".bp-dashboard-overlay") && !document.querySelector(".bp-party-loading")',
   );
 }
 

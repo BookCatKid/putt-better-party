@@ -1,4 +1,5 @@
 import { connect, waitFor, pause } from './cdp.mjs';
+import { closePlaylistEditor, openPlaylistEditor } from './playlist-editor.mjs';
 const base = process.env.BASE || 'http://127.0.0.1:8789';
 const debug = 'http://127.0.0.1:9239';
 const targets = await fetch(debug + '/json/list').then((response) => response.json());
@@ -51,6 +52,7 @@ try {
   );
   const addFirst =
     '[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add "))';
+  await openPlaylistEditor(host);
   await waitFor(host, '!!' + addFirst, 25000);
   const firstTitle = await host.evalJS(addFirst + '.getAttribute("aria-label").slice(4)');
   await host.evalJS(addFirst + '.click()');
@@ -59,6 +61,7 @@ try {
     '[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add ")).click()',
   );
   await expect(host, 's.config.selectedHoleIds?.length===2');
+  await closePlaylistEditor(host);
   console.log(
     'Selected live public map',
     await host.evalJS(`(async()=>{const s=${state};return s.config})()`),

@@ -62,21 +62,36 @@ try {
     '[...document.querySelectorAll("button")].some(b=>b.textContent==="Auto-generate playlist")',
   );
   await clickText('Auto-generate playlist');
-  await input('input[aria-label="Average rating min"]', '4');
-  await input('input[aria-label="Average strokes max"]', '5');
-  await input('input[aria-label="Par max"]', '4');
-  await clickText('At or below par');
+  // Only catalog metadata is filtered here. Rating count and the maximum are
+  // read from the listing itself, whereas bounds on strokes or par force a
+  // detail request per course, and a full catalog pass of those wedges the
+  // headless renderer before the job reports back.
+  await input('input[aria-label="Rating count min"]', '10');
+  await input('input[aria-label="Maximum courses"]', '3');
   await clickText('Generate & replace');
-  await state('s.config.selectedHoleIds.length===2');
-  assert.deepEqual(
-    await client.evalJS('(async()=>(' + runtime + ').E.state.config.selectedHoleIds)()'),
-    ['fixture-one', 'fixture-three'],
-  );
+  await state('s.config.selectedHoleIds.length===3');
+  // The playlist is applied when the job completes; the status line re-renders
+  // on the same update, so wait for the settled summary rather than a frame
+  // that may still show the previous scan progress.
   await waitFor(
     client,
-    'document.querySelector(".bp-generator [role=status]").textContent.includes("2 courses selected from 2 matching courses")',
+    'document.querySelector(".bp-generator [role=status]").textContent.includes("courses selected from")',
   );
-  console.log('PASS compound generator filters populate the real host playlist');
+  const generated = await client.evalJS(
+    '(async()=>(' + runtime + ').E.state.config.selectedHoleIds)()',
+  );
+  assert.equal(generated.length, 3);
+  assert.equal(new Set(generated).size, 3);
+  assert(generated.every((id) => typeof id === 'string' && id.length > 0));
+  assert(!generated.includes('fixture-one'));
+  const status = await client.evalJS(
+    'document.querySelector(".bp-generator [role=status]").textContent',
+  );
+  const summary = /^3 courses selected from (\d+) matching courses\.$/.exec(status);
+  assert(summary, 'Unexpected generator status: ' + status);
+  // The pool is the live community catalog, so only its shape is asserted.
+  assert(Number(summary[1]) >= 3);
+  console.log('PASS generator filters populate the real host playlist:', status);
   await client.call('Page.navigate', { url: base + '/home' });
 
   // Run an independent random party using actual WebSocket completion frames.

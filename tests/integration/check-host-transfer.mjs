@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { connect, waitFor } from './cdp.mjs';
+import { closePlaylistEditor, openPlaylistEditor } from './playlist-editor.mjs';
 
 // Proves host hand-over in real clients: the host picks a player from the party
 // controls mid-match, both clients learn about it immediately, the new host can
@@ -84,11 +85,14 @@ try {
   await host.evalJS(
     `(()=>{let x=document.querySelector("select[aria-label='Party map selection']");x.value="picked";x.dispatchEvent(new Event("change",{bubbles:true}));})()`,
   );
+  await openPlaylistEditor(host);
   await waitFor(host, addButtons + '.length>=1', 25000);
   await host.evalJS(`${addButtons}[0].click()`);
   await expect(host, 's.config.selectedHoleIds?.length===1', 20000);
   const originalCapability = await capabilityOf(host);
   assert.equal(typeof originalCapability, 'string');
+
+  await closePlaylistEditor(host);
 
   await host.evalJS(
     '[...document.querySelectorAll("button")].find(x=>x.textContent==="Start party").click()',

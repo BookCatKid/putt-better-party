@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { connect, waitFor } from './cdp.mjs';
+import { closePlaylistEditor, openPlaylistEditor } from './playlist-editor.mjs';
 
 // Renders every match transition against delayed packets: the guest tab holds
 // the next hole's snapshots after the results screen appears and holds the
@@ -153,6 +154,7 @@ try {
   await host.evalJS(
     `(()=>{let x=document.querySelector("select[aria-label='Party map selection']");x.value="picked";x.dispatchEvent(new Event("change",{bubbles:true}));})()`,
   );
+  await openPlaylistEditor(host);
   await waitFor(host, addButtons + '.length>=2', 25000);
   await addCourse(host, 0, 1);
   const firstTitle = await host.evalJS(addButtons + '[0].getAttribute("aria-label").slice(4)');
@@ -160,6 +162,7 @@ try {
   await addCourse(host, 1, 2);
   const secondTitle = await host.evalJS(addButtons + '[1].getAttribute("aria-label").slice(4)');
   assert.notEqual(firstTitle, secondTitle);
+  await closePlaylistEditor(host);
   await host.evalJS(
     '[...document.querySelectorAll("button")].find(x=>x.textContent==="Start party").click()',
   );

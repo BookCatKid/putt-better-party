@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { connect, waitFor } from './cdp.mjs';
+import { closePlaylistEditor, openPlaylistEditor } from './playlist-editor.mjs';
 
 // Exercises the recoverable next-course failure against the real client: the
 // server is started with BP_TEST_FAIL_MAP_FETCH_CALL=1 so the first lazy load
@@ -107,11 +108,13 @@ try {
   );
   const addFirst =
     '[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add "))';
+  await openPlaylistEditor(host);
   await waitFor(host, '!!' + addFirst, 25000);
   await host.evalJS(addFirst + '.click()');
   await expect(host, 's.config.selectedHoleIds?.length===1');
   await host.evalJS(addFirst + '.click()');
   await expect(host, 's.config.selectedHoleIds?.length===2');
+  await closePlaylistEditor(host);
   await host.evalJS(
     '[...document.querySelectorAll("button")].find(x=>x.textContent==="Start party").click()',
   );

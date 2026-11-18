@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { connect, waitFor } from './cdp.mjs';
+import { closePlaylistEditor, openPlaylistEditor } from './playlist-editor.mjs';
 
 // Proves that a client still loading its level does not eat into the round:
 // the guest's renderer readiness frame is held back by several seconds, and the
@@ -125,8 +126,10 @@ try {
   await host.evalJS(
     `(()=>{let x=document.querySelector("select[aria-label='Party map selection']");x.value="picked";x.dispatchEvent(new Event("change",{bubbles:true}));})()`,
   );
+  await openPlaylistEditor(host);
   await waitFor(host, addButtons + '.length>=1', 25000);
   await addCourse(host, 0, 1);
+  await closePlaylistEditor(host);
   await host.evalJS(
     '[...document.querySelectorAll("button")].find(x=>x.textContent==="Start party").click()',
   );

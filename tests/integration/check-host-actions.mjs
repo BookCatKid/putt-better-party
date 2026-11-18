@@ -1,4 +1,5 @@
 import { connect, waitFor } from './cdp.mjs';
+import { closePlaylistEditor, openPlaylistEditor } from './playlist-editor.mjs';
 import assert from 'node:assert/strict';
 const base = process.env.BASE || 'http://127.0.0.1:8789';
 const debug = 'http://127.0.0.1:9239';
@@ -59,6 +60,7 @@ try {
   await client.evalJS(
     '(()=>{let x=document.querySelector("[aria-label=\\"Party map selection\\"]");x.value="picked";x.dispatchEvent(new Event("change",{bubbles:true}));})()',
   );
+  await openPlaylistEditor(client);
   await waitFor(client, 'document.querySelectorAll(".bp-catalog-scroll li img").length>=24');
   await waitFor(
     client,
@@ -82,6 +84,7 @@ try {
     '(async()=>{(await import("/assets/runtime-DL2fiDAQ.js")).D({timerMs:60000,elimination:false})})()',
   );
   await expect('!s.config.elimination');
+  await closePlaylistEditor(client);
   await click('Start party');
   await expect('s.phase==="playing"&&s.mapReady');
   const rect = await client.evalJS(

@@ -1,4 +1,5 @@
 import { connect, waitFor } from './cdp.mjs';
+import { closePlaylistEditor, openPlaylistEditor } from './playlist-editor.mjs';
 import assert from 'node:assert/strict';
 const base = process.env.BASE || 'http://127.0.0.1:8789';
 const debug = 'http://127.0.0.1:9239';
@@ -59,6 +60,7 @@ try {
   );
   const add =
     '[...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add "))';
+  await openPlaylistEditor(client);
   await waitFor(client, '!!' + add);
   const title = await client.evalJS(add + '.getAttribute("aria-label").slice(4)');
   await waitFor(
@@ -70,6 +72,7 @@ try {
   await expect('s.config.selectedHoleIds.length===1');
   await client.evalJS(add + '.click()');
   await expect('s.config.selectedHoleIds.length===2');
+  await closePlaylistEditor(client);
   await client.evalJS(
     '(async()=>{(await import("/assets/runtime-DL2fiDAQ.js")).D({timerMs:20000,elimination:false})})()',
   );
