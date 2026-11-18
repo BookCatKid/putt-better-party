@@ -1162,3 +1162,41 @@ test('a player is preferred to a spectator, who is a last resort rather than nob
   expect(room.hostUid).toBe(spectator.identity.uid);
   room.dispose();
 });
+
+test('a completion from the finished attempt cannot score the restarted one', async () => {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const host = enter(room, 'Host', true);
+  const guest = enter(room, 'Guest');
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p'], elimination: false },
+  });
+  room.handle(host.ws, { t: 'start' });
+  await delay(12);
+  const firstMatch = room.matchId;
+  room.handle(host.ws, { f: 1, s: 2, p: 3, matchId: firstMatch, holeIndex: 0 });
+  room.handle(host.ws, {
+    t: 'host-action',
+    action: 'restart',
+    matchId: firstMatch,
+    holeIndex: 0,
+  });
+  expect(room.matchId).not.toBe(firstMatch);
+  expect(room.phase).toBe('countdown');
+  // Let the restarted countdown finish so the round is genuinely playable: the
+  // only thing that can still reject the stale packet is its round identity.
+  await delay(12);
+  expect(room.phase).toBe('playing');
+  // A client that had already holed out replays its completion for the previous
+  // attempt. The restarted hole has not been played, so this must be ignored:
+  // otherwise the stale result would score the new attempt before it begins.
+  room.handle(guest.ws, { f: 1, s: 1, p: 3, matchId: firstMatch, holeIndex: 0 });
+  expect(guest.player.done).toBe(false);
+  expect(guest.player.strokes).toBe(0);
+  expect(guest.player.success).toBe(false);
+  // The current attempt is still accepted.
+  room.handle(guest.ws, { f: 1, s: 4, p: 3, matchId: room.matchId, holeIndex: 0 });
+  expect(guest.player.done).toBe(true);
+  expect(guest.player.strokes).toBe(4);
+  room.dispose();
+});

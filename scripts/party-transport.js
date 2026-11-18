@@ -71,6 +71,9 @@ function connectBetterParty(code, identity, options = {}) {
   let forfeitSent = false;
   let roundChangePending = false;
   let sawMapReadyFalse = false;
+  // The attempt sequence the game store held when the round changed. A new
+  // attempt has to advance it before progress may be reported again.
+  let attemptAtRoundChange = null;
   let announcedSceneKey = '';
   // A socket can be half-open: the peer is gone but no close event ever arrives,
   // so sends keep "succeeding" into the void. Counting unanswered heartbeats is
@@ -171,9 +174,19 @@ function connectBetterParty(code, identity, options = {}) {
   function freshAttemptConfirmed() {
     const party = bind.partyStore.state;
     const game = bind.gameStore.state;
-    return (
-      !!party.currentMap?.id && party.mapReady === true && game.level?.id === party.currentMap.id
-    );
+    if (
+      !party.currentMap?.id ||
+      party.mapReady !== true ||
+      game.level?.id !== party.currentMap.id
+    ) {
+      return false;
+    }
+    // A restart or a repeat of the same course reuses the very same course
+    // identifier, so the level ID cannot prove that the renderer installed a new
+    // attempt: the game store may still hold the previous attempt, finished and
+    // complete. Installing a level advances the attempt sequence exactly once,
+    // so an unchanged sequence means the stale attempt is still in place.
+    return typeof game.attemptSeq !== 'number' || game.attemptSeq !== attemptAtRoundChange;
   }
 
   function observePartyState() {
@@ -218,6 +231,11 @@ function connectBetterParty(code, identity, options = {}) {
       hadRound && (!sameRound || (message.phase === 'lobby' && previous.phase !== 'lobby'));
     if (roundChanged) {
       roundChangePending = true;
+      // Remember which attempt was live when the round changed, so the fresh
+      // attempt can be told apart from the stale one even when the course is
+      // identical.
+      const sequence = bind.gameStore.state.attemptSeq;
+      attemptAtRoundChange = typeof sequence === 'number' ? sequence : null;
       if (bind.partyStore.state.mapReady !== true) {
         sawMapReadyFalse = true;
       }

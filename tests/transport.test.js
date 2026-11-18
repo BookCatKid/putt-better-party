@@ -128,7 +128,10 @@ function fakeEnvironment(clockOptions = {}) {
     count: 0,
     roster: [],
   });
-  const gameStore = fakeStore({ strokes: 0, phase: 'aiming', level: null });
+  // The upstream game store always carries an attempt sequence: installing a
+  // level advances it, so the transport can tell a fresh attempt from a stale
+  // one even when the course identifier is identical.
+  const gameStore = fakeStore({ strokes: 0, phase: 'aiming', level: null, attemptSeq: 0 });
   const settingsStore = fakeStore({ ghosts: true });
   const scene = { ballPos: { x: 1, y: 0, z: 2 }, pointer: { x: 0, z: 0, active: false } };
   const log = { connection: [], identity: [], errors: [], finals: [], acks: [], hostTokens: [] };
@@ -543,11 +546,12 @@ test('completion is not retransmitted when the round changed during the disconne
   // No completion may be sent from the stale game state.
   expect(socket.sent.some((frame) => frame.f === 1)).toBe(false);
   // The route reloads: map readiness clears, the new level loads and readiness
-  // returns with a fresh game state. Still no stale completion.
+  // returns with a fresh game state. Installing the new level advances the
+  // attempt sequence, which is what proves the stale attempt is gone.
   env.partyStore.setState({ mapReady: false });
   env.gameStore.setState({ level: { id: 'next' }, strokes: 0, phase: 'aiming', result: undefined });
   env.partyStore.setState({ mapReady: true });
-  env.gameStore.setState({ strokes: 1 });
+  env.gameStore.setState({ strokes: 1, attemptSeq: 1 });
   expect(socket.sent.some((frame) => frame.f === 1)).toBe(false);
   expect(socket.sent.some((frame) => frame.t === 'prog')).toBe(true);
   dispose();
@@ -954,5 +958,63 @@ test('a disconnect during the results phase settles rather than replaying the ho
   env.gameStore.setState({ strokes: 0, phase: 'aiming', result: undefined });
   expect(socket.sent.filter((frame) => frame.f === 1).length).toBe(0);
   expect(socket.sent.some((frame) => frame.t === 'forfeit')).toBe(false);
+  dispose();
+});
+
+test('a restart of the same course does not let the finished attempt report again', () => {
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const socket = env.WebSocket.sockets[0];
+  handshake(env, socket);
+  // The player holes out on hole 0 of course `p`.
+  env.gameStore.setState({
+    level: { id: 'p' },
+    strokes: 2,
+    phase: 'holed',
+    result: { strokes: 2, par: 3 },
+  });
+  expect(socket.sent.filter((frame) => frame.f === 1).length).toBe(1);
+
+  // The host restarts the hole. A restart mints a new match identity but keeps
+  // the very same course, so the map ID alone cannot tell the two attempts apart.
+  socket.message({
+    t: 'party',
+    matchId: 'm2',
+    holeIndex: 0,
+    phase: 'countdown',
+    holeIds: ['p'],
+    currentMap: { id: 'p' },
+  });
+  // The route reloads the identical course: readiness clears, the renderer tears
+  // the old level down, and readiness returns before the fresh attempt is
+  // installed. The game store therefore still holds the finished attempt.
+  env.partyStore.setState({ mapReady: false });
+  env.gameStore.setState({ strokes: 2 });
+  env.partyStore.setState({ mapReady: true });
+  socket.message({
+    t: 'party',
+    matchId: 'm2',
+    holeIndex: 0,
+    phase: 'playing',
+    holeIds: ['p'],
+    currentMap: { id: 'p' },
+  });
+  env.gameStore.setState({ strokes: 2 });
+
+  // The previous attempt already reported; the restarted hole has not been played.
+  expect(socket.sent.filter((frame) => frame.f === 1).length).toBe(1);
+
+  // Installing the fresh attempt advances the sequence, which is what proves the
+  // stale result is gone. Only then may the new attempt report.
+  env.gameStore.setState({
+    level: { id: 'p' },
+    strokes: 1,
+    phase: 'holed',
+    result: { strokes: 1, par: 3 },
+    attemptSeq: 1,
+  });
+  const frames = socket.sent.filter((frame) => frame.f === 1);
+  expect(frames.length).toBe(2);
+  expect(frames[1]).toMatchObject({ s: 1 });
   dispose();
 });
