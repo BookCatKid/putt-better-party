@@ -1,0 +1,74 @@
+name: Release
+
+# Releases are **source only**. The archived original game client under
+# `private-client/` is tracked in Git, so a plain `git archive` would put 287 of its
+# files into every artefact - a redistribution this project has no permission to
+# make. The check below is therefore the important step, not the upload.
+#
+# There is deliberately no `release` step that publishes a binary. Anybody can
+# build the client from the archive with `bun run prepare:client`, and keeping the
+# client out of the artefact is what makes that the only way to get one.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `git archive` and the version check both read history and tags.
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Version agrees with the changelog and the tag
+        run: python3 scripts/release.py check --tag "${{ github.ref_name }}"
+
+      - name: Build the source-only archive
+        run: python3 scripts/release.py archive --output dist/putt-better-party.tar.gz
+
+      # Proves the artefact on disk, rather than trusting that the command that
+      # wrote it was the one that excluded the client.
+      - name: Verify the archive carries no proprietary code
+        run: python3 scripts/release.py verify dist/putt-better-party.tar.gz
+
+      # The same commit must produce the same bytes, or "reproducible" is a claim
+      # rather than a property. The first build above is compared against a second.
+      - name: Rebuild and compare
+        run: |
+          python3 scripts/release.py archive --output dist/second.tar.gz
+          first=$(sha256sum dist/putt-better-party.tar.gz | cut -d' ' -f1)
+          second=$(sha256sum dist/second.tar.gz | cut -d' ' -f1)
+          echo "first:  $first"
+          echo "second: $second"
+          test "$first" = "$second"
+
+      - name: Build the client from the archive
+        run: |
+          mkdir -p unpacked
+          tar -xzf dist/putt-better-party.tar.gz -C unpacked
+          # The archive must not carry the client, so preparation must fail here
+          # with a clear reason instead of serving an incomplete build.
+          if python3 unpacked/scripts/prepare-client.py; then
+            echo 'preparation succeeded, but the archive should not carry the originals'
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: putt-better-party-source
+          path: dist/putt-better-party.tar.gz
+          retention-days: 7
+          if-no-files-found: error

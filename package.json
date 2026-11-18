@@ -10,6 +10,8 @@
     "capture:client": "python3 scripts/capture-client.py",
     "backup": "python3 scripts/backup.py create",
     "backup:prune": "python3 scripts/backup.py prune",
+    "release:check": "python3 scripts/release.py check",
+    "release:archive": "python3 scripts/release.py archive",
     "format": "prettier --write . && ruff format scripts",
     "format:check": "prettier --check . && ruff format --check scripts",
     "lint": "eslint . --max-warnings 0 && ruff check scripts && shellcheck tests/integration/*.sh",

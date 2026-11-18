@@ -12,6 +12,7 @@ __pycache__/
 *-proof.png
 
 captures/
+dist/
 
 .env
 .env.*
