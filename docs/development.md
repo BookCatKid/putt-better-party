@@ -13,7 +13,7 @@ bun run lint
 bun run check
 ```
 
-The quality check runs Prettier, ESLint, Ruff, ShellCheck, strict TypeScript checking and the offline unit tests. CI uses the same check. The installed pre-commit hook formats and lints staged source, runs the type checker and runs the unit tests. Generated assets and room data are excluded from source control and formatting. Catalog unit tests use an explicit test-only adapter for course validation, date calculation and public response transport, while exercising the real catalog and public detail parser. They require neither network access nor a prepared client. To exercise the same catalog scenarios with the original pinned validator and date helper, prepare the client and run `bun run test:catalog:original`. This mode requires the pinned assets and never silently falls back to the fixture validator.
+The quality check runs Prettier, ESLint, Ruff, ShellCheck, strict TypeScript checking and the offline unit tests. CI uses the same check. The installed pre-commit hook formats and lints staged source, runs the type checker and runs the unit tests. Generated assets and room data are excluded from source control and formatting. The private repository preserves only the original bundles listed in `scripts/client-lock.json`, with exact SHA-256 hashes. The quality check and pre-commit hook run `bun run prepare:bundles` to reconstruct the original validator and patched client offline. Catalog unit tests mock only public network answers and exercise the original pinned validator; neither media downloads nor a live public server are required.
 
 ## Integration tests
 
@@ -53,4 +53,4 @@ bun run capture:client --apply-compatible
 bun run prepare:client
 ```
 
-Keep exact match anchors in the Python patcher. Write substantial new JavaScript in separately formatted and linted source files. Upstream lexical bindings are documented in the ESLint config; do not disable linting for the whole patch.
+When adopting a new upstream build, update the lock and archive the corresponding exact files together. Explicitly stage only the lock-listed originals with `git add -f`; other downloaded and generated files stay ignored. Do not make the repository or archived bundles public without appropriate permission. Keep exact match anchors in the Python patcher. Write substantial new JavaScript in separately formatted and linted source files. Upstream lexical bindings are documented in the ESLint config; do not disable linting for the whole patch.

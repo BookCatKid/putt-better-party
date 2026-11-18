@@ -1,0 +1,1 @@
+var e=6e4,t=2e4,n=3e5,r={holes:3,timerMs:e,elimination:!0,maxPlayers:50,mapSource:`random`};export{n,t as r,r as t};

@@ -8,7 +8,7 @@ All handwritten code must be maintainable and suitable for public review. Functi
 - Keep distinct responsibilities separate. Do not introduce unnecessary abstractions.
 - Use strict TypeScript contracts for backend code; validate external JSON at its boundary. Never use explicit `any`, blanket assertions, or suppression comments to evade the type checker.
 - Isolate original hashed modules behind the upstream adapter. Keep exact patch anchors separate from authored functions. Reverse-engineer the original bundles to establish behavior before changing protocol bindings or making test requests.
-- Never format, lint, commit or distribute downloaded/generated client assets; do not commit recordings, credentials, databases or logs.
+- Preserve the original hash-pinned bundles in the private repository under `private-client/assets/`. Only archive exact files listed in `scripts/client-lock.json`; never format, lint or edit their bytes. Keep generated assets, recordings, credentials, databases and logs out of Git. Do not redistribute the original client or make this repository public without appropriate permission.
 - Do not weaken lint rules, remove tests, or change expected behavior simply to obtain passing checks.
 - Before committing run `bun run format` and `bun run check`. Run relevant browser/integration regressions for runtime changes.
 - Install the repository pre-commit hook with `bun run hooks:install`. CI independently runs formatting, linting, strict type checking and tests on every push and pull request.

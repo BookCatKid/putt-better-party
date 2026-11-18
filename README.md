@@ -30,7 +30,7 @@ bun run prepare:client
 bun run start
 ```
 
-Open [http://localhost:8789](http://localhost:8789), create a party and share its invite code. Course metadata and specifications are retrieved from the public putt.day catalog; downloaded client assets are not included in this repository.
+Open [http://localhost:8789](http://localhost:8789), create a party and share its invite code. Course metadata and specifications are retrieved from the public putt.day catalog; The exact hash-pinned client bundles are retained in this private repository so they survive upstream updates. Stock media is fetched separately when preparing the browser client.
 
 ## Architecture
 
@@ -58,6 +58,6 @@ The service binds to loopback by default. Review deployment security before expo
 
 ## Compatibility and limitations
 
-Better Party is an independent project and is not affiliated with putt.day. The original client and game assets belong to their respective rights holders and are obtained separately from the public site. Obtain appropriate permission before redistribution or public deployment.
+Better Party is an independent project and is not affiliated with putt.day. The archived original client and other game assets belong to their respective rights holders. The bundle archive is for private development and is not independently licensed by this project. Obtain appropriate permission before redistribution or public deployment.
 
 Room settings and sessions survive restarts; interrupted matches return to the lobby. Scoring penalties and tie-breaking are independent policies, and physics results are client-reported. Upstream changes can require a compatibility update. See [architecture and operation](docs/architecture.md) for details.

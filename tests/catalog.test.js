@@ -8,11 +8,8 @@ const adapterPath = path.join(root, 'src/upstream/client-adapter.ts');
  * Live-only course sources.
  *
  * Every playable course has to come from a validated public detail response.
- * These regressions use the original-client adapter as a dependency boundary.
- * The real detail parser and catalog run against controlled public responses.
- * The default suite uses an explicit test-only validator, so a clean checkout
- * needs no downloaded assets. Run test:catalog:original to exercise the same
- * scenarios with the actual pinned validator and date helper.
+ * The real detail parser, catalog and original pinned validator run against
+ * controlled public responses. Only the network transport is replaced.
  */
 
 /** A minimal course the original validator accepts. */
@@ -40,37 +37,19 @@ const upstream = {
   listAnswer: async () => ({ holes: [], total: 0, offset: 0, nextOffset: null }),
 };
 
-// Do not silently select a different validator depending on which files happen
-// to exist. CI always exercises the offline dependency boundary; the explicit
-// original-client suite must fail if its pinned prerequisites are absent.
-const originalAdapter =
-  process.env.BP_TEST_ORIGINAL_VALIDATOR === '1' ? { ...(await import(adapterPath)) } : null;
+const originalAdapter = { ...(await import(adapterPath)) };
 const validation = { requests: [], failure: null };
 
-function validateFixture(specification, title) {
-  if (
-    !specification ||
-    typeof specification !== 'object' ||
-    Array.isArray(specification) ||
-    typeof specification.par !== 'number'
-  ) {
-    throw new Error('Invalid catalog test fixture');
-  }
-  return structuredClone({ ...specification, name: title });
-}
-
 mock.module(adapterPath, () => ({
+  ...originalAdapter,
   validateCourse(specification, title) {
     validation.requests.push({ specification, title });
     if (validation.failure) {
       throw validation.failure;
     }
-    return originalAdapter
-      ? originalAdapter.validateCourse(specification, title)
-      : validateFixture(specification, title);
+    return originalAdapter.validateCourse(specification, title);
   },
-  currentDailyNumber: originalAdapter?.currentDailyNumber ?? (() => 365),
-  // Both modes fake network answers, while preserving the real detail parser.
+  // Fake the network answers while preserving the original validator.
   invokePublicFunction: (identifier, method, data) => {
     if (method === 'POST') {
       const id = data.id;

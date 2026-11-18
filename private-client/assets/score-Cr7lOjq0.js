@@ -1,0 +1,1 @@
+function e(e,t){if(e===1)return`Hole-in-one!`;let n=e-t;return n<=-3?`Albatross`:n===-2?`Eagle`:n===-1?`Birdie`:n===0?`Par`:n===1?`Bogey`:n===2?`Double bogey`:`+${n}`}export{e as t};

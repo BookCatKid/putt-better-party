@@ -1,0 +1,2 @@
+# Preserve the original bytes used by the client SHA-256 lock.
+private-client/assets/* -text -diff

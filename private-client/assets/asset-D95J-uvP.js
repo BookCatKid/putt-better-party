@@ -1,0 +1,1 @@
+var e=`/`;function t(t){return e+t.replace(/^\//,``)}export{t};

@@ -1,3 +1,4 @@
+import argparse
 import concurrent.futures
 import hashlib
 import json
@@ -5,6 +6,12 @@ import pathlib
 import shutil
 import subprocess
 import sys
+
+parser = argparse.ArgumentParser(description="Prepare the pinned original client")
+parser.add_argument(
+    "--bundles-only", action="store_true", help="Build offline from the archived, pinned bundles"
+)
+args = parser.parse_args()
 
 root = pathlib.Path(__file__).resolve().parent.parent
 private = root / "private-client"
@@ -58,9 +65,12 @@ def get(path):
         print("MISSING", path, str(e), flush=True)
 
 
-with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
-    list(pool.map(get, sorted(paths)))
 hashes = json.loads((root / "scripts/client-lock.json").read_text())
+if not args.bundles_only:
+    # Only non-pinned media may be downloaded. Missing pinned bundles must
+    # be recovered from version control, not replaced by an upstream build.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        list(pool.map(get, sorted(paths - hashes.keys())))
 for path, h in hashes.items():
     assert hashlib.sha256((private / path.lstrip("/")).read_bytes()).hexdigest() == h, path
 print(f"Verified all {len(hashes)} pinned bundle hashes", flush=True)
@@ -70,7 +80,8 @@ for name in ("assets", "models", "sky", "sfx"):
     source = private / name
     if source.is_dir():
         shutil.copytree(source, web / name, dirs_exist_ok=True)
-shutil.copyfile(private / "favicon.ico", web / "favicon.ico")
+if not args.bundles_only:
+    shutil.copyfile(private / "favicon.ico", web / "favicon.ico")
 # Preserve the original hashed copies; patch only web.
 subprocess.run([sys.executable, str(root / "scripts/patch-client.py")], check=True)
 
