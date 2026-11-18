@@ -456,14 +456,16 @@ body:has(> #app) {
 }
 .bp-entry button,
 .bp-entry input,
-.bp-entry a.bp-resume {
+.bp-entry a.bp-resume,
+.bp-entry a.bp-browse-leaderboard {
   font-family: inherit;
   font-size: 15px;
   line-height: 1.25;
   border-radius: 12px;
   box-sizing: border-box;
 }
-.bp-entry button {
+.bp-entry button,
+.bp-entry a.bp-browse-leaderboard {
   cursor: pointer;
   font-weight: 650;
   transition:
@@ -472,7 +474,8 @@ body:has(> #app) {
 }
 .bp-entry button:focus-visible,
 .bp-entry input:focus-visible,
-.bp-entry a.bp-resume:focus-visible {
+.bp-entry a.bp-resume:focus-visible,
+.bp-entry a.bp-browse-leaderboard:focus-visible {
   outline: 2px solid #6ee7b7;
   outline-offset: 3px;
 }
@@ -541,7 +544,8 @@ body:has(> #app) {
 .bp-name-input:focus {
   border-color: #34d399;
 }
-.bp-home form button {
+.bp-home form button,
+.bp-home .bp-browse-leaderboard {
   flex-shrink: 0;
   min-width: 76px;
   background: #ffffff14;
@@ -549,7 +553,16 @@ body:has(> #app) {
   color: #e4eee9;
   padding: 12px 20px;
 }
+.bp-home .bp-browse-leaderboard {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 54px;
+  text-decoration: none;
+}
 .bp-home form button:hover,
+.bp-home .bp-browse-leaderboard:hover,
 .bp-resume:hover {
   background: #ffffff20;
 }
