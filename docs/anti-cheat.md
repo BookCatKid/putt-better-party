@@ -122,16 +122,18 @@ A score reaches the public leaderboard only when **all** of these hold:
 
 - the room reached `final`;
 - `mapSource` is `random` (custom playlists are excluded);
+- `courseVoting` is off — a match with voting enabled is ineligible even when
+  nobody votes, because the course draw is partly chosen by the players;
 - `recordEligible` is true — a host restart clears it;
 - `roundHistory` has exactly `config.holes` rounds, every one `completed`, in
   order;
 - every hole row for that player is `holed` with an integer stroke count `>= 1`
   and a finite, non-negative time.
 
-Custom playlists, restarted attempts, skipped or ended rounds, timeouts,
-elimination, and late joiners who missed a hole are therefore all ineligible.
-The gate is a whitelist: an unexpected condition yields no score rather than a
-score with a caveat.
+Custom playlists, voting matches, restarted attempts, skipped or ended rounds,
+timeouts, elimination, and late joiners who missed a hole are therefore all
+ineligible. The gate is a whitelist: an unexpected condition yields no score
+rather than a score with a caveat.
 
 ## What the server cannot enforce
 
