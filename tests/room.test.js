@@ -1907,3 +1907,98 @@ test('course selection is a weighted draw across every vote, not a majority win'
     ).id,
   ).toBe('b');
 });
+
+/**
+ * The score boundary.
+ *
+ * The server does not simulate shots, so it cannot verify that a reported score
+ * was earned. What it *can* do is refuse reports that are internally impossible,
+ * and it does: a finish must name the real par, a finish cannot claim fewer
+ * strokes than have already been reported, and a progress report is bounded.
+ * These tests pin those refusals, because they are the only scoring integrity the
+ * architecture allows and it would be easy to widen them by accident while
+ * "simplifying" a condition.
+ *
+ * They deliberately do not claim to stop cheating. A client that reports a
+ * plausible-but-unearned score is accepted, which is documented in
+ * docs/anti-cheat.md. This is about the floor, not a ceiling.
+ */
+async function playingRoom() {
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const identity = room.issue('Host');
+  const hostSocket = socket();
+  room.handle(hostSocket, {
+    t: 'join',
+    ...identity,
+    protocol: 2,
+    host: room.hostToken,
+    scene: true,
+  });
+  room.handle(hostSocket, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p'], elimination: false },
+  });
+  room.handle(hostSocket, { t: 'start' });
+  room.handle(hostSocket, { t: 'scene', matchId: room.matchId, holeIndex: 0, levelId: 'p' });
+  await delay(20);
+  // The readiness gate releases once the only player has acknowledged its scene.
+  room.startPlay();
+  await waitForRoom(() => room.phase === 'playing');
+  return { room, host: { ws: hostSocket, player: room.players.get(identity.uid) } };
+}
+
+test('a finish naming the wrong par is refused', async () => {
+  const { room, host } = await playingRoom();
+  const par = room.specs[0].par;
+  room.handle(host.ws, { f: 1, s: 1, p: par + 1 });
+  // Still playing: the report was refused rather than recorded.
+  expect(room.phase).toBe('playing');
+  expect(host.player.done).toBe(false);
+  room.handle(host.ws, { f: 1, s: 1, p: par });
+  expect(host.player.done).toBe(true);
+  room.dispose();
+});
+
+test('a finish cannot claim fewer strokes than were already reported', async () => {
+  const { room, host } = await playingRoom();
+  const par = room.specs[0].par;
+  // Report five strokes, then claim the hole in two.
+  room.handle(host.ws, { t: 'prog', st: 5 });
+  expect(host.player.strokes).toBe(5);
+  room.handle(host.ws, { f: 1, s: 2, p: par });
+  expect(host.player.done).toBe(false);
+  // Five is the floor, and zero is refused even before any progress.
+  room.handle(host.ws, { f: 1, s: 0, p: par });
+  expect(host.player.done).toBe(false);
+  room.handle(host.ws, { f: 1, s: 5, p: par });
+  expect(host.player.done).toBe(true);
+  room.dispose();
+});
+
+test('a progress report is bounded and ignored outside play', async () => {
+  const { room, host } = await playingRoom();
+  // Above the cap: refused, and the recorded count is unchanged.
+  room.handle(host.ws, { t: 'prog', st: 201 });
+  expect(host.player.strokes).toBe(0);
+  room.handle(host.ws, { t: 'prog', st: 200 });
+  expect(host.player.strokes).toBe(200);
+  room.dispose();
+
+  // In the lobby there is no hole to progress through, so nothing is recorded.
+  const lobby = new Room('ABCDE', maps);
+  const waiting = enter(lobby, 'Host', true);
+  lobby.handle(waiting.ws, { t: 'prog', st: 3 });
+  expect(waiting.player.strokes).toBe(0);
+  lobby.dispose();
+});
+
+test('a plausible but unearned score is accepted, and that is documented', async () => {
+  const { room, host } = await playingRoom();
+  // This is the honest limit of client-reported scoring: a par-3 finished in 2
+  // strokes with no physics behind it is accepted. The test asserts the current
+  // behaviour so a future deterministic verifier is a deliberate change, not a
+  // silent one.
+  room.handle(host.ws, { f: 1, s: 2, p: room.specs[0].par });
+  expect(host.player.done).toBe(true);
+  room.dispose();
+});
