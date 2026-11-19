@@ -185,6 +185,16 @@ export default [
     },
   },
   {
+    files: ['scripts/bp-ghost-color.js'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        transportPartyStore: 'readonly',
+        bpBallRegistry: 'readonly',
+      },
+    },
+  },
+  {
     files: ['scripts/party-replay-scene.js'],
     languageOptions: {
       globals: {

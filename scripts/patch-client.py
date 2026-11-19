@@ -38,9 +38,22 @@ def authored_module(path):
 
 
 def replace_once(s, a, b):
+    return replace_count(s, a, b, 1)
+
+
+def replace_count(s, a, b, expected):
+    """
+    Replace an anchor that legitimately occurs `expected` times.
+
+    Every anchor is counted: a missing or ambiguous one fails the patch run
+    rather than silently leaving the bundle half-patched. `expected` is part of
+    the contract - it documents how many upstream sites the patch intends to
+    change, so an upstream rebuild that adds or removes a site is reviewed
+    instead of absorbed.
+    """
     count = s.count(a)
-    assert count == 1, (a[:100], count)
-    return s.replace(a, b, 1)
+    assert count == expected, (a[:100], count, expected)
+    return s.replace(a, b)
 
 
 def patch(name, fn):
@@ -142,6 +155,11 @@ const isTransportSpectator = _e;
         "function Dn({century:e=!1})",
         "function Dn({century:e=!1,bpLevel,bpRuntimeReady})",
     )
+    # The initial ball placement watcher is intentionally inline: it runs
+    # inside `Dn`'s frame hook and captures fourteen bundle locals (`n`, `B`,
+    # `N`, `r`, `i`, `V`, `Lr`, `K`, `gn`, `f`, `J`, `W`, plus the two patched
+    # props), so extracting it would mean threading the whole frame context
+    # through a parameter list rather than deepening anything.
     source = replace_once(
         source,
         "return S((a,o)=>{let p=t?o:Math.min(o,_n)",
@@ -244,30 +262,18 @@ const isTransportSpectator = _e;
         "if(t.tr){let e=Pe(t.tr,t.trDt,(l-t.trStart)/1e3);t.cx=e.x,t.cy=e.y,t.cz=e.z,e.done&&(t.tr=null)",
         "if(t.tr){let bpSample=Pe(t.tr,t.trDt,(l-t.trStart)/1e3);t.cx=bpSample.x,t.cy=bpSample.y,t.cz=bpSample.z,bpSample.done&&(t.tr=null)",
     )
-    source = source.replace(
+    # Two sites by contract: the anchor sets each ghost's colour in both of the
+    # instanced loop's branches - trajectory playback (`t.tr`) and interpolated
+    # extrapolation (`t.updatedAt`) - and both need the roster-resolved colour.
+    source = replace_count(
+        source,
         "t.ballColor?$.set(t.ballColor):$.setHSL(t.hue/360,.75,.62)",
-        "bpGhostColor(e,t,$,bpAnimated),t.ballEffect&&bpAnimated++",
+        "bpGhostColor(e,t,$,bpAnimated,jt),t.ballEffect&&bpAnimated++",
+        2,
     )
-    source += """
-function bpGhostColor(id, ghost, color, animatedCount) {
-  const player = transportPartyStore.state.roster.find(member => member.id === id);
-  if (player?.colorOverride) {
-    ghost.ballEffect = undefined;
-    color.setHSL(player.hue / 360, .75, .62);
-    return;
-  }
-  if (player?.ball) {
-    ghost.ballEffect = animatedCount < jt ? bpBallRegistry.get(player.ball.key)?.effect : undefined;
-    color.set(player.ball.color);
-    return;
-  }
-  if (ghost.ballColor) {
-    color.set(ghost.ballColor);
-    return;
-  }
-  color.setHSL((player?.hue ?? ghost.hue) / 360, .75, .62);
-}
-"""
+    # Authored as a module; `jt`, the engine's animated-overlay budget, arrives
+    # as a parameter rather than a captured bundle global.
+    source += authored_module(root / "scripts/bp-ghost-color.js")
     source = replace_once(
         source,
         "Se=ge||xe;return",
@@ -619,8 +625,14 @@ def game_patch(s):
         part = s[start:end]
         part = replace_once(part, "(0,J.jsx)(yt,{mode:`party`})", "(0,J.jsx)(BpReplayLink,{})")
         s = s[:start] + part + s[end:]
-    s = s.replace(
-        "background:`hsl(${e.hue} 75% 62%)`", "background:e.ball?.color??`hsl(${e.hue} 75% 62%)`"
+    # Six sites by contract: every rounded-full swatch that fell back to the
+    # roster hue - lobby rows, standings, the podium circle and feed entries -
+    # prefers a selected ball colour when the player has one.
+    s = replace_count(
+        s,
+        "background:`hsl(${e.hue} 75% 62%)`",
+        "background:e.ball?.color??`hsl(${e.hue} 75% 62%)`",
+        6,
     )
     return s
 
@@ -681,6 +693,7 @@ build_inputs = [root / "scripts" / "patch-client.py"] + sorted(
         "picker-generator.js",
         "picker.js",
         "results-export.js",
+        "bp-ghost-color.js",
         "lobby.js",
         "match-details.js",
         "host-menu.js",
