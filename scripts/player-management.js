@@ -419,6 +419,11 @@ function BpUpcomingEditor() {
   const [failure, setFailure] = React.useState('');
   const upcoming = party.holeIds.slice(party.holeIndex + 1);
   const live = ['playing', 'countdown'].includes(party.phase);
+  // Pressing Enter in the search field submits the form even while the submit
+  // button is disabled, so two searches can overlap. Without a generation check
+  // the slower, older response would overwrite the newer results - the same stale
+  // write the community picker already guards against.
+  const searchGeneration = React.useRef(0);
   async function apply(action, argument) {
     setPending(true);
     setFailure('');
@@ -432,6 +437,7 @@ function BpUpcomingEditor() {
   }
   async function search(event) {
     event.preventDefault();
+    const generation = ++searchGeneration.current;
     setPending(true);
     setFailure('');
     try {
@@ -440,14 +446,21 @@ function BpUpcomingEditor() {
         { signal: AbortSignal.timeout(15000) },
       );
       const result = await response.json();
+      if (generation !== searchGeneration.current) {
+        return;
+      }
       if (!response.ok || !Array.isArray(result.holes)) {
         throw Error(result.error || 'Could not load courses');
       }
       setResults(result.holes);
     } catch (searchError) {
-      setFailure(searchError.message);
+      if (generation === searchGeneration.current) {
+        setFailure(searchError.message);
+      }
     } finally {
-      setPending(false);
+      if (generation === searchGeneration.current) {
+        setPending(false);
+      }
     }
   }
   function move(index, offset) {

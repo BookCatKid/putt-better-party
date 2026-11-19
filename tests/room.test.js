@@ -2073,3 +2073,28 @@ test('a mid-hole drop repaints the live board, not just the roster', async () =>
   expect(boards.at(-1).standings[0].connected).toBe(false);
   room.dispose();
 });
+
+test('preparation that resolves after disposal cannot start a match', async () => {
+  let finish;
+  const room = new Room('ABCDE', maps, {
+    prepareMatch: () =>
+      new Promise((resolvePreparation) => {
+        finish = resolvePreparation;
+      }),
+  });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, { t: 'start' });
+  await delay(1);
+  expect(room.snapshot().preparing).toBe(true);
+
+  // The room is torn down while upstream work is still in flight - an idle sweep
+  // or shutdown, not a user action. The pending result must not resurrect it.
+  room.dispose();
+  finish({ ids: ['p'], specs: [spec], seen: [], ballots: [] });
+  await delay(1);
+
+  expect(room.closed).toBe(true);
+  expect(room.phase).toBe('lobby');
+  expect(room.snapshot().preparing).toBe(false);
+  expect(room.matchId).toBe(null);
+});
