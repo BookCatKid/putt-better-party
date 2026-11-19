@@ -55,7 +55,8 @@ def route_patch(source):
     start = source.index("function E(){")
     end = source.index("export{E as component}", start)
     return (
-        source[:start]
+        'import{A as partyBallRegistry}from"./index-DFMxt6BL.js";\n'
+        + source[:start]
         + """
 const partyRouteReact = y, partyRouteJsx = x, partyRouteStore = u;
 const selectPartyRouteState = l, joinPartyRuntime = f, resetPartyRuntime = p;
@@ -188,19 +189,70 @@ const isTransportSpectator = _e;
     source = replace_once(
         source,
         "d=w(A,k),p=w(A,te)",
-        "bpColor=w(transportPartyStore,e=>{const player=e.roster.find(p=>p.uid===e.self?.uid);return player?.colorOverride?'hsl('+player.hue+',75%,62%)':null}),d=w(A,k),p=w(A,te)",
+        "bpColor=w(transportPartyStore,e=>{const player=e.roster.find(p=>p.uid===e.self?.uid);return player?.colorOverride?'hsl('+player.hue+',75%,62%)':player?.ball?.color??null}),bpEffect=w(transportPartyStore,e=>{const player=e.roster.find(p=>p.uid===e.self?.uid);return player?.colorOverride?null:player?.ball?bpBallRegistry.get(player.ball.key)?.effect??null:undefined}),d=w(A,k),p=w(A,te)",
     )
     source = replace_once(source, "m.color.set(d)", "m.color.set(bpColor??d)")
+    source = replace_once(
+        source, "x=!e&&!u?m:void 0", "x=!e&&!u?(bpEffect===undefined?m:bpEffect??void 0):void 0"
+    )
+    source = replace_once(source, "color:u?`#ffd76b`:d", "color:u?`#ffd76b`:(bpColor??d)")
+    source = 'import{A as bpBallRegistry}from"./index-DFMxt6BL.js";' + source
+    # The daily route alone mounted ghost cosmetic overlays originally.
+    # Party ghosts use the same shaders, selected from the validated roster.
+    source = replace_once(
+        source,
+        "t!==void 0&&!pe&&!_e&&(0,Y.jsxs)(Y.Fragment,{children:[(0,Y.jsx)(kt,{}),(0,Y.jsx)(Mt,{})]})",
+        "(transportPartyStore.state.active||t!==void 0&&!pe&&!_e)&&(0,Y.jsxs)(Y.Fragment,{children:[(0,Y.jsx)(kt,{}),(0,Y.jsx)(Mt,{})]})",
+    )
+    # Explicit party selections take precedence over rare daily-hole visuals.
+    source = replace_once(
+        source,
+        "x=!e&&!u?(bpEffect===undefined?m:bpEffect??void 0):void 0",
+        "x=bpEffect!==undefined?bpEffect??void 0:!e&&!u?m:void 0",
+    )
+    source = replace_once(
+        source,
+        "u?m.color.set(`#ffd76b`):m.color.set(bpColor??d)",
+        "bpColor?m.color.set(bpColor):u?m.color.set(`#ffd76b`):m.color.set(d)",
+    )
+    source = replace_once(
+        source, "color:u?`#ffd76b`:(bpColor??d)", "color:bpColor??(u?`#ffd76b`:d)"
+    )
+    # Keep the native shader-overlay budget. Beyond twelve animated ghosts,
+    # draw the selected solid base color instead of hiding the instanced ball.
+    source = replace_once(
+        source,
+        "u=1-Math.exp(-10*i),d=0;for(let[e,t]of U)",
+        "u=1-Math.exp(-10*i),d=0,bpAnimated=0;for(let[e,t]of U)",
+    )
     # Use roster hue for actual remote ball mesh, not just the name tag.
+    source = replace_once(
+        source,
+        "if(t.tr){let e=Pe(t.tr,t.trDt,(l-t.trStart)/1e3);t.cx=e.x,t.cy=e.y,t.cz=e.z,e.done&&(t.tr=null)",
+        "if(t.tr){let bpSample=Pe(t.tr,t.trDt,(l-t.trStart)/1e3);t.cx=bpSample.x,t.cy=bpSample.y,t.cz=bpSample.z,bpSample.done&&(t.tr=null)",
+    )
     source = source.replace(
-        "t.ballColor?$.set(t.ballColor):$.setHSL(t.hue/360,.75,.62)", "bpGhostColor(e,t,$)"
+        "t.ballColor?$.set(t.ballColor):$.setHSL(t.hue/360,.75,.62)",
+        "bpGhostColor(e,t,$,bpAnimated),t.ballEffect&&bpAnimated++",
     )
     source += """
-function bpGhostColor(id,ghost,color){
-  const player=transportPartyStore.state.roster.find(member=>member.id===id);
-  if(player?.colorOverride){color.setHSL(player.hue/360,.75,.62);return}
-  if(ghost.ballColor){color.set(ghost.ballColor);return}
-  color.setHSL((player?.hue??ghost.hue)/360,.75,.62)
+function bpGhostColor(id, ghost, color, animatedCount) {
+  const player = transportPartyStore.state.roster.find(member => member.id === id);
+  if (player?.colorOverride) {
+    ghost.ballEffect = undefined;
+    color.setHSL(player.hue / 360, .75, .62);
+    return;
+  }
+  if (player?.ball) {
+    ghost.ballEffect = animatedCount < jt ? bpBallRegistry.get(player.ball.key)?.effect : undefined;
+    color.set(player.ball.color);
+    return;
+  }
+  if (ghost.ballColor) {
+    color.set(ghost.ballColor);
+    return;
+  }
+  color.setHSL((player?.hue ?? ghost.hue) / 360, .75, .62);
 }
 """
     source = replace_once(
@@ -524,6 +576,9 @@ def game_patch(s):
         part = s[start:end]
         part = replace_once(part, "(0,J.jsx)(yt,{mode:`party`})", "(0,J.jsx)(BpReplayLink,{})")
         s = s[:start] + part + s[end:]
+    s = s.replace(
+        "background:`hsl(${e.hue} 75% 62%)`", "background:e.ball?.color??`hsl(${e.hue} 75% 62%)`"
+    )
     return s
 
 

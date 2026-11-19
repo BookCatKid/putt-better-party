@@ -1722,3 +1722,64 @@ body:has(.bp-management-dialog[open]) .bp-management-notices:not(.bp-dialog-noti
 .bp-management-notices .bp-management-pause {
   color: #fcd34d;
 }
+
+.bp-ball-picker {
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  margin: 8px 0 10px;
+  padding: 12px;
+  border: 1px solid #ffffff1a;
+  border-radius: 14px;
+}
+.bp-ball-picker legend {
+  padding: 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #c5d6cf;
+}
+.bp-ball-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.bp-entry .bp-ball-swatch {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid #ffffff25;
+  padding: 0;
+  color: #102b26;
+  font-size: 23px;
+  font-weight: 700;
+}
+.bp-entry .bp-ball-swatch[aria-pressed='true'] {
+  outline: 2px solid #34d399;
+  outline-offset: 3px;
+}
+.bp-ball-selection {
+  min-height: 29px;
+  margin-top: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e4eee9;
+}
+.bp-custom-ball-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.bp-entry .bp-custom-ball-color input {
+  width: 44px;
+  height: 30px;
+  padding: 2px;
+  border-radius: 6px;
+  background: #ffffff18;
+  cursor: pointer;
+}

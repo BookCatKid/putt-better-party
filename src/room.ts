@@ -1,3 +1,4 @@
+import { parseBallAppearance } from './ball-cosmetics.js';
 import { isHostAction, normalizedName } from './host-actions.js';
 import { newReplayId, RoundReplayCapture } from './replays.js';
 import { randomUUID, randomBytes, randomInt } from 'node:crypto';
@@ -266,7 +267,7 @@ export class Room {
     });
   }
 
-  issue(name: unknown, uid?: unknown, session?: unknown): Identity {
+  issue(name: unknown, uid?: unknown, session?: unknown, ball?: unknown): Identity {
     this.lastActivity = Date.now();
     if (typeof name !== 'string' || !name.trim() || name.trim().length > 24) {
       throw new Error('Name must contain 1–24 characters');
@@ -295,6 +296,7 @@ export class Room {
       session: token(),
       name: name.trim(),
       hue: randomInt(360),
+      ...(ball !== undefined ? { ball: parseBallAppearance(ball) } : {}),
     };
     this.issued.set(identity.uid, identity);
     this.audit('identity_issued', { uid: identity.uid, name: identity.name });
@@ -430,6 +432,7 @@ export class Room {
         uid: player.uid,
         name: player.name,
         hue: player.hue,
+        ...(player.ball && !player.colorOverride ? { ball: player.ball } : {}),
         role: player.role,
         spectatorReason: this.spectatorReason(player),
         isHost: player.uid === this.hostUid,
@@ -459,6 +462,7 @@ export class Room {
         uid: player.uid,
         name: player.name,
         hue: player.hue,
+        ...(player.ball && !player.colorOverride ? { ball: player.ball } : {}),
         rank: index + 1,
         holesSurvived: player.holesSurvived,
         totalStrokes: player.totalStrokes,
@@ -524,6 +528,7 @@ export class Room {
         uid: identity.uid,
         name: identity.name,
         hue: identity.hue,
+        ball: identity.ball,
         colorOverride: identity.colorOverride,
         coHost: identity.coHost && identity.uid !== this.hostUid,
         hostSpectator: identity.hostSpectator,

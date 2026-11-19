@@ -332,7 +332,9 @@ async function handleRequest(
       if (!room) {
         return response({ error: 'Room does not exist' }, 404);
       }
-      return response(room.issue(requestBody.name, requestBody.uid, requestBody.session));
+      return response(
+        room.issue(requestBody.name, requestBody.uid, requestBody.session, requestBody.ball),
+      );
     }
     if (pathname === '/api/import' || pathname === '/api/import-playlist') {
       if (req.method !== 'POST') {

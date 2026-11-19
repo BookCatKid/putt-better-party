@@ -1,3 +1,4 @@
+import { replayBallColor } from './ball-cosmetics.js';
 /** Replay-only archive. No client-supplied course geometry or player credentials
  * enter the public replay. Courses are snapshots of the actual played level,
  * not a reusable catalog or source for future matches. */
@@ -28,6 +29,7 @@ export type ReplayTrack = {
   id: number;
   name: string;
   hue: number;
+  color?: string;
   samples: number[];
   states: DeviceState[];
   native?: NativeReplay;
@@ -93,6 +95,7 @@ export class RoundReplayCapture {
         id: this.tracks.size,
         name: player.name,
         hue: player.hue,
+        color: replayBallColor(player),
         samples: [],
         states: [],
         truncated: false,
@@ -231,7 +234,10 @@ export class RoundReplayCapture {
 
 type RoundSummary = Omit<ReplayRound, 'level' | 'tracks'> & {
   players: Array<
-    Pick<ReplayTrack, 'id' | 'name' | 'hue' | 'status' | 'strokes' | 'timeMs' | 'truncated'> & {
+    Pick<
+      ReplayTrack,
+      'id' | 'name' | 'hue' | 'color' | 'status' | 'strokes' | 'timeMs' | 'truncated'
+    > & {
       recorded: boolean;
       native: boolean;
     }
@@ -244,10 +250,11 @@ function summarize(round: ReplayRound): RoundSummary {
     status: round.status,
     durationMs: round.durationMs,
     players: round.tracks.map(
-      ({ id, name, hue, status, strokes, timeMs, truncated, samples, native }) => ({
+      ({ id, name, hue, color, status, strokes, timeMs, truncated, samples, native }) => ({
         id,
         name,
         hue,
+        color,
         status,
         strokes,
         timeMs,

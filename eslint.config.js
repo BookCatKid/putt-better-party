@@ -210,6 +210,7 @@ export default [
     languageOptions: {
       globals: {
         ...globals.browser,
+        partyBallRegistry: 'readonly',
         partyRouteReact: 'readonly',
         partyRouteJsx: 'readonly',
         joinPartyRuntime: 'readonly',

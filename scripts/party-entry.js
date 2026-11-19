@@ -1,5 +1,84 @@
+// The original profile picker uses the registry's swatch (or solid color)
+// and circular, selected-ring buttons. No account/unlock endpoint is needed
+// on the independent party service.
+function readBallPreference() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('bp.ball.v1') || 'null');
+    if (saved?.key === 'custom' && /^#[0-9a-fA-F]{6}$/.test(saved.color)) {
+      return saved;
+    }
+    if (partyBallRegistry.get(saved?.key)?.kind === 'ball') {
+      return { key: saved.key };
+    }
+  } catch {
+    // A disabled storage API must not prevent joining.
+  }
+  return { key: 'classic' };
+}
+
+function PartyBallPicker({ ball, setBall, disabled }) {
+  const createElement = partyRouteReact.createElement;
+  const [customColor, setCustomColor] = partyRouteReact.useState(
+    ball.key === 'custom' ? ball.color : '#34d399',
+  );
+  const choices = [
+    { key: 'classic', name: 'Classic', color: '#ffffff' },
+    ...[...partyBallRegistry.values()].filter((cosmetic) => cosmetic.kind === 'ball'),
+    { key: 'custom', name: 'Custom', color: customColor },
+  ];
+  const selected = choices.find((choice) => choice.key === ball.key) ?? choices[0];
+  function select(choice) {
+    if (choice.key === 'custom') {
+      setBall({ key: choice.key, color: customColor });
+    } else {
+      setBall({ key: choice.key });
+    }
+  }
+  return createElement('fieldset', { className: 'bp-ball-picker', disabled }, [
+    createElement('legend', { key: 'label' }, 'Ball'),
+    createElement(
+      'div',
+      { key: 'swatches', className: 'bp-ball-swatches' },
+      choices.map((choice) =>
+        createElement(
+          'button',
+          {
+            key: choice.key,
+            type: 'button',
+            className:
+              'bp-ball-swatch relative grid h-9 w-9 place-items-center rounded-full border transition hover:scale-105',
+            title: choice.name,
+            'aria-label': choice.name,
+            'aria-pressed': ball.key === choice.key,
+            style: { background: choice.swatch ?? choice.color },
+            onClick: () => select(choice),
+          },
+          choice.key === 'custom' ? '+' : null,
+        ),
+      ),
+    ),
+    createElement('div', { key: 'selection', className: 'bp-ball-selection' }, [
+      createElement('span', { key: 'name' }, selected.name),
+      ball.key === 'custom' &&
+        createElement('label', { key: 'custom', className: 'bp-custom-ball-color' }, [
+          createElement('input', {
+            type: 'color',
+            'aria-label': 'Custom ball color',
+            value: customColor,
+            onChange: (event) => {
+              setCustomColor(event.target.value);
+              setBall({ key: 'custom', color: event.target.value });
+            },
+          }),
+          createElement('span', {}, customColor.toUpperCase()),
+        ]),
+    ]),
+  ]);
+}
+
 function usePartyAdmission(code) {
   const [name, setName] = partyRouteReact.useState(sessionStorage.getItem('bp.name.' + code) ?? '');
+  const [ball, setBall] = partyRouteReact.useState(readBallPreference);
   const [error, setError] = partyRouteReact.useState('');
   const [busy, setBusy] = partyRouteReact.useState(false);
   const [resume, setResume] = partyRouteReact.useState(
@@ -30,6 +109,7 @@ function usePartyAdmission(code) {
         body: JSON.stringify({
           code,
           name: name.trim(),
+          ball,
           uid: savedUid,
           session: sessionStorage.getItem('bp.session.' + code),
           host,
@@ -44,6 +124,9 @@ function usePartyAdmission(code) {
         }
         throw new Error(identity.error || 'Could not join this party.');
       }
+      try {
+        localStorage.setItem('bp.ball.v1', JSON.stringify(ball));
+      } catch {}
       sessionStorage.setItem('bp.lastRoom', code);
       sessionStorage.setItem('bp.name.' + code, identity.name);
       sessionStorage.setItem('bp.uid.' + code, identity.uid);
@@ -80,11 +163,11 @@ function usePartyAdmission(code) {
     setError('');
   }
 
-  return { name, setName, error, busy, resume, sessionExpired, join, enterName };
+  return { name, setName, ball, setBall, error, busy, resume, sessionExpired, join, enterName };
 }
 
 function PartyEntry({ code, admission }) {
-  const { name, setName, error, busy, join } = admission;
+  const { name, setName, ball, setBall, error, busy, join } = admission;
 
   return partyRouteJsx.jsx('main', {
     className: 'bp-home',
@@ -116,6 +199,7 @@ function PartyEntry({ code, admission }) {
               className: 'bp-name-input',
               autoComplete: 'nickname',
             }),
+            partyRouteJsx.jsx(PartyBallPicker, { ball, setBall, disabled: busy }),
             partyRouteJsx.jsx('button', {
               type: 'submit',
               disabled: busy || !name.trim(),

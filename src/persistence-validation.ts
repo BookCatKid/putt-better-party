@@ -1,3 +1,4 @@
+import { parseBallAppearance } from './ball-cosmetics.js';
 import { MAP_SOURCE, isRecord, type MapSource, type RoomConfig, type RoomPhase } from './domain.js';
 import { LATE_JOIN, type LateJoinPolicy } from './domain.js';
 import type { Identity, RoomCheckpoint } from './room-types.js';
@@ -346,6 +347,13 @@ function readIdentity(value: unknown): Identity {
     reject('corrupt', 'Invalid color override');
   }
   const identity: Identity = { uid, session, name, hue };
+  if (value.ball !== undefined) {
+    try {
+      identity.ball = parseBallAppearance(value.ball);
+    } catch {
+      reject('corrupt', 'Invalid ball appearance');
+    }
+  }
   for (const key of ['colorOverride', 'coHost', 'hostSpectator', 'puttingLocked'] as const) {
     if (value[key] !== undefined && typeof value[key] !== 'boolean') {
       reject('corrupt', 'Invalid identity flag');

@@ -8,7 +8,7 @@ const Scene = React.lazy(() =>
   import('./Replay3D-Cz9axXph.js').then((module) => ({ default: module.BpPartyReplayScene })),
 );
 const OriginalReplay = React.lazy(() => import('./Replay3D-Cz9axXph.js'));
-const color = (track) => 'hsl(' + track.hue + ',75%,62%)';
+const color = (track) => track.color ?? 'hsl(' + track.hue + ',75%,62%)';
 function duration(ms) {
   const tenths = Math.floor(Math.max(0, ms) / 100);
   return (

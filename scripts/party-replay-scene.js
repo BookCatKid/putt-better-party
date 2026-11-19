@@ -178,7 +178,7 @@ function BpTimedBalls({ tracks, clock, focus }) {
         D.createElement('sphereGeometry', { key: 'mesh', args: [0.09, 24, 24] }),
         D.createElement('meshStandardMaterial', {
           key: 'material',
-          color: 'hsl(' + track.hue + ',75%,62%)',
+          color: track.color ?? 'hsl(' + track.hue + ',75%,62%)',
           roughness: 0.35,
           metalness: 0.05,
         }),

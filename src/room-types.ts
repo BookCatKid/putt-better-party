@@ -1,3 +1,4 @@
+import type { BallAppearance } from './ball-cosmetics.js';
 import type { ReplayRound } from './replays.js';
 import type {
   CourseSpecification,
@@ -29,6 +30,7 @@ export interface Identity {
   session: string;
   name: string;
   hue: number;
+  ball?: BallAppearance;
   colorOverride?: boolean;
   coHost?: boolean;
   hostSpectator?: boolean;
@@ -38,6 +40,7 @@ export interface Player {
   uid: string;
   name: string;
   hue: number;
+  ball?: BallAppearance;
   id: string;
   ws: RoomSocket | null;
   instance?: unknown;
@@ -141,6 +144,7 @@ export interface Standing {
   uid: string;
   name: string;
   hue: number;
+  ball?: BallAppearance;
   rank: number;
   holesSurvived: number;
   totalStrokes: number;
@@ -157,6 +161,7 @@ export interface RosterEntry {
   uid: string;
   name: string;
   hue: number;
+  ball?: BallAppearance;
   role: 'player' | 'spectator';
   /** Set when the player is spectating; explains why, for the lobby chip. */
   spectatorReason: string | null;
