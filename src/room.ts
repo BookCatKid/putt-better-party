@@ -273,6 +273,28 @@ export class Room {
     });
   }
 
+  /**
+   * Forget the oldest credential that nobody could still be using.
+   *
+   * `issued` is insertion-ordered, so the first entry is the longest-held. Two
+   * identities are never forgotten: the host's, because authority is bound to it,
+   * and anyone still in `players`, because a disconnected player mid-match is kept
+   * precisely so they can reconnect and reclaim their score.
+   *
+   * Everything else is a player who joined and left the lobby. Their credential
+   * would have restored their old name and hue, so forgetting it is a small loss
+   * rather than a broken return: they can join again as a new identity.
+   */
+  private evictDormantIdentity(): void {
+    for (const uid of this.issued.keys()) {
+      if (uid === this.hostUid || this.players.has(uid)) {
+        continue;
+      }
+      this.issued.delete(uid);
+      return;
+    }
+  }
+
   issue(name: unknown, uid?: unknown, session?: unknown, ball?: unknown): Identity {
     this.lastActivity = Date.now();
     if (typeof name !== 'string' || !name.trim() || name.trim().length > 24) {
@@ -295,7 +317,15 @@ export class Room {
       throw new JoinRefused('full', 'Party is full.');
     }
     if (this.issued.size >= 200) {
-      throw new JoinRefused('identity-limit', 'Room identity limit reached');
+      // Issued credentials are what let a returning player keep their identity and
+      // score, so they are never dropped while they might still be used. But a
+      // long-lived party accumulates one per join, and without any cleanup the
+      // 200th drop-in would permanently close the party to everyone new. Make room
+      // first, and only refuse when nothing is safe to forget.
+      this.evictDormantIdentity();
+      if (this.issued.size >= 200) {
+        throw new JoinRefused('identity-limit', 'Room identity limit reached');
+      }
     }
     const identity = {
       uid: randomUUID(),

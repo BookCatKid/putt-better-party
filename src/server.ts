@@ -34,6 +34,7 @@ import {
   readJsonObject,
 } from './request-guards.js';
 import { JoinRefused, joinRefusalStatus } from './join-errors.js';
+import { isReclaimable } from './room-expiry.js';
 import { ClientScriptAssets } from './client-scripts.js';
 import { readClientBuild } from './client-build.js';
 import { VERSION } from './version.js';
@@ -682,11 +683,10 @@ const tick = setInterval(() => {
 // Reclaim empty rooms, including never-joined rooms, after 30 minutes.
 const reclaim = setInterval(() => {
   replayArchive.prune();
+  const now = Date.now();
   for (const [code, room] of rooms) {
-    if (
-      ![...room.players.values()].some((player) => player.ws) &&
-      Date.now() - room.lastActivity > 1800000
-    ) {
+    const connectedPlayers = [...room.players.values()].filter((player) => player.ws).length;
+    if (isReclaimable({ connectedPlayers, lastActivity: room.lastActivity }, now)) {
       room.dispose();
       rooms.delete(code);
       store.remove(code);
