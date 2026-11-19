@@ -1173,3 +1173,36 @@ test('an error raised after synchronization is not cleared by unrelated traffic'
   expect(env.log.errors.at(-1)).toBe('Only the host can do that.');
   dispose();
 });
+
+test('presence is published every 100 ms, the cadence the pinned client uses', () => {
+  // The relay rate is a compatibility contract: the original GameCanvas sends at
+  // 100 ms and the ghost interpolation is tuned to it. Changing it needs measured
+  // justification, so it is pinned here rather than left to drift.
+  const env = fakeEnvironment();
+  env.bindings.document.visibilityState = 'visible';
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const socket = env.WebSocket.sockets[0];
+  handshake(env, socket, {
+    phase: 'playing',
+    mapReady: true,
+    holeIds: ['p'],
+    currentMap: { id: 'p' },
+  });
+  env.partyStore.setState({ mapReady: true });
+  const sent = () => socket.sent.filter((frame) => typeof frame.x === 'number').length;
+  const before = sent();
+
+  // Just under the interval: nothing yet.
+  env.clock.advance(99);
+  expect(sent()).toBe(before);
+  // Crossing it publishes exactly one position.
+  env.clock.advance(1);
+  expect(sent()).toBe(before + 1);
+  // The ball moves, and the next interval publishes again: a cadence rather than a
+  // single send. An unchanged position is deliberately coalesced, so the ball has to
+  // move for this to measure the interval rather than the dedupe.
+  env.scene.ballPos.x = 4;
+  env.clock.advance(100);
+  expect(sent()).toBe(before + 2);
+  dispose();
+});

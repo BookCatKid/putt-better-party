@@ -2098,3 +2098,50 @@ test('preparation that resolves after disposal cannot start a match', async () =
   expect(room.snapshot().preparing).toBe(false);
   expect(room.matchId).toBe(null);
 });
+
+test('a ghost from the previous hole is not relayed into the next one', async () => {
+  const { room, host } = await playingRoom();
+  // A position in the current hole.
+  room.handle(host.ws, { x: 1, y: 2, z: 3, px: 0, pz: 0, c: 0, m: 0 });
+  expect(room.positions.size).toBe(1);
+
+  // Starting a round clears presence, so a stale ghost cannot be drawn in a hole
+  // the player has not moved in.
+  room.begin();
+  expect(room.positions.size).toBe(0);
+  room.dispose();
+});
+
+test('a player moved to spectators stops emitting a ghost', async () => {
+  // Elimination sets the same role, so this is the gate that keeps an eliminated
+  // player's ball from lingering on everyone else's screen.
+  const room = new Room('ABCDE', maps, { countdown: 5 });
+  const host = enter(room, 'Host', true);
+  const guest = enter(room, 'Guest');
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p'], elimination: true },
+  });
+  room.handle(host.ws, { t: 'start' });
+
+  room.handle(guest.ws, { x: 1, y: 2, z: 3, px: 0, pz: 0, c: 0, m: 0 });
+  expect(room.positions.size).toBe(1);
+  room.positions.clear();
+
+  // The host moves them out of play; their presence must go with them.
+  room.handle(host.ws, {
+    t: 'host-action',
+    action: 'spectate-player',
+    requestId: 'spectate-1',
+    matchId: room.matchId,
+    holeIndex: room.holeIndex,
+    uid: guest.identity.uid,
+  });
+  expect(room.players.get(guest.identity.uid).role).toBe('spectator');
+  // Past the 40 ms presence throttle, so a rejected position can only be the role
+  // gate - otherwise this would pass because the send was coalesced away.
+  await delay(45);
+  room.handle(guest.ws, { x: 4, y: 5, z: 6, px: 0, pz: 0, c: 0, m: 0 });
+  expect(room.positions.size).toBe(0);
+  room.dispose();
+});
