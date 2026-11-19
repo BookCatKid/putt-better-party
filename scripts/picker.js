@@ -235,6 +235,45 @@ function readSavedPlaylists() {
   };
 }
 
+/**
+ * A course thumbnail that can fail and recover.
+ *
+ * Previews come from upstream, so they can be slow, missing, or briefly refused. The
+ * old handler dimmed the broken image and left it there, which reads as "this card
+ * is disabled" rather than "this picture did not load". This retries once with a
+ * cache-busting parameter - a failed preview is not cached server-side, so the retry
+ * is a real second attempt rather than the same failure replayed - and then shows a
+ * placeholder of the same size, so the grid does not reflow and the card keeps its
+ * original dimensions either way.
+ */
+function BpCourseThumb({ courseId, title, className, eager }) {
+  const React = BetterPartyReact;
+  const [attempt, setAttempt] = React.useState(0);
+  if (attempt >= 2) {
+    return React.createElement(
+      'div',
+      {
+        className: 'bp-thumb-fallback ' + (className ?? ''),
+        role: 'img',
+        'aria-label': title,
+      },
+      React.createElement(
+        'span',
+        { key: 'mark' },
+        (String(title ?? '').trim()[0] ?? '?').toUpperCase(),
+      ),
+    );
+  }
+  return React.createElement('img', {
+    src: '/api/preview/' + encodeURIComponent(courseId) + (attempt ? '?retry=' + attempt : ''),
+    alt: title,
+    loading: eager ? 'eager' : 'lazy',
+    decoding: 'async',
+    className,
+    onError: () => setAttempt((value) => value + 1),
+  });
+}
+
 function CommunityCoursePicker({ config, holeSettings }) {
   const [pickerOpen, setPickerOpen] = BetterPartyReact.useState(false);
   const dialog = BetterPartyReact.useRef(null);
@@ -1118,16 +1157,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
     });
   }
   const image = (courseId, title, classNames, eager = false) =>
-    createElement('img', {
-      src: '/api/preview/' + encodeURIComponent(courseId),
-      alt: title,
-      loading: eager ? 'eager' : 'lazy',
-      decoding: 'async',
-      className: classNames,
-      onError: (event) => {
-        event.currentTarget.style.opacity = '.35';
-      },
-    });
+    createElement(BpCourseThumb, { key: courseId, courseId, title, className: classNames, eager });
   const mode = createElement(
     'label',
     { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
