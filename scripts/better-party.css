@@ -265,6 +265,7 @@
    keep the text small enough that the sticky name column does not crowd the scores. */
 @media (max-width: 520px) {
   .bp-scorecard-scroll {
+    max-height: 60vh;
     max-height: 60dvh;
   }
   .bp-scorecard table {
@@ -496,6 +497,7 @@ body:has(> #app) {
   min-height: 100vh;
 }
 .bp-home {
+  min-height: 100vh;
   min-height: 100dvh;
   display: grid;
   place-items: center;
@@ -1114,6 +1116,7 @@ body:has(> #app) {
   display: flex;
   flex-direction: column;
   width: min(calc(100% - 48px), 800px);
+  max-height: 88vh;
   max-height: 88dvh;
   overflow: hidden;
 }
@@ -1252,6 +1255,7 @@ body:has(> #app) {
   color: rgb(255 255 255 / 55%);
 }
 .bp-dashboard-courses .bp-dashboard-panel-content {
+  max-height: min(45vh, 460px);
   max-height: min(45dvh, 460px);
   overflow: auto;
   overscroll-behavior: contain;
@@ -1278,6 +1282,7 @@ body:has(> #app) {
   flex-shrink: 0;
 }
 .bp-dashboard-player-list {
+  max-height: min(35vh, 300px);
   max-height: min(35dvh, 300px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1350,6 +1355,7 @@ body:has(> #app) {
 @media (max-width: 680px) {
   .bp-dashboard {
     width: calc(100% - 24px);
+    max-height: 92vh;
     max-height: 92dvh;
     padding: 16px;
   }
@@ -1407,6 +1413,7 @@ body:has(> #app) {
   inset: 0;
   width: min(calc(100vw - 48px), 1180px);
   max-width: none;
+  max-height: 88vh;
   max-height: 88dvh;
   margin: auto;
   padding: 0;
@@ -1449,6 +1456,7 @@ body:has(> #app) {
   margin-top: 16px;
 }
 .bp-playlist-dialog .bp-catalog-scroll {
+  max-height: 52vh;
   max-height: 52dvh;
   padding-right: 8px;
 }
@@ -1465,6 +1473,7 @@ body:has(> #app) {
   border-radius: 12px;
 }
 .bp-playlist-dialog .bp-playlist-scroll {
+  max-height: 35vh;
   max-height: 35dvh;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1489,6 +1498,7 @@ body:has(> #app) {
 @media (max-width: 680px) {
   .bp-playlist-dialog {
     width: calc(100vw - 24px);
+    max-height: 94vh;
     max-height: 94dvh;
   }
   .bp-playlist-dialog-header,
@@ -1638,6 +1648,7 @@ body:has(> #app) {
   margin-bottom: 10px;
 }
 .bp-replay-players ul {
+  max-height: 55vh;
   max-height: 55dvh;
   overflow-y: auto;
   list-style: none;
@@ -1743,6 +1754,7 @@ body:has(> #app) {
 }
 
 .bp-host-panel {
+  max-height: min(calc(100vh - 76px), 680px);
   max-height: min(calc(100dvh - 76px), 680px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1828,6 +1840,7 @@ body:has(.bp-management-dialog[open]) .bp-management-notices:not(.bp-dialog-noti
   inset: 0;
   margin: auto;
   width: min(450px, calc(100vw - 24px));
+  max-height: calc(100vh - 32px);
   max-height: calc(100dvh - 32px);
   overflow: auto;
   background: #11272b;
