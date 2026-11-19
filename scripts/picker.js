@@ -245,6 +245,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
   const [daily, setDaily] = BetterPartyReact.useState(false);
   const [maker, setMaker] = BetterPartyReact.useState(null);
   const [page, setPage] = BetterPartyReact.useState({ holes: [] });
+  const [catalogError, setCatalogError] = BetterPartyReact.useState('');
   const [names, setNames] = BetterPartyReact.useState({});
   const [loading, setLoading] = BetterPartyReact.useState(false);
   const [busy, setBusy] = BetterPartyReact.useState(false);
@@ -921,6 +922,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
     return catalogPage;
   }
   const generation = BetterPartyReact.useRef(0);
+  const [reload, setReload] = BetterPartyReact.useState(0);
   BetterPartyReact.useEffect(() => {
     if (config.mapSource !== 'picked' || !pickerOpen) {
       return;
@@ -929,6 +931,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
     const requestGeneration = ++generation.current;
     setLoading(true);
     setError('');
+    setCatalogError('');
     setPage({ holes: [] });
     const timer = setTimeout(async () => {
       try {
@@ -942,7 +945,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
         }
       } catch (err) {
         if (!abortController.signal.aborted) {
-          setError(err.message);
+          setCatalogError(err.message);
         }
       } finally {
         if (!abortController.signal.aborted) {
@@ -955,27 +958,34 @@ function CommunityCoursePicker({ config, holeSettings }) {
       abortController.abort();
       generation.current++;
     };
-  }, [config.mapSource, pickerOpen, search, sort, rating, daily, maker]);
+  }, [config.mapSource, pickerOpen, search, sort, rating, daily, maker, reload]);
   async function more() {
     if (loading || page.nextOffset == null) {
       return;
     }
     const requestGeneration = generation.current;
     setLoading(true);
-    setError('');
+    setCatalogError('');
     try {
       const catalogPage = await fetchCatalogPage(page.nextOffset);
       if (requestGeneration !== generation.current) {
         return;
       }
+      const existing = new Set(page.holes.map((course) => course.id));
+      const fresh = catalogPage.holes.filter((course) => !existing.has(course.id));
+      // The catalogue is a moving list, so a cursor can come back pointing at the
+      // page already shown. Without this the button would fetch the same page for
+      // ever while the dedupe hid the fact that nothing was arriving.
+      const advanced = catalogPage.nextOffset != null && catalogPage.nextOffset !== page.nextOffset;
+      if (fresh.length === 0 && !advanced) {
+        setPage((old) => ({ ...old, nextOffset: null }));
+        return;
+      }
       setPage((old) => ({
-        ...catalogPage,
-        holes: [
-          ...old.holes,
-          ...catalogPage.holes.filter(
-            (candidate) => !old.holes.some((existing) => existing.id === candidate.id),
-          ),
-        ],
+        ...old,
+        total: catalogPage.total,
+        nextOffset: catalogPage.nextOffset,
+        holes: [...old.holes, ...fresh],
       }));
       setNames((previous) => ({
         ...previous,
@@ -983,13 +993,26 @@ function CommunityCoursePicker({ config, holeSettings }) {
       }));
     } catch (err) {
       if (requestGeneration === generation.current) {
-        setError(err.message);
+        setCatalogError(err.message);
       }
     } finally {
       if (requestGeneration === generation.current) {
         setLoading(false);
       }
     }
+  }
+  /**
+   * Re-run whichever catalogue request failed.
+   *
+   * A first page that failed has nothing to append to, so the effect is re-run; a
+   * failed "load more" keeps the page it already has and retries the cursor.
+   */
+  function retryCatalog() {
+    if (page.holes.length === 0) {
+      setReload((value) => value + 1);
+      return;
+    }
+    void more();
   }
   async function add(course) {
     await addCourseById(course.id, course.title);
@@ -1384,6 +1407,17 @@ function CommunityCoursePicker({ config, holeSettings }) {
                     { role: 'alert', className: 'mb-4 text-sm text-red-300' },
                     error,
                   ),
+                catalogError &&
+                  createElement('div', { className: 'mb-4', role: 'alert' }, [
+                    createElement(
+                      'p',
+                      { key: 'message', className: 'text-sm text-red-300' },
+                      catalogError,
+                    ),
+                    actionButton('Try again', retryCatalog, loading, pill, {
+                      'aria-label': 'Retry catalogue',
+                    }),
+                  ]),
                 page.holes.length
                   ? createElement(
                       'ul',
@@ -1402,7 +1436,12 @@ function CommunityCoursePicker({ config, holeSettings }) {
                   createElement(
                     'p',
                     { className: 'text-xs text-[var(--sea-ink-soft)]' },
-                    (page.total ?? 0) + ' holes',
+                    (page.total ?? 0) +
+                      ' holes' +
+                      // End-of-list is stated rather than implied by a missing button,
+                      // so "there is nothing more" is distinguishable from "still
+                      // loading" when a filter returns a short list.
+                      (page.nextOffset == null && page.holes.length ? ' · end of list' : ''),
                   ),
                   page.nextOffset != null &&
                     actionButton(
