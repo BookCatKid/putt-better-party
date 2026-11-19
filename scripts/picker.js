@@ -997,6 +997,24 @@ function CommunityCoursePicker({ config, holeSettings }) {
     source.splice(index + destination, 0, moved);
     update(source);
   }
+  /**
+   * Shuffle the picked order, keeping the same courses and the same duplicates.
+   *
+   * Fisher-Yates over the array itself, so a course added twice stays twice: this
+   * reorders a playlist, it does not build a set out of one. A single course is left
+   * untouched rather than sent as a pointless config change.
+   */
+  function shufflePicked() {
+    if (picked.length < 2) {
+      return;
+    }
+    const next = [...picked];
+    for (let index = next.length - 1; index > 0; index -= 1) {
+      const swap = Math.floor(Math.random() * (index + 1));
+      [next[index], next[swap]] = [next[swap], next[index]];
+    }
+    update(next);
+  }
   function formatCourseAge(timestamp) {
     if (!Number.isFinite(timestamp)) {
       return '';
@@ -1422,6 +1440,10 @@ function CommunityCoursePicker({ config, holeSettings }) {
                 ),
                 picked.length > 0 &&
                   actionButton('Clear', () => update([]), busy || preparing, pill + ' mt-3'),
+                picked.length > 1 &&
+                  actionButton('Shuffle', shufflePicked, busy || preparing, pill + ' mt-3', {
+                    'aria-label': 'Shuffle playlist order',
+                  }),
                 createElement('div', { className: 'bp-saved-playlists' }, [
                   createElement('input', {
                     'aria-label': 'Playlist name',
