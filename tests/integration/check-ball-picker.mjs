@@ -35,6 +35,30 @@ try {
   await waitFor(client, 'typeof document.querySelector("#create")?.onclick==="function"');
   await client.evalJS('document.querySelector("#create").click()');
   await waitFor(client, 'document.querySelectorAll(".bp-ball-swatch").length===15');
+  for (const width of [375, 1280]) {
+    await client.call('Emulation.setDeviceMetricsOverride', {
+      width,
+      height: 800,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    const sizes = await client.evalJS(
+      '[...document.querySelectorAll(".bp-ball-swatch")].map(button=>{const rect=button.getBoundingClientRect();return {width:rect.width,height:rect.height,left:rect.left,right:rect.right}})',
+    );
+    assert(
+      sizes.every(
+        (size) =>
+          Math.abs(size.width - size.height) < 0.1 &&
+          size.width === 36 &&
+          size.left >= 0 &&
+          size.right <= width,
+      ),
+      JSON.stringify(sizes),
+    );
+  }
+  await client.call('Emulation.clearDeviceMetricsOverride');
+  console.log('PASS circular ball swatches at mobile and desktop widths');
+
   assert.equal(
     await client.evalJS(
       'document.querySelector("[aria-label=Classic]").getAttribute("aria-pressed")',

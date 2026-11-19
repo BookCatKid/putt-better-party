@@ -533,7 +533,7 @@ body:has(> #app) {
 .bp-name-input:focus {
   border-color: #34d399;
 }
-.bp-home form button,
+.bp-home form > button,
 .bp-home .bp-browse-leaderboard {
   flex-shrink: 0;
   min-width: 76px;
@@ -550,7 +550,7 @@ body:has(> #app) {
   min-height: 54px;
   text-decoration: none;
 }
-.bp-home form button:hover,
+.bp-home form > button:hover,
 .bp-home .bp-browse-leaderboard:hover,
 .bp-resume:hover {
   background: #ffffff20;
@@ -1745,8 +1745,11 @@ body:has(.bp-management-dialog[open]) .bp-management-notices:not(.bp-dialog-noti
 }
 .bp-entry .bp-ball-swatch {
   display: grid;
+  flex: 0 0 36px;
   width: 36px;
+  min-width: 36px;
   height: 36px;
+  aspect-ratio: 1;
   place-items: center;
   border-radius: 50%;
   border: 1px solid #ffffff25;
