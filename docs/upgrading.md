@@ -205,3 +205,37 @@ patched client, the server, and the upstream catalog together.
 
 See the [operations guide](operations.md) for backups, shutdown and recovery, and
 the [configuration reference](configuration.md) for `BP_DB` and the rest.
+
+## Watching upstream
+
+Upstream compatibility checks are deliberate, on-demand and read-only — nothing
+here runs on a schedule, because the lock is a ratchet and never a suggestion.
+
+```sh
+# 1. Snapshot the live upstream (network; writes only under captures/).
+bun run capture:client
+
+# 2. Verdict: is this capture complete and identical to the pin?
+bun run capture:verify captures/<timestamp>     # exit 0 installable / 1 incomplete / 2 unreadable
+
+# 3. What drifted, exactly — and would the patches still apply?
+bun run capture:diff captures/<timestamp>
+```
+
+`capture:diff` reports four surfaces, and writes nothing:
+
+- **dependencies** — `changed`/`added`/`removed`/`missing`/`mismatched` paths
+  against the lock (the same classification the verifier returns);
+- **media** — registry-discovered models, skyboxes and sounds the new bundles
+  reference or drop, compared by logical name so hash-suffixed renames do not
+  double-report;
+- **textures** — external URIs inside the GLBs, the reference class no
+  JavaScript scan can see;
+- **anchors** — every patch body dry-run against the new bundles: `ok`, or
+  `failed` naming the exact anchor with found-vs-expected counts, or `missing`
+  when a bundle no longer exists by that logical name.
+
+A clean diff (all anchors `ok`, no removals that matter) means the new build is
+a candidate for deliberate adoption — updating the lock and re-proving is a
+human step on purpose. A drifted anchor is information, not a blocker: the pin
+keeps working regardless of what upstream does next.

@@ -9,6 +9,8 @@
     "test": "bun test",
     "prepare:client": "python3 scripts/prepare-client.py",
     "capture:client": "python3 scripts/capture-client.py",
+    "capture:verify": "python3 scripts/verify-capture.py",
+    "capture:diff": "python3 scripts/diff-capture.py",
     "backup": "python3 scripts/backup.py create",
     "backup:prune": "python3 scripts/backup.py prune",
     "release:check": "python3 scripts/release.py check",
