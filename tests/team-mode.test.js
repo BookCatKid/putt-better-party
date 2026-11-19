@@ -143,11 +143,11 @@ test('two players on one team add up on the same hole', async () => {
     await waitForRoom(() => room.phase === 'final');
 
     const standings = room.standings();
-    expect(standings.map((row) => [row.name, row.totalStrokes])).toEqual([
-      ['Team 1', 5],
-      ['Team 2', 5],
-    ]);
-    // Equal totals are separated by the name tiebreak, so the ranks stay dense.
+    // Equal totals are ordered by time and then name, so this asserts the sums by
+    // team rather than an order that depends on how long each team took.
+    const totals = Object.fromEntries(standings.map((row) => [row.name, row.totalStrokes]));
+    expect(totals).toEqual({ 'Team 1': 5, 'Team 2': 5 });
+    // Whatever the tiebreak decides, the ranks stay dense.
     expect(standings.map((row) => row.rank)).toEqual([1, 2]);
     // The team's survived holes are the furthest any member reached.
     expect(standings[0].holesSurvived).toBe(1);

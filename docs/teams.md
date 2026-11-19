@@ -37,7 +37,8 @@ server policy, pinned by `tests/team-mode.test.js`.
   `holesSurvived` is the furthest any member reached.
 - **Ranking** uses the same comparator as players - survival, then lower score, then
   faster time, then name - so ranks stay dense and the client's one-medal-per-rank
-  indexing is safe. Equal team totals are separated by name.
+  indexing is safe. Equal team totals are separated by the faster time and then by
+  name, exactly as two equal player scorecards are.
 - In **elimination**, the party ends when **one team is left** (or none), not when one
   player is. A surviving team-mate must not be made to play on alone.
 
