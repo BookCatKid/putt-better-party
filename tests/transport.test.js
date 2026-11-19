@@ -1243,3 +1243,91 @@ test('a backed-up socket stops publishing presence but still reports results', (
   expect(positions()).toBe(before + 1);
   dispose();
 });
+
+test('the client deadline stays inside the window the server will accept', () => {
+  // The runtime builds its deadline from the snapshot's timerMs, anchored on
+  // arrival, so it lands one one-way trip after the server's own deadline. The
+  // budget is trimmed so a shot at the very end is not sent and then rejected.
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const socket = env.WebSocket.sockets[0];
+  handshake(env, socket, {
+    phase: 'playing',
+    mapReady: true,
+    holeIds: ['p'],
+    currentMap: { id: 'p' },
+    timerMs: 60_000,
+  });
+  socket.message({
+    t: 'party',
+    phase: 'playing',
+    matchId: 'm1',
+    holeIndex: 0,
+    holeIds: ['p'],
+    startsAt: Date.now(),
+    timerMs: 60_000,
+    now: Date.now(),
+    config: {},
+    roster: [],
+    initialPlayers: 1,
+    roundHistory: [],
+    playlistTitles: {},
+    vote: null,
+    randomHistoryCount: 0,
+    preparing: false,
+    awaitingPlayers: 0,
+    nextError: null,
+    recoveryNotice: false,
+  });
+  expect(env.partyStore.state.timerMs).toBe(60_000 - 250);
+
+  // A countdown is not trimmed: the start must not move earlier, or the client
+  // would unblock putting before the server accepts it.
+  socket.message({
+    t: 'party',
+    phase: 'countdown',
+    matchId: 'm1',
+    holeIndex: 0,
+    holeIds: ['p'],
+    startsAt: Date.now() + 5000,
+    timerMs: 60_000,
+    now: Date.now(),
+    config: {},
+    roster: [],
+    initialPlayers: 1,
+    roundHistory: [],
+    playlistTitles: {},
+    vote: null,
+    randomHistoryCount: 0,
+    preparing: false,
+    awaitingPlayers: 0,
+    nextError: null,
+    recoveryNotice: false,
+  });
+  expect(env.partyStore.state.timerMs).toBe(60_000);
+
+  // A budget shorter than the margin cannot go negative.
+  socket.message({
+    t: 'party',
+    phase: 'playing',
+    matchId: 'm2',
+    holeIndex: 0,
+    holeIds: ['p'],
+    startsAt: Date.now(),
+    timerMs: 100,
+    now: Date.now(),
+    config: {},
+    roster: [],
+    initialPlayers: 1,
+    roundHistory: [],
+    playlistTitles: {},
+    vote: null,
+    randomHistoryCount: 0,
+    preparing: false,
+    awaitingPlayers: 0,
+    nextError: null,
+    recoveryNotice: false,
+  });
+  expect(env.partyStore.state.timerMs).toBe(0);
+  dispose();
+});

@@ -76,7 +76,11 @@ try {
   }
   await waitFor(client, '!!document.querySelector(".bp-host-panel")');
   await click('+30s');
-  await expect('s.timerEndsAt-s.startAt===90000');
+  // The extension must reach the client (about 90 s, not the original 60 s), and
+  // the client's own window must never exceed what the server will accept - the
+  // adapter trims a small safety margin so a shot at the very end is not sent and
+  // then rejected.
+  await expect('s.timerEndsAt-s.startAt<=90000&&s.timerEndsAt-s.startAt>=89500');
   console.log('PASS host time extension through UI');
   if (!(await client.evalJS('!!document.querySelector(".bp-host-panel")'))) {
     await click('Party controls');

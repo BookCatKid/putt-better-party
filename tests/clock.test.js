@@ -187,3 +187,63 @@ test('elapsed time equals the number of steps at 1/120 s each', () => {
   expect(counted).toBe(120);
   expect(clock.elapsed).toBeCloseTo(1, 9);
 });
+
+/**
+ * The snapshot-to-deadline conversion, transcribed from the pinned runtime.
+ *
+ * Recovered source, for comparison:
+ *   t = e.startsAt - e.now
+ *   n = (e.phase === 'countdown' || e.phase === 'playing') ? Date.now() + t : 0
+ *   r = (e.phase === 'playing' && n) ? n + e.timerMs : 0
+ *
+ * The property that matters is that `e.now` - the server's own clock - is what
+ * converts an absolute server time into a client one. Using the client's clock for
+ * both sides would make the countdown wrong by the skew, which on a device with a
+ * mis-set clock is hours rather than milliseconds.
+ */
+function applySnapshot(snapshot, clientNow) {
+  const remaining = snapshot.startsAt - snapshot.now;
+  const startAt =
+    snapshot.phase === 'countdown' || snapshot.phase === 'playing' ? clientNow + remaining : 0;
+  const timerEndsAt = snapshot.phase === 'playing' && startAt ? startAt + snapshot.timerMs : 0;
+  return { startAt, timerEndsAt };
+}
+
+test('a mis-set client clock does not change how long the round has left', () => {
+  const serverNow = 1_000_000;
+  const snapshot = {
+    phase: 'playing',
+    startsAt: serverNow + 5_000,
+    now: serverNow,
+    timerMs: 60_000,
+  };
+  // Same snapshot read by a client whose clock is right, and one an hour ahead.
+  const correct = applySnapshot(snapshot, serverNow + 100);
+  const skewed = applySnapshot(snapshot, serverNow + 100 + 3_600_000);
+  expect(skewed.startAt - correct.startAt).toBe(3_600_000);
+  // The countdown, and therefore the visible timer, is identical on both.
+  expect(skewed.timerEndsAt - (serverNow + 100 + 3_600_000)).toBe(
+    correct.timerEndsAt - (serverNow + 100),
+  );
+});
+
+test('the visible deadline stays inside the window the server will accept', () => {
+  // The client anchors on arrival, so its deadline is one one-way trip later than
+  // the server's. Trimming the budget by the margin is what pulls it back in.
+  const serverNow = 1_000_000;
+  const startsAt = serverNow + 5_000;
+  const timerMs = 60_000;
+  const margin = 250;
+  const serverDeadline = startsAt + timerMs;
+
+  for (const oneWayLatency of [0, 40, 120, 250]) {
+    const clientNow = serverNow + oneWayLatency;
+    const { timerEndsAt } = applySnapshot(
+      { phase: 'playing', startsAt, now: serverNow, timerMs: timerMs - margin },
+      clientNow,
+    );
+    // Converted back into server time, the client deadline must not be later than
+    // the server's, or a shot at the very end is sent and then rejected.
+    expect(timerEndsAt - oneWayLatency).toBeLessThanOrEqual(serverDeadline);
+  }
+});

@@ -19,6 +19,23 @@ const globalSetInterval = (handler, delayMs) => setInterval(handler, delayMs);
 const globalClearInterval = (handle) => clearInterval(handle);
 
 /**
+ * How much of the server's round budget the client declines to use.
+ *
+ * The runtime turns the server's absolute `startsAt` into a client deadline by
+ * adding `timerMs`, anchored on the moment the snapshot arrives. That deadline
+ * therefore lands one one-way trip *after* the server's own
+ * `startsAt + timerMs`: for that long the client shows time the server will not
+ * accept, and a shot taken at the very end is sent, rejected and lost. Trimming
+ * the budget keeps the visible deadline inside the server's window.
+ *
+ * Only the end is moved. `startsAt` is untouched, so play is never unblocked
+ * early - the opposite hazard, where the client lets a player putt before the
+ * server accepts, would be worse than a slightly short timer. A quarter second is
+ * imperceptible on a countdown and covers a normal one-way trip with jitter.
+ */
+const CLOCK_SAFETY_MARGIN_MS = 250;
+
+/**
  * @param {Partial<TransportBindings>} [injected]
  * @returns {TransportBindings}
  */
@@ -342,7 +359,14 @@ function connectBetterParty(code, identity, options = {}) {
       forfeitSent = false;
       lastStrokeCount = -1;
     }
-    bind.updateParty(message);
+    bind.updateParty(
+      message.phase === 'playing' && typeof message.timerMs === 'number'
+        ? // See CLOCK_SAFETY_MARGIN_MS: the runtime derives the client deadline from
+          // this budget, so trimming it here is what keeps that deadline inside the
+          // server's acceptance window. The start is deliberately untouched.
+          { ...message, timerMs: Math.max(0, message.timerMs - CLOCK_SAFETY_MARGIN_MS) }
+        : message,
+    );
     if (
       (message.phase === 'countdown' || message.phase === 'playing') &&
       previous.selfRole !== 'spectator'
