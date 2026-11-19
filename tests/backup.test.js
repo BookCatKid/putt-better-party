@@ -16,6 +16,16 @@ import { spawnSync } from 'node:child_process';
  */
 const script = join(import.meta.dir, '..', 'scripts', 'backup.py');
 
+/**
+ * Every test here drives the real tool in a child process, and a few of them run
+ * it half a dozen times. Bun's default five-second limit is a bound on logic, not
+ * on process startup: under a full parallel suite these were intermittently
+ * failing at 5.0 s without anything being wrong. The bound is raised rather than
+ * the assertions relaxed - a genuine hang still fails, just later.
+ */
+const SPAWN_TIMEOUT_MS = 30_000;
+const spawnTest = (name, fn) => test(name, fn, SPAWN_TIMEOUT_MS);
+
 function run(arguments_) {
   const result = spawnSync('python3', [script, ...arguments_], { encoding: 'utf8' });
   return { code: result.status, out: result.stdout, err: result.stderr };
@@ -45,7 +55,7 @@ function temporaryDirectory() {
   return mkdtempSync(join(tmpdir(), 'bp-backup-test-'));
 }
 
-test('a backup of a live database captures rows still in the write-ahead log', () => {
+spawnTest('a backup of a live database captures rows still in the write-ahead log', () => {
   const directory = temporaryDirectory();
   const { filename, database } = liveDatabase(directory, ['AAAAA', 'BBBBB', 'CCCCC']);
   const walPath = filename + '-wal';
@@ -64,7 +74,7 @@ test('a backup of a live database captures rows still in the write-ahead log', (
   }
 });
 
-test('the backup is one file, not a set with a write-ahead log beside it', () => {
+spawnTest('the backup is one file, not a set with a write-ahead log beside it', () => {
   const directory = temporaryDirectory();
   const { filename, database } = liveDatabase(directory, ['AAAAA']);
   const backups = join(directory, 'backups');
@@ -80,7 +90,7 @@ test('the backup is one file, not a set with a write-ahead log beside it', () =>
   }
 });
 
-test('a backup and its directory are private to their owner', () => {
+spawnTest('a backup and its directory are private to their owner', () => {
   const directory = temporaryDirectory();
   const { filename, database } = liveDatabase(directory, ['AAAAA']);
   const backups = join(directory, 'backups');
@@ -96,7 +106,7 @@ test('a backup and its directory are private to their owner', () => {
   }
 });
 
-test('verify refuses a backup that is readable beyond its owner', () => {
+spawnTest('verify refuses a backup that is readable beyond its owner', () => {
   const directory = temporaryDirectory();
   const { filename, database } = liveDatabase(directory, ['AAAAA']);
   const backups = join(directory, 'backups');
@@ -116,33 +126,38 @@ test('verify refuses a backup that is readable beyond its owner', () => {
   }
 });
 
-test('verify reports a checkpoint version this build cannot read instead of passing silently', () => {
-  const directory = temporaryDirectory();
-  const { filename, database } = liveDatabase(directory, ['AAAAA']);
-  const backups = join(directory, 'backups');
-  try {
-    expect(run(['create', '--db', filename, '--directory', backups]).code).toBe(0);
-    const backup = join(
-      backups,
-      readdirSync(backups).find((name) => name.endsWith('.sqlite')),
-    );
-    // Rewrite every row as a future version, which is what a rollback meets.
-    const rewritten = new Database(backup);
-    rewritten.exec('UPDATE rooms SET payload = replace(payload, \'"version":1\', \'"version":2\')');
-    rewritten.close();
-    const verified = run(['verify', backup]);
-    // The file is intact, so verify succeeds, but it must say no room is current
-    // rather than implying this build could start with them.
-    expect(verified.code).toBe(0);
-    expect(verified.out).toContain('checkpoint version 2');
-    expect(verified.out).toContain('would skip every room');
-  } finally {
-    database.close();
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
+spawnTest(
+  'verify reports a checkpoint version this build cannot read instead of passing silently',
+  () => {
+    const directory = temporaryDirectory();
+    const { filename, database } = liveDatabase(directory, ['AAAAA']);
+    const backups = join(directory, 'backups');
+    try {
+      expect(run(['create', '--db', filename, '--directory', backups]).code).toBe(0);
+      const backup = join(
+        backups,
+        readdirSync(backups).find((name) => name.endsWith('.sqlite')),
+      );
+      // Rewrite every row as a future version, which is what a rollback meets.
+      const rewritten = new Database(backup);
+      rewritten.exec(
+        'UPDATE rooms SET payload = replace(payload, \'"version":1\', \'"version":2\')',
+      );
+      rewritten.close();
+      const verified = run(['verify', backup]);
+      // The file is intact, so verify succeeds, but it must say no room is current
+      // rather than implying this build could start with them.
+      expect(verified.code).toBe(0);
+      expect(verified.out).toContain('checkpoint version 2');
+      expect(verified.out).toContain('would skip every room');
+    } finally {
+      database.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
 
-test('verify rejects a file that is not a room database', () => {
+spawnTest('verify rejects a file that is not a room database', () => {
   const directory = temporaryDirectory();
   const { filename, database } = liveDatabase(directory, ['AAAAA']);
   try {
@@ -164,7 +179,7 @@ test('verify rejects a file that is not a room database', () => {
   }
 });
 
-test('prune keeps the newest backups and never removes the last one', () => {
+spawnTest('prune keeps the newest backups and never removes the last one', () => {
   const directory = temporaryDirectory();
   const { filename, database } = liveDatabase(directory, ['AAAAA']);
   const backups = join(directory, 'backups');
@@ -194,7 +209,7 @@ test('prune keeps the newest backups and never removes the last one', () => {
   }
 });
 
-test('a backed-up database opens in the service and keeps its rooms', () => {
+spawnTest('a backed-up database opens in the service and keeps its rooms', () => {
   const directory = temporaryDirectory();
   const { filename, database } = liveDatabase(directory, ['REST1', 'REST2']);
   const backups = join(directory, 'backups');

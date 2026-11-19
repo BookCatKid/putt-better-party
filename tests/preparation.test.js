@@ -4,6 +4,16 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync 
 import path from 'node:path';
 
 /**
+ * The tests below drive the real preparation script, which verifies every archived
+ * asset hash and patches ten bundles before it publishes. That is seconds of work
+ * by design, not a hang, so the bound is raised above Bun's five-second default -
+ * under a full parallel suite these were intermittently failing at 5.0 s with
+ * nothing wrong. No assertion is relaxed: a genuine hang still fails, just later.
+ */
+const PREPARE_TIMEOUT_MS = 120_000;
+const prepareTest = (name, fn) => test(name, fn, PREPARE_TIMEOUT_MS);
+
+/**
  * Atomic preparation.
  *
  * `scripts/prepare-client.py` used to delete the live `web/` and then copy and
@@ -50,7 +60,7 @@ const fingerprint = (directory) => {
   return entries;
 };
 
-test('the prepared client exists and its entry modules are present', () => {
+prepareTest('the prepared client exists and its entry modules are present', () => {
   expect(existsSync(prepared)).toBe(true);
   // The entry, one lazily loaded route, and the generated validator closure.
   expect(existsSync(path.join(prepared, 'assets/index-DFMxt6BL.js'))).toBe(true);
@@ -58,13 +68,13 @@ test('the prepared client exists and its entry modules are present', () => {
   expect(existsSync(path.join(prepared, 'validation/specValidation-vqop-JBL.js'))).toBe(true);
 });
 
-test('preparation writes no generated output into the immutable archive', () => {
+prepareTest('preparation writes no generated output into the immutable archive', () => {
   // The validation closure is generated, so it belongs to the prepared build. It
   // used to be written under private-client/, which holds hash-pinned originals.
   expect(existsSync(path.join(archived, 'validation'))).toBe(false);
 });
 
-test('the patcher refuses to run outside preparation', () => {
+prepareTest('the patcher refuses to run outside preparation', () => {
   const result = spawnSync('python3', [path.join(root, 'scripts/patch-client.py')], {
     cwd: root,
     encoding: 'utf8',
@@ -74,7 +84,7 @@ test('the patcher refuses to run outside preparation', () => {
   expect(result.stderr).toContain('must run through prepare-client.py');
 });
 
-test('a failing patch leaves the live build intact and no staging behind', () => {
+prepareTest('a failing patch leaves the live build intact and no staging behind', () => {
   // Break an authored module that is spliced into a patched bundle, so the failure
   // happens after staging has begun but before publication.
   const target = path.join(root, 'scripts/party-runtime.js');
@@ -100,20 +110,24 @@ test('a failing patch leaves the live build intact and no staging behind', () =>
   }
 });
 
-test('a successful preparation publishes a complete build and cleans up', () => {
-  const result = spawnSync('python3', [path.join(root, 'scripts/prepare-client.py')], {
-    cwd: root,
-    encoding: 'utf8',
-  });
-  expect(result.status).toBe(0);
-  expect(result.stdout).toContain('Syntax-checked');
-  expect(result.stdout).toContain('Cross-checked');
-  expect(stagingStrays()).toEqual([]);
+prepareTest(
+  'a successful preparation publishes a complete build and cleans up',
+  () => {
+    const result = spawnSync('python3', [path.join(root, 'scripts/prepare-client.py')], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Syntax-checked');
+    expect(result.stdout).toContain('Cross-checked');
+    expect(stagingStrays()).toEqual([]);
 
-  // Every pinned file must be present in the published build.
-  const lock = JSON.parse(readFileSync(path.join(root, 'scripts/client-lock.json'), 'utf8'));
-  const missing = Object.keys(lock).filter(
-    (entry) => !existsSync(path.join(prepared, entry.replace(/^\//, ''))),
-  );
-  expect(missing).toEqual([]);
-}, 300_000);
+    // Every pinned file must be present in the published build.
+    const lock = JSON.parse(readFileSync(path.join(root, 'scripts/client-lock.json'), 'utf8'));
+    const missing = Object.keys(lock).filter(
+      (entry) => !existsSync(path.join(prepared, entry.replace(/^\//, ''))),
+    );
+    expect(missing).toEqual([]);
+  },
+  300_000,
+);
