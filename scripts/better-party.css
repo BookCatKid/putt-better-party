@@ -218,6 +218,42 @@
 .bp-holed {
   color: #a7f3d0;
 }
+/* A course name under its hole number: visible without hover, narrow enough that a
+   long playlist still fits, and truncated with the full name in `title`. */
+.bp-hole-name {
+  display: block;
+  max-width: 76px;
+  margin: 1px auto 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  opacity: 0.6;
+}
+.bp-cell-flag {
+  margin-left: 1px;
+  opacity: 0.7;
+}
+.bp-cell-relative {
+  display: block;
+  opacity: 0.75;
+}
+.bp-dnf {
+  color: #fca5a5;
+}
+/* A phone shows fewer columns at once, so give the scrolling table more height and
+   keep the text small enough that the sticky name column does not crowd the scores. */
+@media (max-width: 520px) {
+  .bp-scorecard-scroll {
+    max-height: 60dvh;
+  }
+  .bp-scorecard table {
+    font-size: 10px;
+  }
+  .bp-hole-name {
+    max-width: 56px;
+  }
+}
 .bp-saved-playlists {
   display: flex;
   flex-wrap: wrap;

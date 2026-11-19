@@ -77,6 +77,23 @@ The scorecard must agree with itself: the per-hole cell for a timeout shows the 
 charged value that is added to the total, and `tests/timeout-penalties.test.js` and
 `check-scorecard-totals.mjs` both assert that the rows add up to the total.
 
+**The scorecard is a view, not a calculation.** It renders `roundHistory` (one row per
+hole) and `final.standings` (order and totals) and derives nothing the server has not
+already recorded, except two display values:
+
+- **Relative to par** is `totalStrokes` minus the par of the holes the player was
+  actually scored on. A skipped hole, an `ended` row with no score and an elimination
+  contribute no par, so a player who never finished a hole has no relative figure
+  rather than a misleading "E".
+- **State labels** are named rather than shown as a bare dash: `Skip` for a skipped
+  hole, `End` for a party the host ended, `DNF` for elimination, and a charged score
+  with a `⏱` marker for a timeout. A timeout is a real score, so it keeps its number;
+  the marker stops it looking like a holed hole.
+
+Course names are visible under each hole number rather than only in a hover title,
+because a phone has no hover. The table scrolls horizontally with the player-name
+column pinned, so a long playlist stays readable.
+
 **Rematch** starts a new match with a new `matchId`; the previous rounds stay in
 `roundHistory`, and a restart of the same course keeps the current match identity.
 

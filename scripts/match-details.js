@@ -43,6 +43,53 @@ function BpGuestPlaylist() {
     ),
   ]);
 }
+/**
+ * How a scorecard cell reads for one player on one hole.
+ *
+ * Every state the server records is named rather than left as a bare dash, because a
+ * dash for a skipped hole, an ended party and a missing row would be three different
+ * things shown the same way. A timeout keeps its charged score - it is a real score -
+ * but carries a marker so it is not mistaken for a holed hole.
+ */
+function bpScoreCell(round, score) {
+  if (round.status === 'skipped') {
+    return { label: 'Skip', flag: '', className: '' };
+  }
+  if (score?.status === 'eliminated') {
+    return { label: 'DNF', flag: '', className: 'bp-dnf' };
+  }
+  if (score?.status === 'ended') {
+    return { label: 'End', flag: '', className: '' };
+  }
+  if (typeof score?.strokes === 'number') {
+    return {
+      label: score.strokes,
+      flag: score.status === 'timeout' ? '⏱' : '',
+      className: score.status === 'holed' ? 'bp-holed' : '',
+    };
+  }
+  return { label: '—', flag: '', className: '' };
+}
+
+/**
+ * Strokes relative to par, over the holes a player was actually scored on.
+ *
+ * The denominator is the par of the holes with a recorded score, not the whole
+ * playlist: a player eliminated at the third hole did not face the remaining par, and
+ * a skipped hole has no par to compare against. This is derived from the same rows
+ * the total is summed from, so the two can never disagree.
+ */
+function bpRelativeToPar(strokes, parFaced) {
+  if (!parFaced) {
+    return '';
+  }
+  const relative = strokes - parFaced;
+  if (relative === 0) {
+    return 'E';
+  }
+  return relative > 0 ? '+' + relative : '−' + Math.abs(relative);
+}
+
 function BpScorecard() {
   const history = useBetterPartyState(betterPartyStore, (partyState) => partyState.roundHistory);
   const final = useBetterPartyState(betterPartyStore, (partyState) => partyState.final);
@@ -71,7 +118,14 @@ function BpScorecard() {
             createElement('tr', {}, [
               createElement('th', {}, 'Hole'),
               ...history.map((round) =>
-                createElement('th', { key: round.index, title: round.title }, round.index + 1),
+                createElement('th', { key: round.index, title: round.title }, [
+                  createElement('span', { key: 'number' }, round.index + 1),
+                  // The course name as a visible label rather than a hover title:
+                  // a phone has no hover, and "which hole was that?" is the first
+                  // question a scorecard has to answer. Truncated to keep the
+                  // columns narrow; the full name stays in `title`.
+                  createElement('small', { key: 'name', className: 'bp-hole-name' }, round.title),
+                ]),
               ),
               createElement('th', {}, 'Total'),
             ]),
@@ -90,8 +144,15 @@ function BpScorecard() {
           createElement(
             'tbody',
             {},
-            final.standings.map((player) =>
-              createElement('tr', { key: player.uid }, [
+            final.standings.map((player) => {
+              // The par this player was actually scored against, derived from the
+              // same rows the total is summed from.
+              const parFaced = history.reduce((total, round) => {
+                const score = round.rows.find((entry) => entry.uid === player.uid);
+                return total + (typeof score?.strokes === 'number' ? (round.par ?? 0) : 0);
+              }, 0);
+              const relative = bpRelativeToPar(player.totalStrokes, parFaced);
+              return createElement('tr', { key: player.uid }, [
                 createElement(
                   'th',
                   {},
@@ -103,17 +164,23 @@ function BpScorecard() {
                 ),
                 ...history.map((round) => {
                   const score = round.rows.find((entry) => entry.uid === player.uid);
+                  const cell = bpScoreCell(round, score);
                   return createElement(
                     'td',
                     {
                       key: round.index,
                       title: round.title + ' · ' + (score?.status ?? round.status),
-                      className: score?.status === 'holed' ? 'bp-holed' : '',
+                      className: cell.className,
+                      'data-status': score?.status ?? round.status,
                     },
                     [
-                      round.status === 'skipped'
-                        ? 'Skip'
-                        : (score?.strokes ?? (score?.status === 'eliminated' ? 'DNF' : '—')),
+                      cell.label,
+                      cell.flag &&
+                        createElement(
+                          'small',
+                          { key: 'flag', className: 'bp-cell-flag' },
+                          cell.flag,
+                        ),
                       score?.timeMs != null &&
                         createElement(
                           'small',
@@ -123,16 +190,25 @@ function BpScorecard() {
                     ],
                   );
                 }),
-                createElement('td', {}, [
-                  player.totalStrokes,
-                  createElement(
-                    'small',
-                    { key: 'time', className: 'bp-cell-time' },
-                    bpFormatTime(player.totalTimeMs),
-                  ),
-                ]),
-              ]),
-            ),
+                createElement(
+                  'td',
+                  { key: 'total', title: relative ? 'Relative to par ' + relative : undefined },
+                  [
+                    player.totalStrokes,
+                    createElement(
+                      'small',
+                      { key: 'relative', className: 'bp-cell-relative' },
+                      relative,
+                    ),
+                    createElement(
+                      'small',
+                      { key: 'time', className: 'bp-cell-time' },
+                      bpFormatTime(player.totalTimeMs),
+                    ),
+                  ],
+                ),
+              ]);
+            }),
           ),
         ]),
       ),
