@@ -86,8 +86,14 @@ export interface ProgressFrame {
   st: number;
 }
 
-export interface ForfeitFrame {
+export interface ForfeitFrame extends Partial<RoundIdentity> {
   t: 'forfeit';
+  replay?: unknown;
+}
+
+export interface ReplaySamplesFrame extends RoundIdentity {
+  t: 'replay-samples';
+  replay: unknown;
 }
 
 /**
@@ -99,6 +105,7 @@ export interface FinishFrame extends Partial<RoundIdentity> {
   f: 1;
   s: number;
   p: number;
+  replay?: unknown;
 }
 
 export interface PingFrame {
@@ -165,6 +172,7 @@ export type ClientFrame =
   | SceneFrame
   | ProgressFrame
   | ForfeitFrame
+  | ReplaySamplesFrame
   | FinishFrame
   | PingFrame
   | ConfigFrame
@@ -316,6 +324,7 @@ const CLIENT_FRAME_TAGS: Record<ClientFrameTag, true> = {
   scene: true,
   prog: true,
   forfeit: true,
+  'replay-samples': true,
   ping: true,
   config: true,
   start: true,

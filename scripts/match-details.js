@@ -591,3 +591,26 @@ function BpCourseVote() {
     ),
   ]);
 }
+
+function BpReplayLink() {
+  const replayId = useBetterPartyState(betterPartyStore, (partyState) => partyState.replayId);
+  const phase = useBetterPartyState(betterPartyStore, (partyState) => partyState.phase);
+  const hole = useBetterPartyState(betterPartyStore, (partyState) => partyState.holeIndex);
+  if (!replayId) {
+    return null;
+  }
+  return BetterPartyReact.createElement(
+    'a',
+    {
+      href:
+        '/replays/' +
+        encodeURIComponent(replayId) +
+        (phase === 'hole-results' ? '?hole=' + hole : ''),
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      className:
+        'mb-3 block rounded-full bg-white/10 px-4 py-2 text-sm font-bold text-white/85 no-underline transition hover:bg-white/20',
+    },
+    'View party replays',
+  );
+}

@@ -1,4 +1,5 @@
 import type { Server } from 'bun';
+import { ReplayArchive } from './replays.js';
 import { Leaderboard } from './leaderboard.js';
 import { PlaylistJobs, parseFilters } from './playlist-generator.js';
 import { currentDailyNumber, validateCourse } from './upstream/client-adapter.js';
@@ -69,6 +70,8 @@ const loadMap = (id: string) => {
   return fetchPublicMap(id, { saved: true });
 };
 const leaderboard = new Leaderboard(store.db);
+const replayArchive = new ReplayArchive(store.db);
+const onReplayRound = replayArchive.record.bind(replayArchive);
 const playlistJobs = new PlaylistJobs();
 const onFinalize = (room: Room) => {
   try {
@@ -78,7 +81,7 @@ const onFinalize = (room: Room) => {
     logEvent('leaderboard_record_failed', { room: room.code });
   }
 };
-const rooms = store.load(courseIndex, { prepareMatch, loadMap, onFinalize });
+const rooms = store.load(courseIndex, { prepareMatch, loadMap, onFinalize, onReplayRound });
 for (const id of courseIndex.keys()) {
   rememberPublicMetadata(id, courseIndex.get(id)?.title);
 }
@@ -298,6 +301,7 @@ async function handleRequest(
         loadMap,
         onChange: (changedRoom) => store.save(changedRoom),
         onFinalize,
+        onReplayRound,
       });
       rooms.set(code, room);
       store.save(room);
@@ -454,6 +458,31 @@ async function handleRequest(
         },
       );
       return response(job);
+    }
+    if (pathname.startsWith('/api/replays/')) {
+      if (!readOnly) {
+        return methodNotAllowed(READ_METHODS);
+      }
+      const match = /^\/api\/replays\/([A-Za-z0-9_-]{32})(?:\/(\d{1,5}))?$/.exec(pathname);
+      if (!match) {
+        return response({ error: 'Replay not found' }, 404);
+      }
+      if (match[2] !== undefined) {
+        const round = replayArchive.round(match[1], Number(match[2]));
+        return round
+          ? new Response(round, {
+              headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+            })
+          : response({ error: 'Replay not found or expired' }, 404);
+      }
+      const summary = replayArchive.summary(match[1]);
+      return summary ? response(summary) : response({ error: 'Replay not found or expired' }, 404);
+    }
+    if (/^\/replays\/[A-Za-z0-9_-]{32}$/.test(pathname)) {
+      if (!readOnly) {
+        return methodNotAllowed(READ_METHODS);
+      }
+      return page(html.replace('Party · Better Party', 'Replays · Better Party'));
     }
     if (pathname === '/api/leaderboard' && req.method === 'GET') {
       const holes = Number(url.searchParams.get('holes') ?? 3);
@@ -615,6 +644,7 @@ const tick = setInterval(() => {
 }, 100);
 // Reclaim empty rooms, including never-joined rooms, after 30 minutes.
 const reclaim = setInterval(() => {
+  replayArchive.prune();
   for (const [code, room] of rooms) {
     if (
       ![...room.players.values()].some((player) => player.ws) &&

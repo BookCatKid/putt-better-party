@@ -1,3 +1,4 @@
+import { createReplayRecorder } from './replay-timeline.js';
 /**
  * Party WebSocket adapter for the original game's state stores and presence API.
  * Wire fields and the 100ms ghost update loop follow the pinned GameCanvas bundle.
@@ -98,6 +99,7 @@ function connectBetterParty(code, identity, options = {}) {
   // so sends keep "succeeding" into the void. Counting unanswered heartbeats is
   // the only way to notice, and a real drop is what forces a reconnect.
   let unansweredPings = 0;
+  const replayRecorder = createReplayRecorder();
 
   function socketOpen() {
     return socket?.readyState === bind.WebSocket.OPEN;
@@ -173,10 +175,25 @@ function connectBetterParty(code, identity, options = {}) {
       }
     }
     if (game.phase === 'forfeit' && !forfeitSent) {
-      forfeitSent = send({ t: 'forfeit' });
+      replayRecorder.sample(party, game, bind.scene, Date.now(), true);
+      const replay = replayRecorder.payload(party, game, bind.scene, true);
+      forfeitSent = send({ t: 'forfeit', ...(replay ? { replay } : {}) });
+      if (forfeitSent) {
+        replayRecorder.sent();
+      }
     }
     if (game.phase === 'holed' && game.result && !completionSent) {
-      completionSent = send({ f: 1, s: game.result.strokes, p: game.result.par });
+      replayRecorder.sample(party, game, bind.scene, Date.now(), true);
+      const replay = replayRecorder.payload(party, game, bind.scene, true);
+      completionSent = send({
+        f: 1,
+        s: game.result.strokes,
+        p: game.result.par,
+        ...(replay ? { replay } : {}),
+      });
+      if (completionSent) {
+        replayRecorder.sent();
+      }
     }
   }
 
@@ -526,6 +543,31 @@ function connectBetterParty(code, identity, options = {}) {
     }
   }, 15_000);
   const presenceTimer = bind.setInterval(publishPosition, 100);
+  // Presence can be hidden or disabled; replay capture is a separate recorder.
+  const replayTimer = bind.setInterval(() => {
+    if (!synchronized || roundChangePending || completionSent || forfeitSent) {
+      return;
+    }
+    const party = bind.partyStore.state;
+    const game = bind.gameStore.state;
+    replayRecorder.sample(party, game, bind.scene, Date.now());
+  }, 50);
+  const replayUpload = bind.setInterval(() => {
+    if (!synchronized || roundChangePending || completionSent || forfeitSent) {
+      return;
+    }
+    const party = bind.partyStore.state;
+    if (party.phase !== 'playing' || party.selfRole === 'spectator') {
+      return;
+    }
+    const replay = replayRecorder.payload(party, bind.gameStore.state, bind.scene);
+    if (
+      replay &&
+      send({ t: 'replay-samples', matchId: party.matchId, holeIndex: party.holeIndex, replay })
+    ) {
+      replayRecorder.sent();
+    }
+  }, 1000);
 
   return () => {
     disposed = true;
@@ -535,6 +577,8 @@ function connectBetterParty(code, identity, options = {}) {
     bind.clearTimeout(reconnectTimer);
     bind.clearInterval(heartbeat);
     bind.clearInterval(presenceTimer);
+    bind.clearInterval(replayTimer);
+    bind.clearInterval(replayUpload);
     gameSubscription.unsubscribe();
     socket?.close();
     socket = null;

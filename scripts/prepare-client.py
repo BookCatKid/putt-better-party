@@ -135,6 +135,9 @@ try:
         env=environment,
     )
 
+    shutil.copyfile(root / "scripts/replay-timeline.js", staging / "assets/replay-timeline.js")
+    shutil.copyfile(root / "scripts/replay-page.js", staging / "assets/bp-replay-page.js")
+
     # Syntax-check every bundle whose bytes the patcher changed. A patch that
     # produces invalid JavaScript would otherwise only fail in the browser, after
     # publication, and only for whoever loads that route. Bundles are compared

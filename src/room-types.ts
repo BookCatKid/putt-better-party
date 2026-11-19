@@ -1,3 +1,4 @@
+import type { ReplayRound } from './replays.js';
 import type {
   CourseSpecification,
   LoadCourse,
@@ -84,6 +85,7 @@ export interface RoomOptions {
   onIdle?: (room: Room) => void;
   onChange?: (room: Room) => void;
   onFinalize?: (room: Room) => void;
+  onReplayRound?: (id: string, replay: ReplayRound) => boolean;
   prepareMatch?: PrepareMatch | null;
   loadMap?: LoadCourse | null;
 }
@@ -152,6 +154,7 @@ export interface RosterEntry {
 }
 export interface PartySnapshot {
   t: 'party';
+  replayId?: string | null;
   recoveryNotice: boolean;
   randomHistoryCount: number;
   preparing: boolean;

@@ -1,3 +1,4 @@
+import { newReplayId, RoundReplayCapture } from './replays.js';
 import { randomUUID, randomBytes, randomInt } from 'node:crypto';
 import { logEvent } from './event-log.js';
 import {
@@ -162,6 +163,10 @@ export class Room {
   readonly onIdle: (room: Room) => void;
   readonly onChange: (room: Room) => void;
   readonly onFinalize: (room: Room) => void;
+  readonly onReplayRound: RoomOptions['onReplayRound'];
+  replayId: string | null = null;
+  replayAvailable = false;
+  replayCapture: RoundReplayCapture | null = null;
   recordEligible = true;
   readonly prepareMatch: PrepareMatch | null;
   readonly loadMap: LoadCourse | null;
@@ -210,6 +215,7 @@ export class Room {
       onIdle = () => {},
       onChange = () => {},
       onFinalize = () => {},
+      onReplayRound,
       prepareMatch = null,
       loadMap = null,
     }: RoomOptions = {},
@@ -223,6 +229,7 @@ export class Room {
     this.onIdle = onIdle;
     this.onChange = onChange;
     this.onFinalize = onFinalize;
+    this.onReplayRound = onReplayRound;
     this.prepareMatch = prepareMatch;
     this.loadMap = loadMap;
   }
@@ -317,6 +324,7 @@ export class Room {
   snapshot(): PartySnapshot {
     return {
       t: 'party',
+      replayId: this.replayAvailable ? this.replayId : null,
       recoveryNotice: this.recoveryNotice,
       randomHistoryCount: this.randomSeen.length,
       preparing: this.starting || this.loadingNext,
@@ -774,6 +782,15 @@ export class Room {
     switch (message.t) {
       case 'join':
         return;
+      case 'replay-samples':
+        if (
+          message.matchId === this.matchId &&
+          message.holeIndex === this.holeIndex &&
+          this.playable(player)
+        ) {
+          this.replayCapture?.append(player, message.replay, this.elapsedHoleMs());
+        }
+        return;
       case 'course-vote':
         return this.castVote(player, message);
       case 'ready':
@@ -890,6 +907,7 @@ export class Room {
         return;
       case 'forfeit':
         if (this.playable(player)) {
+          this.replayCapture?.append(player, message.replay, this.elapsedHoleMs(), true);
           this.finish(player, false);
         }
         return;
@@ -903,6 +921,7 @@ export class Room {
         message.p === this.specs[this.holeIndex]?.par
       ) {
         player.strokes = message.s;
+        this.replayCapture?.append(player, message.replay, this.elapsedHoleMs(), true);
         this.finish(player, true);
       }
       return;
@@ -1091,6 +1110,9 @@ export class Room {
   }
   startPrepared() {
     this.recordEligible = !this.config.courseVoting;
+    this.replayId = this.onReplayRound ? newReplayId() : null;
+    this.replayAvailable = false;
+    this.replayCapture = null;
     this.matchId = randomUUID();
     this.holeIndex = 0;
     this.roundHistory = [];
@@ -1147,6 +1169,9 @@ export class Room {
   }
   begin() {
     this.vote = null;
+    this.replayCapture = this.replayId
+      ? new RoundReplayCapture(this.specs[this.holeIndex] ?? null)
+      : null;
     this.roundTimerMs = this.config.timerMs;
     this.phase = 'countdown';
     this.playNotBefore = Date.now() + this.countdown;
@@ -1609,6 +1634,25 @@ export class Room {
     return false;
   }
   recordRound(status: RoundStatus, rows: RoundScore[]) {
+    if (this.replayId && this.replayCapture && this.onReplayRound) {
+      try {
+        this.replayAvailable =
+          this.onReplayRound(
+            this.replayId,
+            this.replayCapture.finish(
+              this.holeIndex,
+              this.specs[this.holeIndex]?.name ?? this.holeIds[this.holeIndex],
+              status,
+              rows,
+              this.players,
+            ),
+          ) || this.replayAvailable;
+      } catch (error) {
+        // Replay storage failure must never alter scoring or stop a match.
+        console.error('Replay archive write failed:', errorMessage(error));
+      }
+      this.replayCapture = null;
+    }
     this.audit('round_recorded', {
       status,
       title: this.specs[this.holeIndex]?.name,
@@ -1724,6 +1768,9 @@ export class Room {
     this.voteCourses = [];
     this.recoveryNotice = false;
     this.roundHistory = [];
+    this.replayCapture = null;
+    this.replayId = null;
+    this.replayAvailable = false;
     this.initialPlayers = 0;
     this.admittedParticipants.clear();
     this.holeIndex = 0;

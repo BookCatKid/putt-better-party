@@ -9,6 +9,14 @@ const bpParty = Jn({
   path: `/party/$code`,
   component: M(() => import('./party._code-D3a-IB4-.js'), 'component'),
 });
-const bpRouter = dr({ routeTree: bpRoot.addChildren([bpHome, bpParty]), defaultPreload: false });
+const bpReplay = Jn({
+  getParentRoute: () => bpRoot,
+  path: `/replays/$id`,
+  component: M(() => import('./bp-replay-page.js'), 'component'),
+});
+const bpRouter = dr({
+  routeTree: bpRoot.addChildren([bpHome, bpParty, bpReplay]),
+  defaultPreload: false,
+});
 window.__TSS_START_OPTIONS__ = { serializationAdapters: [] };
 (0, Hs.createRoot)(document.getElementById('app')).render((0, k.jsx)(mr, { router: bpRouter }));

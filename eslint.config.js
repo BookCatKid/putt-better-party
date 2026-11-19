@@ -157,6 +157,23 @@ export default [
     },
   },
   {
+    files: ['scripts/party-replay-scene.js'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        ...Object.fromEntries(
+          'D w v y x C S u m d p i f r g T b z c l s a _ bpSampleAt bpActiveNodesAt'
+            .split(' ')
+            .map((name) => [name, 'readonly']),
+        ),
+      },
+    },
+  },
+  {
+    files: ['scripts/replay-page.js', 'scripts/replay-timeline.js'],
+    languageOptions: { globals: globals.browser },
+  },
+  {
     files: ['scripts/client-bootstrap.js'],
     languageOptions: {
       globals: {

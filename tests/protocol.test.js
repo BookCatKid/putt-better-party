@@ -113,7 +113,7 @@ test('the untagged completion frame is the one the transport actually writes', (
   // The original bundle writes `f: 1` with no `t`, and the server branches on
   // `message.f === 1`. Recording it as an untagged kind keeps that quirk visible.
   expect(CLIENT_UNTAGGED_FRAME_KINDS).toContain('f');
-  expect(transportSource).toMatch(/send\(\{ f: 1,/);
+  expect(transportSource).toMatch(/send\(\{\s*f: 1,/);
   expect(serverSource).toContain('message.f === 1');
 });
 

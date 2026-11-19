@@ -38,6 +38,7 @@ interface SnippetPartyState {
   holeIds: string[];
   matchId: string | null;
   mapReady: boolean;
+  startAt?: number;
   currentMap: { id: string } | null;
   config: Record<string, unknown>;
   roster: unknown[];
@@ -56,7 +57,7 @@ interface SnippetPartyState {
 interface SnippetGameState {
   strokes: number;
   phase: string;
-  result: { strokes: number; par: number } | null;
+  result: { strokes: number; par: number; path?: number[] } | null;
   level: { id: string; cup?: [number, number, number] } | null;
   /** Advanced once per installed level; absent in older builds. */
   attemptSeq?: number;
@@ -71,6 +72,10 @@ interface SnippetSettingsState {
 interface SnippetScene {
   ballPos: { x: number; y: number; z: number };
   pointer: { x: number; z: number; active: boolean };
+  discontinuitySeq?: number;
+  activeEventNodes?: Iterable<string>;
+  traj?: number[];
+  eventTimeline?: { sample: number; node: string }[];
 }
 
 /** Everything an authored snippet may reference from the bundle scope. */

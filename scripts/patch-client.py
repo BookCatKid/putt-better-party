@@ -202,17 +202,17 @@ def runtime_patch(s):
     s = replace_once(
         s,
         "active:!0,code:e,hostToken:n,self:t,selfRole:",
-        "active:!0,vote:null,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
+        "active:!0,replayId:null,vote:null,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
     )
     s = replace_once(
         s,
         "active:!1,selfRole:",
-        "active:!1,vote:null,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,selfRole:",
+        "active:!1,replayId:null,vote:null,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,selfRole:",
     )
     s = replace_once(
         s,
         "phase:e.phase,holeIndex:e.holeIndex",
-        "vote:e.vote?{...e.vote,endsAt:Date.now()+e.vote.endsAt-e.now}:null,bpInitialSnapshot:true,recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,awaitingPlayers:e.awaitingPlayers??0,nextError:e.nextError??null,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
+        "replayId:e.replayId??null,vote:e.vote?{...e.vote,endsAt:Date.now()+e.vote.endsAt-e.now}:null,bpInitialSnapshot:true,recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,awaitingPlayers:e.awaitingPlayers??0,nextError:e.nextError??null,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
     )
     s = replace_once(
         s,
@@ -381,10 +381,28 @@ def game_patch(s):
         "(0,J.jsx)(BpScorecard,{}),(0,J.jsx)(`ul`,{className:`mb-5 flex flex-col",
     )
     s = s[:a] + part + s[b:]
+    for component_name in ("Lt", "Ht"):
+        start = s.index("function " + component_name + "(")
+        end = s.index("function ", start + 10)
+        part = s[start:end]
+        part = replace_once(part, "(0,J.jsx)(yt,{mode:`party`})", "(0,J.jsx)(BpReplayLink,{})")
+        s = s[:start] + part + s[end:]
     return s
 
 
 patch("GameRoot-7kMtVtdO.js", game_patch)
+
+
+def replay_patch(source):
+    return (
+        'import{sampleAt as bpSampleAt,activeNodesAt as bpActiveNodesAt}from"./replay-timeline.js";\n'
+        + source
+        + "\n"
+        + (root / "scripts/party-replay-scene.js").read_text()
+    )
+
+
+patch("Replay3D-Cz9axXph.js", replay_patch)
 # Strip the captured CSS import of Google fonts for isolated local mode.
 p = web / "assets/styles-S28F_fms.css"
 s = p.read_text()
@@ -427,6 +445,9 @@ build_inputs = [root / "scripts" / "patch-client.py"] + sorted(
         "match-details.js",
         "host-menu.js",
         "better-party.css",
+        "party-replay-scene.js",
+        "replay-timeline.js",
+        "replay-page.js",
     )
 )
 build_hash = hashlib.sha256()

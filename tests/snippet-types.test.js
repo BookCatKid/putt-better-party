@@ -81,6 +81,12 @@ test('the transport keeps the wire names the bundle depends on', () => {
   for (const wireName of ["t: 'scene'", "t: 'prog'", "'forfeit'", 'f: 1', "t: 'join'"]) {
     expect(transport).toContain(wireName);
   }
-  // And the transport must not have acquired an import it cannot resolve.
-  expect(transport).not.toMatch(/^\s*import\s/m);
+  // The explicit recorder dependency is staged alongside the patched bundle.
+  const imports = [...transport.matchAll(/^\s*import\s+.*?from ['"]([^'"]+)['"]/gm)].map(
+    (match) => match[1],
+  );
+  expect(imports).toEqual(['./replay-timeline.js']);
+  expect(require('node:fs').existsSync(path.join(root, 'web/assets/replay-timeline.js'))).toBe(
+    true,
+  );
 });
