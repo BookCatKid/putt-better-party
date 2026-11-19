@@ -131,6 +131,19 @@ function PartyRoute() {
       onEnterName: admission.sessionExpired ? admission.enterName : undefined,
     });
   } else if (active && !ready) {
+    /*
+     * A brief disconnect during play does get the full-screen overlay, and that is
+     * deliberate rather than an oversight. `ready` includes `connected`, so a drop
+     * makes the scene untrustworthy immediately, and this overlay is also the thing
+     * that blocks the engine's input: the guard only swallows events outside an
+     * element marked `data-bp-blocking-overlay`, so keeping the scene visible
+     * through a gap would let a player aim and putt into a round the server is no
+     * longer accepting - exactly the "unblocked before synchronization" case this
+     * must avoid. It is also the approved shared loading style, and
+     * `check-party-reconnect.mjs` asserts the "Reconnecting party…" state appears on
+     * a real disconnect. Showing a lighter banner instead would need a second input
+     * blocking mechanism before it could be safe.
+     */
     loadingOverlay = jsx.jsx(PartyLoadingScreen, {
       code,
       message: previouslyConnected && !connected ? 'Reconnecting party…' : 'Loading party…',

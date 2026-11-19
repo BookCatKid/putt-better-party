@@ -236,6 +236,12 @@ function connectBetterParty(code, identity, options = {}) {
     synchronized = true;
     retryDelay = initialRetryDelay;
     bind.connection(true);
+    // This is the one point where the connection has provably recovered, so it is
+    // where a warning from the outage stops being true. `bpConnection(true)` clears
+    // the connection failure; the runtime's own error field is separate and would
+    // otherwise survive a drop and reappear under the next map load, reporting a
+    // problem that was resolved minutes ago.
+    bind.setError('');
     reportProgress();
   }
 

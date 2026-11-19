@@ -293,7 +293,8 @@ test('malformed and unknown frames are ignored without breaking the connection',
   socket.raw('[]');
   socket.raw('42');
   socket.message({ t: 'unknown-frame', x: 1 });
-  expect(env.log.errors.length).toBe(0);
+  // A handshake clears the error field, so count only messages actually raised.
+  expect(env.log.errors.filter(Boolean).length).toBe(0);
   expect(env.sender()({ t: 'ping' })).toBe(true);
   expect(socket.sent.length).toBe(framesBefore + 1);
   dispose();
@@ -1133,5 +1134,42 @@ test('a socket that handshaked and then dropped retries without probing', async 
   expect(probes).toBe(0);
   env.clock.advance(1000);
   expect(env.WebSocket.sockets.length).toBe(2);
+  dispose();
+});
+
+test('an outage warning does not survive the recovery that ends it', () => {
+  // The overlay renders `connectionError || mapError || error`, so a warning left
+  // in the runtime error field reappears under the next map load and reports a
+  // problem that was resolved minutes ago.
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const first = env.WebSocket.sockets[0];
+  handshake(env, first);
+  // Something went wrong while connected, then the socket dropped.
+  first.message({ t: 'error', code: 'map-load-failed', msg: 'Could not load the course.' });
+  expect(env.log.errors.at(-1)).toBe('Could not load the course.');
+  first.drop();
+  expect(env.log.connection.at(-1)).toEqual({ connected: false, failure: '' });
+
+  env.clock.advance(1000);
+  const second = env.WebSocket.sockets[1];
+  handshake(env, second);
+  // Recovery clears both the connection failure and the stale error.
+  expect(env.log.connection.at(-1)).toEqual({ connected: true, failure: undefined });
+  expect(env.log.errors.at(-1)).toBe('');
+  dispose();
+});
+
+test('an error raised after synchronization is not cleared by unrelated traffic', () => {
+  // Clearing on recovery must not become "clear on every frame": a host command
+  // that was just refused has to stay readable.
+  const env = fakeEnvironment();
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const socket = env.WebSocket.sockets[0];
+  handshake(env, socket);
+  socket.message({ t: 'error', code: 'not-host', msg: 'Only the host can do that.' });
+  socket.message({ t: 'roster', players: [] });
+  socket.message({ t: 'board', standings: [], alive: 1, holed: 0 });
+  expect(env.log.errors.at(-1)).toBe('Only the host can do that.');
   dispose();
 });
