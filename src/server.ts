@@ -21,6 +21,7 @@ import { MAX_JSON_BODY_BYTES } from './request-guards.js';
 import { isReclaimable } from './room-expiry.js';
 import { ClientScriptAssets } from './client-scripts.js';
 import { createHttpHandler } from './http-routes.js';
+import { dispatchSocketMessage } from './socket-dispatch.js';
 import path from 'node:path';
 
 const config = readServerConfig();
@@ -119,12 +120,7 @@ const server = Bun.serve<{ room: Room; uid: string | null }>({
       }, 10000);
     },
     message(ws, raw) {
-      try {
-        ws.data.room.handle(ws, JSON.parse(raw.toString()));
-      } catch (error) {
-        ws.data.room.error(ws, 'bad-message', 'Invalid message');
-        console.error(errorMessage(error));
-      }
+      dispatchSocketMessage(ws, raw);
     },
     close(ws, code) {
       if (ws.data.uid) {
