@@ -113,6 +113,51 @@ function sanitizedSettings(settings) {
   return result;
 }
 
+/**
+ * The official public hole link, recovered from the pinned client.
+ *
+ * The gallery builds share links as `${origin}/h/${id}` and the hole page uses the
+ * route `/h/$id`, so that is the shape to accept. Only the **id** is ever taken from
+ * the input; the pasted URL is never fetched. That is what makes host leniency safe
+ * - `www.` is accepted because a copied link may carry it, not because we would ever
+ * contact it.
+ */
+const COURSE_URL_HOSTS = ['putt.day', 'www.putt.day'];
+/** The same alphabet `PUBLIC_COURSE_ID` enforces on the server. */
+const COURSE_URL_ID = /^[a-zA-Z0-9_-]{5,64}$/;
+
+function parseCourseUrl(input) {
+  const text = String(input ?? '').trim();
+  if (!text) {
+    throw Error('Paste a course link first.');
+  }
+  // A bare id is what a player gets by copying from our own UI, and it cannot be
+  // confused with a URL, so it is accepted as-is.
+  if (COURSE_URL_ID.test(text)) {
+    return text;
+  }
+  let url;
+  try {
+    url = new URL(text);
+  } catch {
+    throw Error('That does not look like a course link.');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw Error('That does not look like a course link.');
+  }
+  if (!COURSE_URL_HOSTS.includes(url.hostname)) {
+    throw Error('Only putt.day course links are supported.');
+  }
+  if (url.username || url.password) {
+    throw Error('That does not look like a course link.');
+  }
+  const match = /^\/h\/([^/]+)\/?$/.exec(url.pathname);
+  if (!match || !COURSE_URL_ID.test(match[1])) {
+    throw Error('That link is not a public course link.');
+  }
+  return match[1];
+}
+
 function CommunityCoursePicker({ config, holeSettings }) {
   const [pickerOpen, setPickerOpen] = BetterPartyReact.useState(false);
   const dialog = BetterPartyReact.useRef(null);
@@ -164,6 +209,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
   const [savedId, setSavedId] = BetterPartyReact.useState('');
   const [saveName, setSaveName] = BetterPartyReact.useState('');
   const [transfer, setTransfer] = BetterPartyReact.useState('');
+  const [courseUrl, setCourseUrl] = BetterPartyReact.useState('');
   const [drag, setDrag] = BetterPartyReact.useState(null);
   function store(next) {
     try {
@@ -277,6 +323,28 @@ function CommunityCoursePicker({ config, holeSettings }) {
       bpPickerBusy(false);
       setProgress('');
     }
+  }
+
+  /**
+   * Add the course named by a pasted link.
+   *
+   * The link is parsed for its id and then discarded; the request goes to our own
+   * `/api/import`, so a pasted URL can never make the browser (or the server) fetch
+   * an arbitrary address.
+   */
+  async function addFromUrl() {
+    if (busy || preparing) {
+      return;
+    }
+    let id;
+    try {
+      id = parseCourseUrl(courseUrl);
+    } catch (parseError) {
+      setError(parseError.message);
+      return;
+    }
+    await addCourseById(id);
+    setCourseUrl('');
   }
 
   async function loadSaved() {
@@ -727,6 +795,17 @@ function CommunityCoursePicker({ config, holeSettings }) {
     }
   }
   async function add(course) {
+    await addCourseById(course.id, course.title);
+  }
+
+  /**
+   * Import one course by id and append it to the playlist.
+   *
+   * Shared by the catalogue cards and the pasted-link path so both behave
+   * identically: same request, same room guard, same append. The id is the only
+   * thing a link contributes.
+   */
+  async function addCourseById(id, title) {
     if (busy || preparing) {
       return;
     }
@@ -747,14 +826,15 @@ function CommunityCoursePicker({ config, holeSettings }) {
           uid: betterPartyStore.state.self.uid,
           session: betterPartyStore.state.self.session,
           host: sessionStorage.getItem('bp.host.' + code),
-          id: course.id,
+          id,
         }),
       });
       const catalogPage = await response.json();
       if (!response.ok) {
         throw Error(catalogPage.error || 'Could not load map');
       }
-      setNames((previousNames) => ({ ...previousNames, [course.id]: course.title }));
+      const resolvedTitle = typeof catalogPage.title === 'string' ? catalogPage.title : title;
+      setNames((previousNames) => ({ ...previousNames, [id]: resolvedTitle }));
       if (
         betterPartyStore.state.code !== code ||
         betterPartyStore.state.phase !== 'lobby' ||
@@ -762,7 +842,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
       ) {
         return;
       }
-      update([...(betterPartyStore.state.config.selectedHoleIds ?? []), course.id]);
+      update([...(betterPartyStore.state.config.selectedHoleIds ?? []), id]);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -1251,6 +1331,28 @@ function CommunityCoursePicker({ config, holeSettings }) {
                     !savedId || busy || preparing,
                     pill,
                     { 'aria-label': 'Delete saved playlist' },
+                  ),
+                ]),
+                createElement('div', { className: 'bp-course-url mt-3' }, [
+                  createElement('input', {
+                    key: 'course-url',
+                    'aria-label': 'Course URL',
+                    placeholder: 'Paste a putt.day course link',
+                    value: courseUrl,
+                    onChange: (event) => setCourseUrl(event.target.value),
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void addFromUrl();
+                      }
+                    },
+                  }),
+                  actionButton(
+                    'Add link',
+                    () => void addFromUrl(),
+                    !courseUrl.trim() || busy || preparing,
+                    pill,
+                    { 'aria-label': 'Add course from URL' },
                   ),
                 ]),
                 createElement('div', { className: 'bp-playlist-transfer mt-3' }, [
