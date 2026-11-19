@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { connect, waitFor, pause } from './cdp.mjs';
+import { connect, waitFor } from './cdp.mjs';
 
 /*
  * Renderer failure: a real WebGL context loss, driven end to end.

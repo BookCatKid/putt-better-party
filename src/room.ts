@@ -7,6 +7,9 @@ import { logEvent } from './event-log.js';
 import {
   MAP_SOURCE,
   LATE_JOIN,
+  MAX_HISTORY_COURSES,
+  MAX_MATCH_HISTORY,
+  defaults,
   isRecord,
   errorMessage,
   type RoomConfig,
@@ -17,6 +20,16 @@ import {
   type LoadCourse,
   type PublicCourse,
 } from './domain.js';
+import {
+  aliveTeamCount,
+  assignTeam,
+  assignTeams,
+  computeStandings,
+  compareTournament,
+  effectiveStrokes,
+  summarizeTeams,
+} from './room-scoring.js';
+import { buildCheckpoint, restoreRoom } from './room-persistence.js';
 import type {
   RoomSocket,
   Identity,
@@ -111,80 +124,11 @@ const BOARD_REFILL_PER_SECOND = 4;
 const PRESENCE_BACKLOG_LIMIT = 64 * 1024;
 
 /**
- * How many completed matches a party keeps, and how many courses per match.
- *
- * A history entry is a summary, not a recording. Ten matches covers an evening's
- * play without letting a long-lived party accumulate; a hundred courses covers any
- * normal playlist, and a longer one keeps its true hole count even though the course
- * list is truncated. The cap exists because this is persisted with the room.
- */
-const MAX_MATCH_HISTORY = 10;
-const MAX_HISTORY_COURSES = 100;
-
-/**
- * Team play is two fixed teams, formed from the players present when the match
- * starts. Fixed names and hues keep the scoreboard readable without a naming UI, and
- * two teams is the smallest arrangement where the rule is meaningful: with one team
- * there is nothing to beat.
- */
-const TEAM_NAMES = ['Team 1', 'Team 2'] as const;
-const TEAM_HUES = [205, 25] as const;
-
-/**
  * A tournament is a small fixed number of matches. Twenty is a generous evening and
  * keeps the accumulated table meaningful; the per-match history is bounded separately.
  */
 const MIN_TOURNAMENT_ROUNDS = 2;
 const MAX_TOURNAMENT_ROUNDS = 20;
-
-/**
- * Tournament order: points, then match wins, then the lower cumulative score, then
- * name. Dense ranks are assigned after sorting so the client can render a numbered
- * list without inventing an order of its own.
- */
-function compareTournament(
-  left: { points: number; wins: number; totalStrokes: number; name: string },
-  right: { points: number; wins: number; totalStrokes: number; name: string },
-): number {
-  return (
-    right.points - left.points ||
-    right.wins - left.wins ||
-    left.totalStrokes - right.totalStrokes ||
-    left.name.localeCompare(right.name)
-  );
-}
-
-/**
- * The one ranking rule, for players and teams alike.
- *
- * Survival first, then the lower score, then the faster time, then the name. The
- * pinned client indexes one medal per rank, so the order must be total and the ranks
- * must be dense; a name tiebreak is what guarantees both.
- */
-function compareStandings(
-  left: {
-    holesSurvived: number;
-    alive: boolean;
-    totalStrokes: number;
-    totalTimeMs?: number;
-    name: string;
-  },
-  right: {
-    holesSurvived: number;
-    alive: boolean;
-    totalStrokes: number;
-    totalTimeMs?: number;
-    name: string;
-  },
-): number {
-  return (
-    right.holesSurvived - left.holesSurvived ||
-    Number(right.alive) - Number(left.alive) ||
-    left.totalStrokes - right.totalStrokes ||
-    (left.totalTimeMs ?? 0) - (right.totalTimeMs ?? 0) ||
-    left.name.localeCompare(right.name)
-  );
-}
 
 /**
  * A token bucket: capacity is the burst, and it refills at a fixed rate. Time is
@@ -219,22 +163,6 @@ const READY_GRACE_MS = 10_000;
  * Deliberately leaving hands it over at once.
  */
 const HOST_SUCCESSION_GRACE_MS = 30_000;
-export const defaults: Readonly<RoomConfig> = Object.freeze({
-  holes: 3,
-  timerMs: 60000,
-  elimination: true,
-  maxPlayers: 50,
-  mapSource: MAP_SOURCE.RANDOM,
-  selectedHoleIds: [],
-  locked: false,
-  excludeDaily: false,
-  randomHoles: 3,
-  lateJoin: LATE_JOIN.ALWAYS,
-  courseVoting: false,
-  teams: false,
-  tournament: false,
-  tournamentRounds: 3,
-});
 function isIntegerInRange(value: unknown, minimum: number, maximum: number): value is number {
   return (
     typeof value === 'number' && Number.isInteger(value) && value >= minimum && value <= maximum
@@ -624,121 +552,24 @@ export class Room {
         ...(player.strokeAdjustment ? { strokeAdjustment: player.strokeAdjustment } : {}),
       }));
   }
-  /**
-   * The two team slots and who is on each.
-   *
-   * Empty when team play is off or no match has started yet, which is what makes
-   * `standings()` fall back to per-player rows rather than inventing teams.
-   * Eliminated members stay in their team: their score is part of the team total.
-   */
+  /** The two team slots and who is on each; see `summarizeTeams` for the rules. */
   teams(): TeamSummary[] {
-    if (!this.config.teams) {
-      return [];
-    }
-    const members: string[][] = [[], []];
-    for (const player of this.players.values()) {
-      if (player.team === undefined || !player.participated) {
-        continue;
-      }
-      members[player.team]?.push(player.uid);
-    }
-    return members
-      .map((uids, index) => ({
-        id: 'team-' + (index + 1),
-        name: TEAM_NAMES[index],
-        hue: TEAM_HUES[index],
-        members: uids,
-      }))
-      .filter((team) => team.members.length > 0);
+    return summarizeTeams(this.players, this.config);
   }
-  /**
-   * Split the players present at the start into two teams, in join order.
-   *
-   * Alternating is deterministic and keeps the sides within one player of each other,
-   * so nobody can claim the split was chosen to favour them.
-   */
+  /** Split the match's participants into two teams; see `room-scoring`. */
   private assignTeams() {
-    if (!this.config.teams) {
-      return;
-    }
-    const participants = [...this.players.values()].filter((player) => player.participated);
-    participants.forEach((player, index) => {
-      player.team = index % 2;
-    });
+    assignTeams(this.players, this.config);
   }
   /** Put a newcomer on the smaller team; ties go to the first team. */
   private assignTeam(player: Player) {
-    if (!this.config.teams) {
-      return;
-    }
-    const counts = [0, 0];
-    for (const other of this.players.values()) {
-      if (other === player || other.team === undefined || !other.participated) {
-        continue;
-      }
-      counts[other.team] += 1;
-    }
-    player.team = counts[1] < counts[0] ? 1 : 0;
+    assignTeam(this.players, player, this.config);
   }
   private aliveTeamCount(): number {
-    return this.teams().filter((team) => team.members.some((uid) => this.players.get(uid)?.alive))
-      .length;
+    return aliveTeamCount(this.players, this.config);
   }
-  /**
-   * Team standings: one row per team, aggregated from its members.
-   *
-   * A team survives as long as any member does, so `holesSurvived` is the furthest
-   * any member got. The total is the sum of what its members actually scored -
-   * elimination charges nothing, so a wiped team keeps only the holes it played.
-   */
-  private teamStandings(): Standing[] {
-    return this.teams()
-      .map((team) => {
-        const members = team.members
-          .map((uid) => this.players.get(uid))
-          .filter((player): player is Player => player !== undefined);
-        const totalStrokes = members.reduce((total, player) => total + player.totalStrokes, 0);
-        const totalTimeMs = members.reduce((total, player) => total + (player.totalTimeMs ?? 0), 0);
-        return {
-          uid: team.id,
-          name: team.name,
-          hue: team.hue,
-          rank: 0,
-          holesSurvived: Math.max(0, ...members.map((player) => player.holesSurvived)),
-          totalStrokes,
-          totalTimeMs,
-          holeTimeMs: null,
-          alive: members.some((player) => player.alive),
-          strokes: 0,
-          finished: !members.some((player) => player.alive),
-          connected: members.some((player) => !!player.ws),
-        };
-      })
-      .sort(compareStandings)
-      .map((row, index) => ({ ...row, rank: index + 1 }));
-  }
+  /** The scoreboard rows; see `computeStandings` for team aggregation and rank order. */
   standings(): Standing[] {
-    if (this.config.teams && this.teams().length) {
-      return this.teamStandings();
-    }
-    return [...this.players.values()]
-      .filter((player) => player.participated)
-      .sort(compareStandings)
-      .map((player, index) => ({
-        uid: player.uid,
-        name: player.name,
-        hue: player.hue,
-        ...(player.ball && !player.colorOverride ? { ball: player.ball } : {}),
-        rank: index + 1,
-        holesSurvived: player.holesSurvived,
-        totalStrokes: player.totalStrokes,
-        totalTimeMs: player.totalTimeMs ?? 0,
-        holeTimeMs: player.holeTimeMs ?? null,
-        alive: player.alive,
-        strokes: this.effectiveStrokes(player),
-        finished: player.done,
-        connected: !!player.ws,
-      }));
+    return computeStandings(this.players, this.config);
   }
   board(): BoardFrame {
     const rows = [...this.players.values()].filter((player) => player.alive && player.participated);
@@ -2050,11 +1881,9 @@ export class Room {
       this.endHole();
     }
   }
+  /** A player's hole score after host adjustment; see `room-scoring`. */
   effectiveStrokes(player: Player) {
-    return Math.min(
-      200,
-      Math.max(player.success ? 1 : 0, player.strokes + (player.strokeAdjustment ?? 0)),
-    );
+    return effectiveStrokes(player);
   }
 
   private announce(message: string) {
@@ -2904,81 +2733,13 @@ export class Room {
   changed() {
     this.onChange(this);
   }
+  /** The durable snapshot; `room-persistence` owns what is (and is not) saved. */
   checkpoint(): RoomCheckpoint {
-    // Persist only room configuration, public course metadata and credentials.
-    // Never serialize course specifications, positions, sockets or timers.
-    const titles = Object.fromEntries(
-      this.config.selectedHoleIds.map((id) => [id, this.catalog.get(id)?.title ?? id]),
-    );
-    return {
-      version: 1,
-      code: this.code,
-      hostToken: this.hostToken,
-      hostUid: this.hostUid,
-      hostTransfer: this.hostTransfer ? { ...this.hostTransfer } : null,
-      issued: [...this.issued.values()],
-      ...(this.bannedNames.size ? { bannedNames: [...this.bannedNames] } : {}),
-      config: structuredClone(this.config),
-      titles,
-      randomSeen: [...this.randomSeen],
-      matchHistory: this.matchHistory.map((match) => ({
-        ...match,
-        courses: match.courses.map((course) => ({ ...course })),
-        standings: match.standings.map((row) => ({ ...row })),
-      })),
-      tournament: this.tournament
-        ? {
-            ...this.tournament,
-            standings: this.tournament.standings.map((row) => ({ ...row })),
-          }
-        : null,
-      phase: this.phase,
-      starting: this.starting,
-      lastActivity: this.lastActivity,
-      recoveryNotice: this.recoveryNotice,
-    };
+    return buildCheckpoint(this);
   }
   restore(data: RoomCheckpoint) {
-    this.hostToken = data.hostToken;
-    this.hostUid = data.hostUid;
-    const transfer = data.hostTransfer;
-    this.hostTransfer =
-      transfer && typeof transfer.toUid === 'string' && typeof transfer.fromUid === 'string'
-        ? { fromUid: transfer.fromUid, toUid: transfer.toUid, at: Number(transfer.at) || 0 }
-        : null;
-    this.issued = new Map(data.issued.map((identity) => [identity.uid, identity]));
-    this.bannedNames = new Set(data.bannedNames ?? []);
-    this.config = {
-      ...defaults,
-      ...data.config,
-      lateJoin: data.config.lateJoin ?? LATE_JOIN.NEVER,
-      randomHoles:
-        data.config.randomHoles ??
-        (data.config.mapSource === MAP_SOURCE.RANDOM ? data.config.holes : 3),
-    };
-    this.randomSeen = Array.isArray(data.randomSeen) ? data.randomSeen.slice(0, 10000) : [];
-    // History is optional: a row written before it existed restores with none rather
-    // than failing to load.
-    this.matchHistory = Array.isArray(data.matchHistory)
-      ? data.matchHistory.slice(0, MAX_MATCH_HISTORY)
-      : [];
-    // Optional for the same reason as the history: rows written before tournaments
-    // existed restore as an ordinary party.
-    this.tournament = data.tournament ?? null;
-    this.lastActivity = data.lastActivity;
-    this.recoveryNotice = !!data.recoveryNotice || data.phase !== 'lobby' || !!data.starting;
-    for (const id of this.config.selectedHoleIds) {
-      if (!this.catalog.has(id)) {
-        this.catalog.set(id, { id, title: data.titles?.[id] ?? id });
-      }
-    }
-    // A restarted process cannot recover the original client physics state.
-    // Restore as a lobby rather than resuming a partially scored round.
-    this.phase = 'lobby';
-    this.audit('room_recovered', {
-      previousPhase: data.phase,
-      recoveryNotice: this.recoveryNotice,
-    });
+    const outcome = restoreRoom(this, data);
+    this.audit('room_recovered', outcome);
   }
   dispose() {
     this.audit('room_disposed', { standings: this.standings() });

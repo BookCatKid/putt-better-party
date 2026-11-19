@@ -58,6 +58,35 @@ export interface CourseIndex {
   keys(): IterableIterator<string>;
   set(id: string, entry: CatalogEntry): unknown;
 }
+
+/** The configuration a room starts with before the host changes anything. */
+export const defaults: Readonly<RoomConfig> = Object.freeze({
+  holes: 3,
+  timerMs: 60000,
+  elimination: true,
+  maxPlayers: 50,
+  mapSource: MAP_SOURCE.RANDOM,
+  selectedHoleIds: [],
+  locked: false,
+  excludeDaily: false,
+  randomHoles: 3,
+  lateJoin: LATE_JOIN.ALWAYS,
+  courseVoting: false,
+  teams: false,
+  tournament: false,
+  tournamentRounds: 3,
+});
+
+/**
+ * How many completed matches a party keeps, and how many courses per match.
+ *
+ * A history entry is a summary, not a recording. Ten matches covers an evening's
+ * play without letting a long-lived party accumulate; a hundred courses covers any
+ * normal playlist, and a longer one keeps its true hole count even though the course
+ * list is truncated. The cap exists because this is persisted with the room.
+ */
+export const MAX_MATCH_HISTORY = 10;
+export const MAX_HISTORY_COURSES = 100;
 export interface PreparedMatch {
   ids: string[];
   specs: CourseSpecification[];
