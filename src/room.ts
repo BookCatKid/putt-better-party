@@ -32,6 +32,7 @@ import type {
   Standing,
   RateBudget,
   MatchSummary,
+  TeamSummary,
 } from './room-types.js';
 import type { BoardFrame, ServerFrame } from './protocol.js';
 
@@ -119,6 +120,47 @@ const MAX_MATCH_HISTORY = 10;
 const MAX_HISTORY_COURSES = 100;
 
 /**
+ * Team play is two fixed teams, formed from the players present when the match
+ * starts. Fixed names and hues keep the scoreboard readable without a naming UI, and
+ * two teams is the smallest arrangement where the rule is meaningful: with one team
+ * there is nothing to beat.
+ */
+const TEAM_NAMES = ['Team 1', 'Team 2'] as const;
+const TEAM_HUES = [205, 25] as const;
+
+/**
+ * The one ranking rule, for players and teams alike.
+ *
+ * Survival first, then the lower score, then the faster time, then the name. The
+ * pinned client indexes one medal per rank, so the order must be total and the ranks
+ * must be dense; a name tiebreak is what guarantees both.
+ */
+function compareStandings(
+  left: {
+    holesSurvived: number;
+    alive: boolean;
+    totalStrokes: number;
+    totalTimeMs?: number;
+    name: string;
+  },
+  right: {
+    holesSurvived: number;
+    alive: boolean;
+    totalStrokes: number;
+    totalTimeMs?: number;
+    name: string;
+  },
+): number {
+  return (
+    right.holesSurvived - left.holesSurvived ||
+    Number(right.alive) - Number(left.alive) ||
+    left.totalStrokes - right.totalStrokes ||
+    (left.totalTimeMs ?? 0) - (right.totalTimeMs ?? 0) ||
+    left.name.localeCompare(right.name)
+  );
+}
+
+/**
  * A token bucket: capacity is the burst, and it refills at a fixed rate. Time is
  * taken as a parameter rather than read here so the decision is the same in a
  * test as in the server.
@@ -163,6 +205,7 @@ export const defaults: Readonly<RoomConfig> = Object.freeze({
   randomHoles: 3,
   lateJoin: LATE_JOIN.ALWAYS,
   courseVoting: false,
+  teams: false,
 });
 function isIntegerInRange(value: unknown, minimum: number, maximum: number): value is number {
   return (
@@ -461,6 +504,7 @@ export class Room {
       ),
       roundHistory: this.roundHistory,
       matchHistory: this.matchHistory,
+      teams: this.teams(),
       initialPlayers: this.initialPlayers,
       phase: this.phase,
       holeIndex: this.holeIndex,
@@ -513,6 +557,8 @@ export class Room {
       success: false,
       sceneReady: false,
     });
+    // A late joiner is balanced onto the smaller team rather than left off one.
+    this.assignTeam(player);
     // Includes newly admitted players in the solo-vs-multiplayer elimination rule.
     this.initialPlayers++;
     this.audit('late_player_admitted', { uid: player.uid, name: player.name });
@@ -541,17 +587,106 @@ export class Room {
         ...(player.strokeAdjustment ? { strokeAdjustment: player.strokeAdjustment } : {}),
       }));
   }
+  /**
+   * The two team slots and who is on each.
+   *
+   * Empty when team play is off or no match has started yet, which is what makes
+   * `standings()` fall back to per-player rows rather than inventing teams.
+   * Eliminated members stay in their team: their score is part of the team total.
+   */
+  teams(): TeamSummary[] {
+    if (!this.config.teams) {
+      return [];
+    }
+    const members: string[][] = [[], []];
+    for (const player of this.players.values()) {
+      if (player.team === undefined || !player.participated) {
+        continue;
+      }
+      members[player.team]?.push(player.uid);
+    }
+    return members
+      .map((uids, index) => ({
+        id: 'team-' + (index + 1),
+        name: TEAM_NAMES[index],
+        hue: TEAM_HUES[index],
+        members: uids,
+      }))
+      .filter((team) => team.members.length > 0);
+  }
+  /**
+   * Split the players present at the start into two teams, in join order.
+   *
+   * Alternating is deterministic and keeps the sides within one player of each other,
+   * so nobody can claim the split was chosen to favour them.
+   */
+  private assignTeams() {
+    if (!this.config.teams) {
+      return;
+    }
+    const participants = [...this.players.values()].filter((player) => player.participated);
+    participants.forEach((player, index) => {
+      player.team = index % 2;
+    });
+  }
+  /** Put a newcomer on the smaller team; ties go to the first team. */
+  private assignTeam(player: Player) {
+    if (!this.config.teams) {
+      return;
+    }
+    const counts = [0, 0];
+    for (const other of this.players.values()) {
+      if (other === player || other.team === undefined || !other.participated) {
+        continue;
+      }
+      counts[other.team] += 1;
+    }
+    player.team = counts[1] < counts[0] ? 1 : 0;
+  }
+  private aliveTeamCount(): number {
+    return this.teams().filter((team) => team.members.some((uid) => this.players.get(uid)?.alive))
+      .length;
+  }
+  /**
+   * Team standings: one row per team, aggregated from its members.
+   *
+   * A team survives as long as any member does, so `holesSurvived` is the furthest
+   * any member got. The total is the sum of what its members actually scored -
+   * elimination charges nothing, so a wiped team keeps only the holes it played.
+   */
+  private teamStandings(): Standing[] {
+    return this.teams()
+      .map((team) => {
+        const members = team.members
+          .map((uid) => this.players.get(uid))
+          .filter((player): player is Player => player !== undefined);
+        const totalStrokes = members.reduce((total, player) => total + player.totalStrokes, 0);
+        const totalTimeMs = members.reduce((total, player) => total + (player.totalTimeMs ?? 0), 0);
+        return {
+          uid: team.id,
+          name: team.name,
+          hue: team.hue,
+          rank: 0,
+          holesSurvived: Math.max(0, ...members.map((player) => player.holesSurvived)),
+          totalStrokes,
+          totalTimeMs,
+          holeTimeMs: null,
+          alive: members.some((player) => player.alive),
+          strokes: 0,
+          finished: !members.some((player) => player.alive),
+          connected: members.some((player) => !!player.ws),
+        };
+      })
+      .sort(compareStandings)
+      .map((row, index) => ({ ...row, rank: index + 1 }));
+  }
   standings(): Standing[] {
+    if (this.config.teams && this.teams().length) {
+      return this.teamStandings();
+    }
     return [...this.players.values()]
       .filter((player) => player.participated)
-      .sort(
-        (leftPlayer, rightPlayer) =>
-          rightPlayer.holesSurvived - leftPlayer.holesSurvived ||
-          Number(rightPlayer.alive) - Number(leftPlayer.alive) ||
-          leftPlayer.totalStrokes - rightPlayer.totalStrokes ||
-          (leftPlayer.totalTimeMs ?? 0) - (rightPlayer.totalTimeMs ?? 0) ||
-          leftPlayer.name.localeCompare(rightPlayer.name),
-      )
+      .sort(compareStandings)
       .map((player, index) => ({
         uid: player.uid,
         name: player.name,
@@ -1149,6 +1284,7 @@ export class Room {
       'excludeDaily',
       'lateJoin',
       'courseVoting',
+      'teams',
     ]) {
       if (key in configuration) {
         candidate[key] = configuration[key];
@@ -1161,6 +1297,7 @@ export class Room {
       typeof candidate.locked !== 'boolean' ||
       typeof candidate.excludeDaily !== 'boolean' ||
       typeof candidate.courseVoting !== 'boolean' ||
+      typeof candidate.teams !== 'boolean' ||
       (candidate.lateJoin !== LATE_JOIN.NEVER &&
         candidate.lateJoin !== LATE_JOIN.NEXT_HOLE &&
         candidate.lateJoin !== LATE_JOIN.ALWAYS) ||
@@ -1182,6 +1319,7 @@ export class Room {
       randomHoles: this.config.randomHoles,
       lateJoin: candidate.lateJoin,
       courseVoting: candidate.courseVoting && candidate.mapSource === MAP_SOURCE.RANDOM,
+      teams: candidate.teams,
     };
     if (next.mapSource === MAP_SOURCE.RANDOM) {
       const count = 'holes' in configuration ? configuration.holes : this.config.randomHoles;
@@ -1397,6 +1535,9 @@ export class Room {
       }
     }
     this.initialPlayers = this.admittedParticipants.size;
+    // Teams are formed from the players actually in the party at this moment, so a
+    // rematch re-forms them rather than carrying a stale split.
+    this.assignTeams();
     this.audit('match_started', {
       config: this.config,
       courses: this.holeIds.map((id) => ({ id, title: this.playlistTitle(id) })),
@@ -2569,9 +2710,17 @@ export class Room {
       const alive = [...this.players.values()].filter(
         (player) => player.participated && player.alive,
       ).length;
+      const teams = this.teams();
+      // In team play the party ends when one team is left, not when one player is:
+      // a surviving team-mate must not be made to play on alone.
+      const decidedByTeams =
+        teams.length > 0 &&
+        (this.aliveTeamCount() === 0 || (teams.length > 1 && this.aliveTeamCount() === 1));
       if (
         this.holeIndex + 1 >= this.holeIds.length ||
-        (this.config.elimination && (alive === 0 || (this.initialPlayers > 1 && alive === 1)))
+        (this.config.elimination &&
+          (decidedByTeams ||
+            (!teams.length && (alive === 0 || (this.initialPlayers > 1 && alive === 1)))))
       ) {
         this.finalize();
       } else {
@@ -2634,6 +2783,7 @@ export class Room {
         puttingLocked: false,
         strokeAdjustment: 0,
         joinAfterHole: undefined,
+        team: undefined,
       });
     }
     this.state();

@@ -58,6 +58,10 @@ the standings at all, so a spectator cannot outrank a player. When someone becom
 participant mid-match — and when they must wait — is set out in
 [late admission and disconnects](late-joins.md).
 
+**Team play** is an optional, independent rule that replaces the per-player board with
+two teams whose score is the sum of their members. Formation, survival, readiness and
+disconnect behaviour are set out in [team play](teams.md).
+
 **Timeout penalty**: a non-finisher who is still in a stroke-play round completes the
 hole at `par + 5`. Elimination, by contrast, removes the player from the hole.
 

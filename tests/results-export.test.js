@@ -113,6 +113,32 @@ test('the CSV carries no credential or cosmetic', () => {
   }
 });
 
+test('a team row sums its members and expands to the team total', () => {
+  const history = [
+    round(0, {
+      rows: [
+        { uid: 'uid-a', strokes: 2, status: 'holed', timeMs: 1000 },
+        { uid: 'uid-b', strokes: 3, status: 'holed', timeMs: 2000 },
+        { uid: 'uid-c', strokes: 4, status: 'holed', timeMs: 3000 },
+      ],
+    }),
+  ];
+  // Team 1 is a+b, Team 2 is c alone, as the server would send them.
+  const teams = [
+    { id: 'team-1', name: 'Team 1', hue: 205, members: ['uid-a', 'uid-b'] },
+    { id: 'team-2', name: 'Team 2', hue: 25, members: ['uid-c'] },
+  ];
+  const standings = [
+    { ...player('team-1', 'Team 1', 5), rank: 1 },
+    { ...player('team-2', 'Team 2', 4), rank: 2 },
+  ];
+  const rows = bpResultsCsv(history, standings, teams).trim().split('\r\n');
+  expect(rows.at(-2)).toBe('Team 1,5,5,+2');
+  expect(rows.at(-1)).toBe('Team 2,4,4,+1');
+  // And the file still names no uid.
+  expect(bpResultsCsv(history, standings, teams)).not.toContain('uid-');
+});
+
 test('an empty or absent match produces no file rather than a header-only one', () => {
   expect(bpResultsCsv([], [])).toBe('');
   expect(bpResultsCsv(undefined, undefined)).toBe('');

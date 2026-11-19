@@ -17,6 +17,8 @@ export interface RoomConfig {
   randomHoles: number;
   lateJoin: LateJoinPolicy;
   courseVoting: boolean;
+  /** Team play: players are split into two teams and the party is scored by team. */
+  teams: boolean;
 }
 
 /** The original game owns the rest of the specification's schema. */

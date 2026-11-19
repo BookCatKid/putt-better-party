@@ -196,6 +196,18 @@ function BpLobbyDashboard() {
             onChange: (event) => updateBetterPartyConfig({ elimination: event.target.checked }),
           }),
         ]),
+        // Team play is an independent optional rule: it changes what the party is
+        // scored by, not how a hole is played, so it composes with either mode.
+        createElement('label', { className: 'bp-number-row bp-dashboard-rule' }, [
+          createElement('span', {}, 'Team play'),
+          createElement('input', {
+            type: 'checkbox',
+            'aria-label': 'Team play',
+            checked: !!config.teams,
+            disabled,
+            onChange: (event) => updateBetterPartyConfig({ teams: event.target.checked }),
+          }),
+        ]),
       ]
     : [
         readOnly(
@@ -203,6 +215,7 @@ function BpLobbyDashboard() {
           config.timerMs ? Math.round(config.timerMs / 1000) + 's' : 'Unlimited',
         ),
         readOnly('Mode', config.elimination ? 'Elimination' : 'Stroke play'),
+        readOnly('Scoring', config.teams ? 'Two teams' : 'Individual'),
       ];
 
   const partySettings = host
@@ -235,7 +248,8 @@ function BpLobbyDashboard() {
     ' · ' +
     (config.timerMs ? Math.round(config.timerMs / 1000) + 's' : 'Unlimited') +
     ' · ' +
-    (config.elimination ? 'Elimination' : 'Stroke play');
+    (config.elimination ? 'Elimination' : 'Stroke play') +
+    (config.teams ? ' · Teams' : '');
   const startLabel = busy ? 'Loading courses…' : 'Start party';
 
   return createElement(

@@ -44,31 +44,47 @@ function BpGuestPlaylist() {
   ]);
 }
 /**
- * How a scorecard cell reads for one player on one hole.
+ * How a scorecard cell reads for one row on one hole.
  *
- * Every state the server records is named rather than left as a bare dash, because a
- * dash for a skipped hole, an ended party and a missing row would be three different
- * things shown the same way. A timeout keeps its charged score - it is a real score -
- * but carries a marker so it is not mistaken for a holed hole.
+ * A row is a player, or a team - in which case it is several players and the cell is
+ * their sum. Every state the server records is named rather than left as a bare dash,
+ * because a dash for a skipped hole, an ended party and a missing row would be three
+ * different things shown the same way. A timeout keeps its charged score - it is a
+ * real score - but carries a marker so it is not mistaken for a holed hole.
  */
-function bpScoreCell(round, score) {
+function bpScoreCell(round, scores) {
   if (round.status === 'skipped') {
-    return { label: 'Skip', flag: '', className: '' };
+    return { label: 'Skip', flag: '', className: '', status: 'skipped' };
   }
-  if (score?.status === 'eliminated') {
-    return { label: 'DNF', flag: '', className: 'bp-dnf' };
-  }
-  if (score?.status === 'ended') {
-    return { label: 'End', flag: '', className: '' };
-  }
-  if (typeof score?.strokes === 'number') {
+  const scored = scores.filter((score) => typeof score?.strokes === 'number');
+  if (scored.length) {
+    const allHoled = scored.every((score) => score.status === 'holed');
     return {
-      label: score.strokes,
-      flag: score.status === 'timeout' ? '⏱' : '',
-      className: score.status === 'holed' ? 'bp-holed' : '',
+      label: scored.reduce((total, score) => total + score.strokes, 0),
+      // A team cell flags a clock if any member was charged rather than holing out.
+      flag: scored.some((score) => score.status === 'timeout') ? '⏱' : '',
+      className: allHoled ? 'bp-holed' : '',
+      status: allHoled ? 'holed' : 'timeout',
     };
   }
-  return { label: '—', flag: '', className: '' };
+  if (scores.some((score) => score?.status === 'eliminated')) {
+    return { label: 'DNF', flag: '', className: 'bp-dnf', status: 'eliminated' };
+  }
+  if (scores.some((score) => score?.status === 'ended')) {
+    return { label: 'End', flag: '', className: '', status: 'ended' };
+  }
+  return { label: '—', flag: '', className: '', status: round.status };
+}
+
+/**
+ * The uids whose scores make up one scorecard row.
+ *
+ * A team row is identified by the team id in `standings`, and expands to its members.
+ * A player row is just itself, so ordinary play and team play share one table.
+ */
+function bpRowMembers(row, teams) {
+  const team = teams.find((entry) => entry.id === row.uid);
+  return team ? team.members : [row.uid];
 }
 
 /**
@@ -94,6 +110,7 @@ function BpScorecard() {
   const history = useBetterPartyState(betterPartyStore, (partyState) => partyState.roundHistory);
   const final = useBetterPartyState(betterPartyStore, (partyState) => partyState.final);
   const matchId = useBetterPartyState(betterPartyStore, (partyState) => partyState.matchId);
+  const teams = useBetterPartyState(betterPartyStore, (partyState) => partyState.teams) ?? [];
   const [open, setOpen] = BetterPartyReact.useState(false);
   if (!history?.length || !final?.standings?.length) {
     return null;
@@ -102,7 +119,7 @@ function BpScorecard() {
   // A filename that cannot collide with a previous export: the date orders files and
   // the match id keeps two matches from the same day apart.
   const exportCsv = () => {
-    const text = bpResultsCsv(history, final.standings);
+    const text = bpResultsCsv(history, final.standings, teams);
     if (!text) {
       return;
     }
@@ -172,11 +189,16 @@ function BpScorecard() {
             'tbody',
             {},
             final.standings.map((player) => {
-              // The par this player was actually scored against, derived from the
-              // same rows the total is summed from.
+              const members = bpRowMembers(player, teams);
+              const scoresFor = (round) =>
+                members
+                  .map((uid) => round.rows.find((entry) => entry.uid === uid))
+                  .filter((score) => score !== undefined);
+              // The par this row was actually scored against, derived from the same
+              // rows the total is summed from.
               const parFaced = history.reduce((total, round) => {
-                const score = round.rows.find((entry) => entry.uid === player.uid);
-                return total + (typeof score?.strokes === 'number' ? (round.par ?? 0) : 0);
+                const scored = scoresFor(round).some((score) => typeof score?.strokes === 'number');
+                return total + (scored ? (round.par ?? 0) : 0);
               }, 0);
               const relative = bpRelativeToPar(player.totalStrokes, parFaced);
               return createElement('tr', { key: player.uid }, [
@@ -190,15 +212,17 @@ function BpScorecard() {
                     : player.name,
                 ),
                 ...history.map((round) => {
-                  const score = round.rows.find((entry) => entry.uid === player.uid);
-                  const cell = bpScoreCell(round, score);
+                  const scores = scoresFor(round);
+                  const cell = bpScoreCell(round, scores);
+                  // A single player keeps its own time; a team has no one time to show.
+                  const timeMs = scores.length === 1 ? scores[0].timeMs : null;
                   return createElement(
                     'td',
                     {
                       key: round.index,
-                      title: round.title + ' · ' + (score?.status ?? round.status),
+                      title: round.title + ' · ' + cell.status,
                       className: cell.className,
-                      'data-status': score?.status ?? round.status,
+                      'data-status': cell.status,
                     },
                     [
                       cell.label,
@@ -208,11 +232,11 @@ function BpScorecard() {
                           { key: 'flag', className: 'bp-cell-flag' },
                           cell.flag,
                         ),
-                      score?.timeMs != null &&
+                      timeMs != null &&
                         createElement(
                           'small',
                           { key: 'time', className: 'bp-cell-time' },
-                          bpFormatTime(score.timeMs),
+                          bpFormatTime(timeMs),
                         ),
                     ],
                   );

@@ -20,20 +20,25 @@ function bpCsvField(value) {
 /**
  * One scorecard cell, matching the on-screen table.
  *
- * `-` is used for a hole with no score and no named state, so a shared file says the
- * same thing the screen did rather than inventing a zero.
+ * A row is a player, or a team whose cell is the sum of its members. `-` is used for
+ * a hole with no score and no named state, so a shared file says the same thing the
+ * screen did rather than inventing a zero.
  */
-function bpCsvCell(round, score) {
+function bpCsvCell(round, scores) {
   if (round.status === 'skipped') {
     return 'Skip';
   }
-  if (score?.status === 'eliminated') {
+  const scored = scores.filter((score) => typeof score?.strokes === 'number');
+  if (scored.length) {
+    return scored.reduce((total, score) => total + score.strokes, 0);
+  }
+  if (scores.some((score) => score?.status === 'eliminated')) {
     return 'DNF';
   }
-  if (score?.status === 'ended') {
+  if (scores.some((score) => score?.status === 'ended')) {
     return 'End';
   }
-  return typeof score?.strokes === 'number' ? score.strokes : '-';
+  return '-';
 }
 
 /** Strokes relative to the par of the holes actually scored, or '' when none were. */
@@ -55,7 +60,7 @@ function bpCsvRelative(strokes, parFaced) {
  * player rows come from `standings`, which is already in rank order, and the totals
  * are the same values the screen shows.
  */
-export function bpResultsCsv(roundHistory, standings) {
+export function bpResultsCsv(roundHistory, standings, teams = []) {
   if (
     !Array.isArray(roundHistory) ||
     !roundHistory.length ||
@@ -80,13 +85,18 @@ export function bpResultsCsv(roundHistory, standings) {
     ].map(bpCsvField),
   );
   for (const player of standings) {
+    // A team row expands to its members; a player row is just itself.
+    const team = teams.find((entry) => entry.id === player.uid);
+    const members = team ? team.members : [player.uid];
     let parFaced = 0;
     const cells = roundHistory.map((round) => {
-      const score = round.rows?.find((entry) => entry.uid === player.uid);
-      if (typeof score?.strokes === 'number') {
+      const scores = members
+        .map((uid) => round.rows?.find((entry) => entry.uid === uid))
+        .filter((score) => score !== undefined);
+      if (scores.some((score) => typeof score?.strokes === 'number')) {
         parFaced += round.par ?? 0;
       }
-      return bpCsvCell(round, score);
+      return bpCsvCell(round, scores);
     });
     rows.push(
       [

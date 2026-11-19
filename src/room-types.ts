@@ -75,6 +75,11 @@ export interface Player {
   strokeAdjustment?: number;
   /** A newcomer must wait until the room advances beyond this hole. */
   joinAfterHole?: number;
+  /**
+   * Zero-based team index for the current match, assigned when the match starts.
+   * Undefined when team play is off, so ordinary play carries no team state.
+   */
+  team?: number;
   /** The client reported its level prepared for the current round. */
   sceneReady?: boolean;
   /** The connected client declares that it reports scene readiness each round. */
@@ -225,6 +230,20 @@ export interface RosterEntry {
   strokeAdjustment?: number;
   resetPending?: boolean;
 }
+/**
+ * A team in a team match.
+ *
+ * Membership is by uid and the server owns the assignment; the client only groups
+ * scorecard rows. `members` is empty until the match starts, because teams are formed
+ * from the players who are actually in the party at that moment.
+ */
+export interface TeamSummary {
+  id: string;
+  name: string;
+  hue: number;
+  members: string[];
+}
+
 export interface PartySnapshot {
   t: 'party';
   pausedAt?: number | null;
@@ -258,6 +277,8 @@ export interface PartySnapshot {
   roundHistory: RoundRecord[];
   /** Completed matches in this party, newest first. */
   matchHistory: MatchSummary[];
+  /** Teams for the current match; empty when team play is off. */
+  teams: TeamSummary[];
   initialPlayers: number;
   phase: RoomPhase;
   holeIndex: number;

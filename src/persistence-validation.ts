@@ -239,6 +239,17 @@ function readBoolean(record: Record<string, unknown>, key: string): boolean {
   return value;
 }
 
+function readOptionalBoolean(
+  record: Record<string, unknown>,
+  key: string,
+  fallback: boolean,
+): boolean {
+  if (typeof record[key] === 'undefined') {
+    return fallback;
+  }
+  return readBoolean(record, key);
+}
+
 function readInteger(
   record: Record<string, unknown>,
   key: string,
@@ -395,6 +406,9 @@ function readConfig(value: unknown): RoomConfig {
     randomHoles,
     lateJoin: readLateJoin(value),
     courseVoting: readBoolean(value, 'courseVoting'),
+    // Team play was added after the first checkpoints were written, so a row without
+    // it is an ordinary non-team party rather than corruption.
+    teams: readOptionalBoolean(value, 'teams', false),
   };
 }
 

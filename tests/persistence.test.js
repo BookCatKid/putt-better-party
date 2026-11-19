@@ -480,6 +480,9 @@ test('configuration outside the bounds the room itself enforces is rejected', ()
     { lateJoin: null },
     { courseVoting: 'true' },
     { courseVoting: 1 },
+    // Team play is a flag too, and must not accept a truthy stand-in.
+    { teams: 'yes' },
+    { teams: 1 },
   ];
   const store = new RoomStore(':memory:');
   seedRow(store, 'ABCDE', checkpointPayload());
@@ -684,6 +687,8 @@ test('a well-formed checkpoint restores every persisted field', () => {
     randomHoles: 5,
     lateJoin: 'next-hole',
     courseVoting: true,
+    // The row predates team play, so it restores as an ordinary party.
+    teams: false,
   });
   expect(room.randomSeen).toEqual(['seen-before', 'seen-again']);
   // Play cannot resume after a restart, so a mid-match row recovers as a lobby.
