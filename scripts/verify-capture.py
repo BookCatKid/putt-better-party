@@ -63,6 +63,18 @@ def main():
         fail(2, ok=False, reason="manifest-missing-assets")
 
     lock = json.loads(lock_path.read_text())
+    verdict = classify_capture(capture, manifest, lock)
+    fail(0 if verdict["ok"] else 1, **verdict)
+
+
+def classify_capture(capture, manifest, lock):
+    """
+    Reconcile one capture directory with a lock manifest.
+
+    Shared with `diff-capture.py`, which reports the same classification as part
+    of a wider diff. Returns the verdict object; callers decide the exit code.
+    """
+    assets = manifest.get("assets") or {}
     captured = {}
     mismatched = []
     for path, record in assets.items():
@@ -94,12 +106,11 @@ def main():
 
     missing = manifest.get("missing") or {}
     complete = not missing and not mismatched
-    fail(
-        0 if complete else 1,
-        ok=complete,
-        capture=str(capture),
-        entry=manifest.get("entry"),
-        counts={
+    return {
+        "ok": complete,
+        "capture": str(capture),
+        "entry": manifest.get("entry"),
+        "counts": {
             "captured": len(captured),
             "unchanged": len(unchanged),
             "changed": len(changed),
@@ -108,12 +119,12 @@ def main():
             "missing": len(missing),
             "mismatched": len(mismatched),
         },
-        changed=changed,
-        added=added,
-        removed=removed,
-        missing=missing,
-        mismatched=mismatched,
-    )
+        "changed": changed,
+        "added": added,
+        "removed": removed,
+        "missing": missing,
+        "mismatched": mismatched,
+    }
 
 
 if __name__ == "__main__":

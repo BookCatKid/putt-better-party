@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
@@ -15,12 +16,14 @@ private = root / "private-client"
 # build can never be served. `BP_STAGE_WEB` is that staging directory. It is set
 # by prepare-client.py; running this module directly without it is a mistake that
 # should be loud rather than quietly rewriting the live client.
-_stage = os.environ.get("BP_STAGE_WEB")
-if not _stage:
-    raise SystemExit("patch-client.py must run through prepare-client.py")
-web = Path(_stage)
-if not web.is_dir():
-    raise SystemExit(f"Staging directory does not exist: {web}")
+#
+# `--check-anchors <dir>` is the read-only alternative: every patch body is run
+# against the bundles in <dir> - a staged upstream capture, matched by logical
+# name because hash suffixes differ - and a JSON report of which anchors hold,
+# which are missing and which have changed multiplicity is printed. Nothing is
+# written in that mode, so no staging directory is required. The patch bodies and
+# helpers are importable for diff-capture.py; only the execution paths below are
+# guarded behind __main__.
 
 
 # Executed by prepare-client.py after copying immutable bundles.
@@ -56,10 +59,15 @@ def replace_count(s, a, b, expected):
     return s.replace(a, b)
 
 
+# Patch bodies register rather than run: apply mode plays them back against the
+# staging bundles in order, and check-anchors mode dry-runs the same bodies
+# against a capture. One list is the contract of what a new upstream build must
+# still contain.
+PATCHES = []
+
+
 def patch(name, fn):
-    p = web / "assets" / name
-    s = p.read_text()
-    p.write_text(fn(s))
+    PATCHES.append((name, fn))
 
 
 def index_patch(s):
@@ -650,77 +658,153 @@ def replay_patch(source):
 
 
 patch("Replay3D-Cz9axXph.js", replay_patch)
-# Strip the captured CSS import of Google fonts for isolated local mode.
-p = web / "assets/styles-S28F_fms.css"
-s = p.read_text()
-p.write_text(
-    re.sub(r'^@import "[^"]+";', "", s, count=1)
-    + "\n"
-    + (root / "scripts/better-party.css").read_text()
-)
-# Server-side original validator import closure. This is generated output, so it is
-# written into the staging directory next to the prepared client and published with
-# it. It must never be written under private-client/, which holds the immutable
-# archived originals that the lock hashes.
-validation = web / "validation"
-validation.mkdir(exist_ok=True)
-for path in json.loads((root / "scripts/client-lock.json").read_text()):
-    if path.startswith("/assets/") and path.endswith(".js"):
-        source = private / path.lstrip("/")
-        shutil.copyfile(source, validation / source.name)
-(validation / "index-DFMxt6BL.js").write_text(
-    "export const Xt={state:{active:false}}; export const A=new Map();"
-)
-# A build stamp, so a prepared client can say which source produced it. Without
-# one, a `web/` left over from an earlier checkout starts silently and serves a
-# client whose patches do not match the server that is running - the failure shows
-# up as a broken button rather than an error. The hash is over the patcher's own
-# inputs: the Python patcher and every snippet it splices, so any change to the
-# client build changes the stamp.
-build_inputs = [root / "scripts" / "patch-client.py"] + sorted(
-    root / "scripts" / name
-    for name in (
-        "client-bootstrap.js",
-        "party-loading.js",
-        "party-overlay.js",
-        "party-entry.js",
-        "party-route.js",
-        "party-runtime.js",
-        "party-transport.js",
-        "picker-playlist.js",
-        "picker-ui.js",
-        "picker-catalog.js",
-        "picker-generator.js",
-        "picker.js",
-        "results-export.js",
-        "bp-ghost-color.js",
-        "lobby.js",
-        "match-details.js",
-        "host-menu.js",
-        "player-management.js",
-        "better-party.css",
-        "party-replay-scene.js",
-        "replay-timeline.js",
-        "replay-page.js",
-        "spectator-follow.js",
-        "follow-camera.js",
-        "follow-controls.js",
+
+
+def logical_name(path):
+    """The upstream hash suffix is a build artifact; patches pin by stem."""
+    name = Path(path).name
+    match = re.fullmatch(r"(.+)-[\w-]{8}\.(js|css)", name)
+    return match.group(1) + "." + match.group(2) if match else name
+
+
+def check_anchors(directory):
+    """
+    Dry-run every registered patch body against the bundles in `directory`.
+
+    A patched name like `GameRoot-7kMtVtdO.js` never appears verbatim in a new
+    upstream build - the hash suffix changes - so each patch is matched by
+    logical name. The patch body is run on the captured text exactly as apply
+    mode would run it: every `replace_count` assertion fires on a drifted
+    anchor and `str.index` raises on a moved splice point, so a failure names
+    the anchor that no longer holds. Nothing is written.
+    """
+    captured_assets = sorted((directory / "assets").glob("*.js"))
+    report = []
+    for pinned, fn in PATCHES:
+        candidates = [
+            path for path in captured_assets if logical_name(path) == logical_name(pinned)
+        ]
+        if not candidates:
+            report.append(
+                {
+                    "bundle": pinned,
+                    "status": "missing",
+                    "detail": "no captured bundle by that logical name",
+                }
+            )
+            continue
+        for candidate in candidates:
+            try:
+                fn(candidate.read_text())
+            except Exception as error:
+                detail = getattr(error, "args", None)
+                report.append(
+                    {
+                        "bundle": pinned,
+                        "candidate": candidate.name,
+                        "status": "failed",
+                        "detail": repr(detail[0] if detail else error),
+                    }
+                )
+            else:
+                report.append({"bundle": pinned, "candidate": candidate.name, "status": "ok"})
+    return report
+
+
+if __name__ != "__main__":
+    # Imported for check_anchors or the PATCHES registry (diff-capture.py):
+    # registration already ran above; nothing else executes.
+    pass
+elif "--check-anchors" in sys.argv:
+    try:
+        target_directory = Path(sys.argv[sys.argv.index("--check-anchors") + 1])
+    except IndexError:
+        raise SystemExit("--check-anchors needs a capture directory") from None
+    print(json.dumps(check_anchors(target_directory), indent=2))
+    raise SystemExit(0)
+else:
+    _stage = os.environ.get("BP_STAGE_WEB")
+    if not _stage:
+        raise SystemExit("patch-client.py must run through prepare-client.py")
+    web = Path(_stage)
+    if not web.is_dir():
+        raise SystemExit(f"Staging directory does not exist: {web}")
+
+    for name, fn in PATCHES:
+        target = web / "assets" / name
+        target.write_text(fn(target.read_text()))
+
+    # Strip the captured CSS import of Google fonts for isolated local mode.
+    p = web / "assets/styles-S28F_fms.css"
+    s = p.read_text()
+    p.write_text(
+        re.sub(r'^@import "[^"]+";', "", s, count=1)
+        + "\n"
+        + (root / "scripts/better-party.css").read_text()
     )
-)
-build_hash = hashlib.sha256()
-for path in build_inputs:
-    build_hash.update(path.name.encode())
-    build_hash.update(path.read_bytes())
-(web / "build.json").write_text(
-    json.dumps(
-        {
-            "clientBuild": build_hash.hexdigest()[:16],
-            "assets": len(json.loads((root / "scripts/client-lock.json").read_text())),
-        },
-        indent=2,
+    # Server-side original validator import closure. This is generated output, so it is
+    # written into the staging directory next to the prepared client and published with
+    # it. It must never be written under private-client/, which holds the immutable
+    # archived originals that the lock hashes.
+    validation = web / "validation"
+    validation.mkdir(exist_ok=True)
+    for path in json.loads((root / "scripts/client-lock.json").read_text()):
+        if path.startswith("/assets/") and path.endswith(".js"):
+            source = private / path.lstrip("/")
+            shutil.copyfile(source, validation / source.name)
+    (validation / "index-DFMxt6BL.js").write_text(
+        "export const Xt={state:{active:false}}; export const A=new Map();"
     )
-    + "\n"
-)
-print(
-    "Patched isolated browser bootstrap, local join, local catalog, original validation; Party transport, scene readiness, and initial ball placement patched; shot physics unchanged."
-)
+    # A build stamp, so a prepared client can say which source produced it. Without
+    # one, a `web/` left over from an earlier checkout starts silently and serves a
+    # client whose patches do not match the server that is running - the failure shows
+    # up as a broken button rather than an error. The hash is over the patcher's own
+    # inputs: the Python patcher and every snippet it splices, so any change to the
+    # client build changes the stamp.
+    build_inputs = [root / "scripts" / "patch-client.py"] + sorted(
+        root / "scripts" / name
+        for name in (
+            "client-bootstrap.js",
+            "party-loading.js",
+            "party-overlay.js",
+            "party-entry.js",
+            "party-route.js",
+            "party-runtime.js",
+            "party-transport.js",
+            "picker-playlist.js",
+            "picker-ui.js",
+            "picker-catalog.js",
+            "picker-generator.js",
+            "picker.js",
+            "results-export.js",
+            "bp-ghost-color.js",
+            "lobby.js",
+            "match-details.js",
+            "host-menu.js",
+            "player-management.js",
+            "better-party.css",
+            "party-replay-scene.js",
+            "replay-timeline.js",
+            "replay-page.js",
+            "spectator-follow.js",
+            "follow-camera.js",
+            "follow-controls.js",
+        )
+    )
+    build_hash = hashlib.sha256()
+    for path in build_inputs:
+        build_hash.update(path.name.encode())
+        build_hash.update(path.read_bytes())
+    (web / "build.json").write_text(
+        json.dumps(
+            {
+                "clientBuild": build_hash.hexdigest()[:16],
+                "assets": len(json.loads((root / "scripts/client-lock.json").read_text())),
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    print(
+        "Patched isolated browser bootstrap, local join, local catalog, original validation; Party transport, scene readiness, and initial ball placement patched; shot physics unchanged."
+    )
