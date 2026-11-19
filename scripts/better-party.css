@@ -190,6 +190,16 @@
 }
 .bp-scorecard {
   margin: 0 0 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.bp-export {
+  color: rgb(255 255 255 / 80%);
+}
+.bp-export:hover {
+  background: rgb(255 255 255 / 18%);
 }
 .bp-scorecard-scroll {
   overflow-x: auto;

@@ -80,6 +80,25 @@ or to rejoin as somebody. The current match's per-hole rounds are separate and a
 cleared by a rematch; the history is not. Older checkpoints without a history load
 with an empty one.
 
+### Exporting results
+
+Two exports, both built by explicit projection rather than serialising the store, so
+nothing private can ride along:
+
+- **CSV** (`Export CSV` on the scorecard) is the current match as a scorecard: a
+  course row, a par row, a header row and one row per player with the same numbers and
+  the same named states the screen shows (`Skip`, `DNF`, `End`, and a real score for a
+  timeout).
+- **JSON** (`Export history (JSON)` in the lobby) is the whole retained history, not
+  just the five rows the panel shows: `{format: "better-party.results", version: 1,
+matches: [...]}`.
+
+Neither contains a uid, session, host token, connection id, ball cosmetic, course
+specification or internal `matchId`. Both are downloaded as files rather than copied to
+the clipboard, so they need no clipboard permission and work on a phone.
+`tests/results-export.test.js` asserts the exact projections, and
+`check-results-export.mjs` captures the actual downloads in a browser and checks them.
+
 ## Starting, stopping and restarting
 
 `bun run start` runs in the foreground, which is the right default for local use

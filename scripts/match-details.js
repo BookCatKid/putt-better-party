@@ -93,11 +93,26 @@ function bpRelativeToPar(strokes, parFaced) {
 function BpScorecard() {
   const history = useBetterPartyState(betterPartyStore, (partyState) => partyState.roundHistory);
   const final = useBetterPartyState(betterPartyStore, (partyState) => partyState.final);
+  const matchId = useBetterPartyState(betterPartyStore, (partyState) => partyState.matchId);
   const [open, setOpen] = BetterPartyReact.useState(false);
   if (!history?.length || !final?.standings?.length) {
     return null;
   }
   const createElement = BetterPartyReact.createElement;
+  // A filename that cannot collide with a previous export: the date orders files and
+  // the match id keeps two matches from the same day apart.
+  const exportCsv = () => {
+    const text = bpResultsCsv(history, final.standings);
+    if (!text) {
+      return;
+    }
+    const stamp = new Date().toISOString().slice(0, 10);
+    bpDownloadResults(
+      'better-party-' + stamp + '-' + (matchId ?? 'match').slice(0, 8) + '.csv',
+      text,
+      'text/csv;charset=utf-8',
+    );
+  };
   return createElement('section', { className: 'bp-scorecard' }, [
     createElement(
       'button',
@@ -108,6 +123,18 @@ function BpScorecard() {
         className: 'rounded-full bg-white/10 px-4 py-2 text-xs font-semibold',
       },
       open ? 'Hide scorecard' : 'Scorecard',
+    ),
+    // Exporting is a download rather than a copy, so it needs no clipboard
+    // permission and works from a phone.
+    createElement(
+      'button',
+      {
+        type: 'button',
+        onClick: exportCsv,
+        className:
+          'bp-export bp-export-csv rounded-full bg-white/10 px-4 py-2 text-xs font-semibold',
+      },
+      'Export CSV',
     ),
     open &&
       createElement(

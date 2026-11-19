@@ -378,9 +378,16 @@ def game_patch(s):
     # route, stores and Ready/Start runtime functions unchanged.
     a = s.index("function Mt(")
     b = s.index("function Nt(", a)
+    # The export helpers are pure and used by both the scorecard and the lobby, so
+    # they go in once, ahead of both. They are authored as a module; the bundle is
+    # concatenated, so the `export` keywords are stripped here.
+    results_export_source = (
+        (root / "scripts/results-export.js").read_text().replace("export function ", "function ")
+    )
     s = (
         s[:a]
         + "\nconst bpSetReady = de, bpStartMatch = le, BpOriginalLobbyPlayer = jt;\n"
+        + results_export_source
         + (root / "scripts/lobby.js").read_text()
         + "\nfunction Mt(){return (0,J.jsx)(BpLobbyDashboard,{})}\n"
         + s[b:]
@@ -646,6 +653,7 @@ build_inputs = [root / "scripts" / "patch-client.py"] + sorted(
         "party-runtime.js",
         "party-transport.js",
         "picker.js",
+        "results-export.js",
         "lobby.js",
         "match-details.js",
         "host-menu.js",

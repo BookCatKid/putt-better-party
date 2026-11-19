@@ -101,6 +101,7 @@ export default [
       'scripts/host-menu.js',
       'scripts/player-management.js',
       'scripts/lobby.js',
+      'scripts/results-export.js',
     ],
     languageOptions: {
       globals: {
@@ -125,6 +126,9 @@ export default [
         BpManagementNotice: 'readonly',
         BpManageRoster: 'readonly',
         BpUpcomingEditor: 'readonly',
+        bpResultsCsv: 'readonly',
+        bpHistoryJson: 'readonly',
+        bpDownloadResults: 'readonly',
       },
     },
     rules: {

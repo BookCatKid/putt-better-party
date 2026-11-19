@@ -16,30 +16,53 @@ function BpMatchHistory({ history }) {
     );
   }
   return createElement(
-    'ul',
-    { className: 'bp-match-history' },
-    history.slice(0, 5).map((match) =>
-      createElement('li', { key: match.matchId }, [
-        createElement(
-          'span',
-          { key: 'meta', className: 'bp-match-history-meta' },
-          new Date(match.endedAt).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-          }) +
-            ' · ' +
-            match.holes +
-            (match.holes === 1 ? ' hole' : ' holes'),
-        ),
-        createElement(
-          'span',
-          { key: 'score', className: 'bp-match-history-score' },
-          match.standings
-            .slice(0, 3)
-            .map((row) => row.name + ' ' + row.totalStrokes)
-            .join(' · '),
-        ),
-      ]),
+    'div',
+    { className: 'bp-match-history-wrap' },
+    createElement(
+      'ul',
+      { className: 'bp-match-history' },
+      history.slice(0, 5).map((match) =>
+        createElement('li', { key: match.matchId }, [
+          createElement(
+            'span',
+            { key: 'meta', className: 'bp-match-history-meta' },
+            new Date(match.endedAt).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            }) +
+              ' · ' +
+              match.holes +
+              (match.holes === 1 ? ' hole' : ' holes'),
+          ),
+          createElement(
+            'span',
+            { key: 'score', className: 'bp-match-history-score' },
+            match.standings
+              .slice(0, 3)
+              .map((row) => row.name + ' ' + row.totalStrokes)
+              .join(' · '),
+          ),
+        ]),
+      ),
+    ),
+    // The whole history, not just the five shown: the panel is a glance, the file is
+    // the record.
+    createElement(
+      'button',
+      {
+        type: 'button',
+        onClick: () => {
+          const stamp = new Date().toISOString().slice(0, 10);
+          bpDownloadResults(
+            'better-party-history-' + stamp + '.json',
+            bpHistoryJson(history),
+            'application/json;charset=utf-8',
+          );
+        },
+        className:
+          'bp-export bp-export-history mt-2 rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold',
+      },
+      'Export history (JSON)',
     ),
   );
 }
