@@ -16,7 +16,8 @@ import path from 'node:path';
 const root = path.resolve(import.meta.dir, '..');
 const homeSource = readFileSync(path.join(root, 'scripts/home.ts'), 'utf8');
 const guardsSource = readFileSync(path.join(root, 'src/request-guards.ts'), 'utf8');
-const serverSource = readFileSync(path.join(root, 'src/server.ts'), 'utf8');
+// The party-code generator lives in the request map, not the bootstrap.
+const routesSource = readFileSync(path.join(root, 'src/http-routes.ts'), 'utf8');
 
 /** The literal of a `const NAME = /.../;` declaration. */
 function regexLiteral(source, name) {
@@ -33,7 +34,7 @@ test('the client and server agree on the party-code alphabet', () => {
 });
 
 test('every generated code is one the client and server accept', () => {
-  const generated = serverSource.match(
+  const generated = routesSource.match(
     /\bcode = Array\.from\(\s*\{ length: 5 \},\s*\(\) => '([^']+)'\[/,
   );
   expect(generated).not.toBeNull();
