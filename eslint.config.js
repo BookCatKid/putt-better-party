@@ -146,6 +146,8 @@ export default [
         sanitizedSettings: 'readonly',
         parseCourseUrl: 'readonly',
         readSavedPlaylists: 'readonly',
+        bpHostAuth: 'readonly',
+        bpHostRequest: 'readonly',
         bpResultsCsv: 'readonly',
         bpHistoryJson: 'readonly',
         bpDownloadResults: 'readonly',

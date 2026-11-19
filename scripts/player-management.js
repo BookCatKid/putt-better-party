@@ -292,19 +292,14 @@ function BpBannedNames() {
   // than carried in the broadcast snapshot, which every player receives.
   const refresh = React.useCallback(async () => {
     try {
-      const response = await fetch('/api/bans', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          code,
-          uid: party.self?.uid,
-          session: party.self?.session,
-          host: sessionStorage.getItem('bp.host.' + code),
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok || !Array.isArray(result.names)) {
-        throw Error(result.error || 'Could not load bans');
+      const result = await bpHostRequest(
+        '/api/bans',
+        bpHostAuth(code, party.self?.uid, party.self?.session),
+        {},
+        'Could not load bans',
+      );
+      if (!Array.isArray(result.names)) {
+        throw Error('Could not load bans');
       }
       setNames(result.names);
     } catch (loadError) {

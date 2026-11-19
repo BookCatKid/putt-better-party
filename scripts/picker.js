@@ -9,6 +9,19 @@
  * here is the state graph itself plus the playlist editing surface, which only
  * makes sense next to the state it mutates.
  */
+/**
+ * Whether the lobby the request was made for is still the one on screen.
+ *
+ * Every picker request is awaited, and the host may navigate to another party
+ * or switch the map source in the meantime; applying the response then would
+ * mix one party's playlist into another's. The three await sites check the
+ * same triple — same room, still in the lobby, still on the picked source.
+ */
+function lobbyUnchanged(code) {
+  const state = betterPartyStore.state;
+  return state.code === code && state.phase === 'lobby' && state.config.mapSource === 'picked';
+}
+
 function CommunityCoursePicker({ config, holeSettings }) {
   const [pickerOpen, setPickerOpen] = BetterPartyReact.useState(false);
   const dialog = BetterPartyReact.useRef(null);
@@ -282,44 +295,30 @@ function CommunityCoursePicker({ config, holeSettings }) {
     try {
       const state = betterPartyStore.state;
       const code = state.code;
-      const auth = {
-        code,
-        uid: state.self.uid,
-        session: state.self.session,
-        host: sessionStorage.getItem('bp.host.' + code),
-      };
+      const auth = bpHostAuth(code, state.self.uid, state.self.session);
       // A course already named in this session is one upstream has validated, so it
       // is not re-fetched. Match start still retrieves every course fresh.
       const pending = [...new Set(ids)].filter((id) => !names[id]);
       const failed = [];
       for (const [index, id] of pending.entries()) {
-        if (
-          betterPartyStore.state.code !== code ||
-          betterPartyStore.state.phase !== 'lobby' ||
-          betterPartyStore.state.config.mapSource !== 'picked'
-        ) {
+        if (!lobbyUnchanged(code)) {
           throw Error('The lobby changed while loading the playlist');
         }
-        const response = await fetch('/api/import', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ...auth, id, saved: true }),
-        });
-        const imported = await response.json();
-        if (!response.ok) {
+        try {
+          const imported = await bpHostRequest(
+            '/api/import',
+            auth,
+            { id, saved: true },
+            'This course is unavailable.',
+          );
+          setNames((previousNames) => ({ ...previousNames, [id]: imported.title }));
+        } catch (importError) {
           // Recorded and skipped, not fatal: the rest of the playlist still loads.
-          failed.push({ id, message: imported.error || 'This course is unavailable.' });
-          setProgress('Checked ' + (index + 1) + ' of ' + pending.length + ' courses…');
-          continue;
+          failed.push({ id, message: importError.message });
         }
-        setNames((previousNames) => ({ ...previousNames, [id]: imported.title }));
         setProgress('Checked ' + (index + 1) + ' of ' + pending.length + ' courses…');
       }
-      if (
-        betterPartyStore.state.code !== code ||
-        betterPartyStore.state.phase !== 'lobby' ||
-        betterPartyStore.state.config.mapSource !== 'picked'
-      ) {
+      if (!lobbyUnchanged(code)) {
         throw Error('The lobby changed while loading the playlist');
       }
       const failedIds = new Set(failed.map((entry) => entry.id));
@@ -352,26 +351,20 @@ function CommunityCoursePicker({ config, holeSettings }) {
     try {
       const state = betterPartyStore.state;
       const code = state.code;
-      const response = await fetch('/api/import', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          code,
-          uid: state.self.uid,
-          session: state.self.session,
-          host: sessionStorage.getItem('bp.host.' + code),
-          id,
-          saved: true,
-        }),
-      });
-      const imported = await response.json();
-      if (!response.ok) {
+      let imported;
+      try {
+        imported = await bpHostRequest(
+          '/api/import',
+          bpHostAuth(code, state.self.uid, state.self.session),
+          { id, saved: true },
+          'This course is unavailable.',
+        );
+      } catch (importError) {
+        // Recorded on the entry rather than fatal: the dialog stays usable.
         setLoadAttempt({
           ...loadAttempt,
           failed: loadAttempt.failed.map((entry) =>
-            entry.id === id
-              ? { ...entry, message: imported.error || 'This course is unavailable.' }
-              : entry,
+            entry.id === id ? { ...entry, message: importError.message } : entry,
           ),
         });
         return;
@@ -432,23 +425,12 @@ function CommunityCoursePicker({ config, holeSettings }) {
   const createElement = BetterPartyReact.createElement;
   async function generatorRequest(action, filters) {
     const state = betterPartyStore.state;
-    const response = await fetch('/api/generate-playlist', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        action,
-        filters,
-        code: state.code,
-        uid: state.self.uid,
-        session: state.self.session,
-        host: sessionStorage.getItem('bp.host.' + state.code),
-      }),
-    });
-    const job = await response.json();
-    if (!response.ok) {
-      throw Error(job.error || 'Could not generate playlist');
-    }
-    return job;
+    return bpHostRequest(
+      '/api/generate-playlist',
+      bpHostAuth(state.code, state.self.uid, state.self.session),
+      { action, filters },
+      'Could not generate playlist',
+    );
   }
 
   async function generate() {
@@ -567,28 +549,15 @@ function CommunityCoursePicker({ config, holeSettings }) {
     // response arrives, mixing one party's playlist into another's.
     const code = betterPartyStore.state.code;
     try {
-      const response = await fetch('/api/import', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          code,
-          uid: betterPartyStore.state.self.uid,
-          session: betterPartyStore.state.self.session,
-          host: sessionStorage.getItem('bp.host.' + code),
-          id,
-        }),
-      });
-      const catalogPage = await response.json();
-      if (!response.ok) {
-        throw Error(catalogPage.error || 'Could not load map');
-      }
+      const catalogPage = await bpHostRequest(
+        '/api/import',
+        bpHostAuth(code, betterPartyStore.state.self.uid, betterPartyStore.state.self.session),
+        { id },
+        'Could not load map',
+      );
       const resolvedTitle = typeof catalogPage.title === 'string' ? catalogPage.title : title;
       setNames((previousNames) => ({ ...previousNames, [id]: resolvedTitle }));
-      if (
-        betterPartyStore.state.code !== code ||
-        betterPartyStore.state.phase !== 'lobby' ||
-        betterPartyStore.state.config.mapSource !== 'picked'
-      ) {
+      if (!lobbyUnchanged(code)) {
         return;
       }
       update([...(betterPartyStore.state.config.selectedHoleIds ?? []), id]);

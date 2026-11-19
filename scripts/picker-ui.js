@@ -36,3 +36,41 @@ export function statDetail(label, value) {
     createElement('dd', { className: 'font-bold text-[var(--sea-ink)]' }, value),
   ]);
 }
+
+/**
+ * The host credentials every host-only request carries.
+ *
+ * `code` scopes the host key in `bp.host.<code>` and identifies the room, `uid`
+ * + `session` prove the caller is the connected host, and `host` is the
+ * capability the server compares with the one it issued. Shared by the picker's
+ * import/generate calls and the management panel's ban list, which all live in
+ * the same bundle scope - the entry screen in the other bundle builds its own,
+ * because a snippet cannot share a helper across bundles.
+ */
+export function bpHostAuth(code, uid, session) {
+  return {
+    code,
+    uid,
+    session,
+    host: sessionStorage.getItem('bp.host.' + code),
+  };
+}
+
+/**
+ * POST a host-only JSON request and return the decoded body.
+ *
+ * The server always answers `{error}` on failure, so a thrown message is the
+ * server's own wording with the caller's fallback for the unexpected shape.
+ */
+export async function bpHostRequest(path, auth, body, fallbackMessage) {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...auth, ...body }),
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw Error(result.error || fallbackMessage);
+  }
+  return result;
+}
