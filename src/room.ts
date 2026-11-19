@@ -797,6 +797,11 @@ export class Room {
       this.players.delete(player.uid);
     }
     this.rosterBroadcast();
+    // The roster broadcast above carries `connected`, but the in-game HUD and the
+    // results list both read the *board*, which is only sent when something is
+    // scored. Without this, a player who drops mid-hole stays "present" on the
+    // live standings until the next stroke or hole boundary repaints it.
+    this.broadcast(this.board());
     this.changed();
     if (player.uid === this.hostUid) {
       // An outage may be temporary, so the crown waits rather than moving at once.

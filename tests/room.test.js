@@ -2058,3 +2058,18 @@ test('standings distinguish a dropped player from one who lost', async () => {
   expect(room.standings()[0].connected).toBe(false);
   room.dispose();
 });
+
+test('a mid-hole drop repaints the live board, not just the roster', async () => {
+  const { room, host } = await playingRoom();
+  const observer = enter(room, 'Observer');
+  const before = observer.ws.frames.filter((frame) => frame.t === 'board').length;
+
+  // The in-game HUD and the results list both read the board, which is otherwise
+  // only resent when someone scores. A drop has to repaint it or the HUD keeps
+  // showing the absent player as present until the next stroke.
+  room.close(host.ws);
+  const boards = observer.ws.frames.filter((frame) => frame.t === 'board');
+  expect(boards.length).toBeGreaterThan(before);
+  expect(boards.at(-1).standings[0].connected).toBe(false);
+  room.dispose();
+});

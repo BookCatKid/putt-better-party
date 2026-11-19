@@ -1129,6 +1129,11 @@ body:has(> #app) {
   font-size: 11px;
   color: rgb(252 165 165);
 }
+/* Inline marker for a dropped player in the in-game HUD and the final list. */
+.bp-left-mark {
+  color: rgb(252 165 165);
+  font-weight: 500;
+}
 .bp-dashboard .bp-lobby-options {
   border: 0;
   padding: 0;

@@ -1,3 +1,22 @@
+/**
+ * Marks a player whose socket has dropped, in the in-game HUD and the final list.
+ *
+ * Eliminated, spectating and disconnected are three different things and the
+ * original rows already distinguish the first two - eliminated players are struck
+ * through, spectators get an eye. A dropped player is struck through too once
+ * eliminated, so without this the two are indistinguishable at a glance.
+ */
+function BpLeftMark({ row }) {
+  if (row.connected !== false) {
+    return null;
+  }
+  return BetterPartyReact.createElement(
+    'span',
+    { className: 'bp-left-mark', key: 'left', title: 'Disconnected' },
+    ' · left',
+  );
+}
+
 // Uses the same React/store bindings as the original party HUD.
 function BpWatchName({ row, isSelf }) {
   const party = useBetterPartyState(betterPartyStore, (state) => state);
@@ -9,8 +28,9 @@ function BpWatchName({ row, isSelf }) {
   const className =
     'flex-1 truncate text-xs font-medium ' +
     (row.alive ? 'text-white/90' : 'text-white/35 line-through');
+  const mark = createElement(BpLeftMark, { row, key: 'left' });
   if (!enabled) {
-    return createElement('span', { className }, row.name + (isSelf ? ' (you)' : ''));
+    return createElement('span', { className }, [row.name + (isSelf ? ' (you)' : ''), mark]);
   }
   return createElement(
     'button',
@@ -22,7 +42,7 @@ function BpWatchName({ row, isSelf }) {
       'aria-label': 'Follow ' + row.name,
       title: 'Follow ' + row.name,
     },
-    row.name,
+    [row.name, mark],
   );
 }
 

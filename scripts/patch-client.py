@@ -561,6 +561,11 @@ def game_patch(s):
         '})]})]})]})]}),(0,J.jsxs)(`div`,{"data-overview-hud":`bottom`',
         '})]})]}),(0,J.jsx)(BpHostMenu,{settingsOpen:A,closeSettings:()=>ie(false)})]})]}),(0,J.jsxs)(`div`,{"data-overview-hud":`bottom`',
     )
+    s = replace_once(
+        s,
+        "children:[e.name,e.uid===r?` (you)`:``]}),(0,J.jsxs)(`span`,{className:`shrink-0 text-sm tabular-nums text-white/70`",
+        "children:[e.name,e.uid===r?` (you)`:``,(0,J.jsx)(BpLeftMark,{row:e})]}),(0,J.jsxs)(`span`,{className:`shrink-0 text-sm tabular-nums text-white/70`",
+    )
     a = s.index("function Ht(")
     b = s.index("function ", a + 10)
     part = s[a:b]
