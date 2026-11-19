@@ -22,6 +22,7 @@ import { browse, detail, publicStats, preview, upstreamMetrics } from './upstrea
 import {
   SizeLimitExceededError,
   assertResponseWithinLimit,
+  assetCacheControl,
   containedAssetPath,
   decodedPathSegment,
   isPublicCourseId,
@@ -605,7 +606,10 @@ export function createHttpHandler(context: HttpContext) {
         const asset = containedAssetPath(root, pathname);
         if (asset) {
           return new Response(Bun.file(asset), {
-            headers: { 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' },
+            headers: {
+              'x-content-type-options': 'nosniff',
+              'cache-control': assetCacheControl(pathname),
+            },
           });
         }
         logEvent('asset_missing', {

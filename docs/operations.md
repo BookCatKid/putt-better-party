@@ -184,6 +184,44 @@ What each field is for:
 
 `/health` accepts `GET` and `HEAD` and answers `405` otherwise.
 
+## Client versions, browser cache and service workers
+
+**Version matching is structural.** The party HTML names the pinned entry
+`/assets/index-DFMxt6BL.js` and `styles-S28F_fms.css`; those names are verified
+against `client-lock.json` by `tests/static-serving.test.js`, and every other
+chunk is reached through the entry's own import graph — so a served page can
+only ever reference files from the same prepared build. `build.json` stamps
+the build; `/health` reports it and the deploy smoke test compares it.
+
+**Cache policy.** Vite content-hash-suffixed bundles (`name-XXXXXXXX.js|css`)
+are served `public, max-age=31536000, immutable` — the filename is derived
+from the bytes, so the same name can never carry different content and repeat
+visits refetch nothing. Everything else — models, sounds, skies, authored
+`bp-*.js`, the validator, favicon, HTML, every API response — stays
+`no-store`, because a stable name _can_ carry new bytes after a deliberate
+upstream adoption and a stale course model is a gameplay-visible bug no
+suffix rules out. The policy lives in `assetCacheControl()` in
+`src/request-guards.ts`.
+
+**Service workers: audited, none possible on this origin.** Two upstream
+touchpoints exist: the submit route calls
+`navigator.serviceWorker.register('/sw.js')`, and the entry bundle carries
+upstream's own "rescue" that unregisters every registration and clears every
+Cache when the page looks broken. This server has never served `/sw.js` — the
+registration fails into the client's own `.catch(()=>{})`, so no worker can
+install, and the rescue path only ever removes things. Workers are
+origin-scoped, so one registered for the official site cannot interfere here
+either. The test suite pins both ends: `/sw.js` absent from the lock, and no
+authored file may call `serviceWorker`.
+
+**Rollback.** A client build is fully deterministic from the lock +
+patchers, so rollback is `git checkout <sha> && bun run prepare:client` —
+the atomic stage/publish dance means the running server sees either the
+whole old build or the whole new one, never a mix, and a failed prepare
+leaves the live `web/` byte-identical. `web/` itself is regenerated output:
+never back it up, never hand-edit it; the archive of record is
+`private-client/` plus the lock.
+
 ## Backups
 
 The database runs in WAL mode, so copying `rooms.sqlite` by hand is **not** a

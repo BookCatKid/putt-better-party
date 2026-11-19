@@ -199,6 +199,23 @@ export function containedAssetPath(assetRoot: string, requestPathname: string): 
 }
 
 /**
+ * Cache policy for a served asset path.
+ *
+ * Vite content-hash-suffixed bundles are name-equals-content: `index-DFMxt6BL.js`
+ * can only ever hold the bytes that hashed to `DFMxt6BL`, so immutable caching
+ * is a free win for the multi-megabyte chunk graph — a repeat visit refetches
+ * nothing. Everything else keeps `no-store`: models, sounds, skies, authored
+ * `bp-*.js` and the generated validator all have stable names, and an upstream
+ * adoption could ship new bytes under the same name; a stale course model is a
+ * gameplay-visible bug that no suffix can rule out.
+ */
+export function assetCacheControl(requestPathname: string): string {
+  return /-[\w-]{8}\.(js|css)$/.test(requestPathname)
+    ? 'public, max-age=31536000, immutable'
+    : 'no-store';
+}
+
+/**
  * Separator-aware containment test. Exported because the sibling-prefix case
  * (a root of `/srv/assets` must not accept `/srv/assets-evil`) is the classic
  * `startsWith` bug and deserves to be pinned directly.
