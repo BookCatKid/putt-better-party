@@ -1,5 +1,118 @@
 // Adapt the original _site.holes community card markup and class names.
 // Party-specific actions replace Play/Fork and account-only controls.
+
+/**
+ * A shared playlist is a small versioned document, not a stored object.
+ *
+ * It carries the public course ids in order - duplicates included, because a
+ * playlist may deliberately play a hole twice - and an optional set of lobby
+ * settings. It deliberately carries nothing else: no host capability, no session,
+ * no course specification. A specification is the course itself, and copying one
+ * into a shareable file would ship upstream geometry and pin a stale version of it;
+ * the ids are re-resolved against the live API on import instead.
+ */
+const PLAYLIST_FORMAT = 'better-party.playlist';
+const PLAYLIST_VERSION = 1;
+/** The public course id alphabet the server accepts. */
+const PLAYLIST_COURSE_ID = /^[A-Za-z0-9_-]{5,64}$/;
+const PLAYLIST_MAX_IDS = 10000;
+
+function serializePlaylist(name, ids, settings) {
+  return JSON.stringify(
+    {
+      format: PLAYLIST_FORMAT,
+      version: PLAYLIST_VERSION,
+      name,
+      ids: [...ids],
+      settings,
+    },
+    null,
+    2,
+  );
+}
+
+/**
+ * Parse a shared playlist, refusing anything that is not one.
+ *
+ * Every refusal names what is wrong, because the input came from a person pasting
+ * text rather than from our own storage. Unknown top-level keys and unknown setting
+ * keys are ignored rather than rejected: a newer export from a future version that
+ * still uses version 1 should degrade, not fail.
+ */
+function parsePlaylistDocument(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw Error('That is not valid JSON.');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw Error('A playlist must be a JSON object.');
+  }
+  if (parsed.format !== PLAYLIST_FORMAT) {
+    throw Error('That is not a Better Party playlist.');
+  }
+  if (parsed.version !== PLAYLIST_VERSION) {
+    throw Error('That playlist was made by a different version.');
+  }
+  if (!Array.isArray(parsed.ids) || parsed.ids.length === 0) {
+    throw Error('A playlist needs at least one course.');
+  }
+  if (parsed.ids.length > PLAYLIST_MAX_IDS) {
+    throw Error('That playlist has too many courses.');
+  }
+  const invalid = parsed.ids.find((id) => typeof id !== 'string' || !PLAYLIST_COURSE_ID.test(id));
+  if (invalid !== undefined) {
+    throw Error('That playlist contains an invalid course ID.');
+  }
+  const name =
+    typeof parsed.name === 'string' && parsed.name.trim()
+      ? parsed.name.trim().slice(0, 60)
+      : 'Imported playlist';
+  return { name, ids: parsed.ids.slice(), settings: parsed.settings };
+}
+
+/** The settings worth sharing, and only the ones this build can validate. */
+function shareableSettings(config) {
+  return {
+    timerMs: config.timerMs,
+    elimination: config.elimination,
+    maxPlayers: config.maxPlayers,
+    lateJoin: config.lateJoin,
+  };
+}
+
+/**
+ * Keep only settings that are valid for this build.
+ *
+ * The document is untrusted input, so a setting is applied only when it passes the
+ * same bounds the lobby enforces; anything else is dropped rather than sent to the
+ * server to be refused.
+ */
+function sanitizedSettings(settings) {
+  const result = {};
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    return result;
+  }
+  if (Number.isInteger(settings.timerMs) && settings.timerMs >= 0 && settings.timerMs <= 86400000) {
+    result.timerMs = settings.timerMs;
+  }
+  if (typeof settings.elimination === 'boolean') {
+    result.elimination = settings.elimination;
+  }
+  if (
+    Number.isInteger(settings.maxPlayers) &&
+    settings.maxPlayers >= 1 &&
+    settings.maxPlayers <= 50
+  ) {
+    result.maxPlayers = settings.maxPlayers;
+  }
+  if (['never', 'next-hole', 'always'].includes(settings.lateJoin)) {
+    result.lateJoin = settings.lateJoin;
+  }
+  return result;
+}
+
 function CommunityCoursePicker({ config, holeSettings }) {
   const [pickerOpen, setPickerOpen] = BetterPartyReact.useState(false);
   const dialog = BetterPartyReact.useRef(null);
@@ -50,6 +163,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
   });
   const [savedId, setSavedId] = BetterPartyReact.useState('');
   const [saveName, setSaveName] = BetterPartyReact.useState('');
+  const [transfer, setTransfer] = BetterPartyReact.useState('');
   const [drag, setDrag] = BetterPartyReact.useState(null);
   function store(next) {
     try {
@@ -74,6 +188,97 @@ function CommunityCoursePicker({ config, holeSettings }) {
     setSavedId(id);
     setSaveName('');
   }
+  /**
+   * Put the current selection into the transfer box as a shareable document.
+   *
+   * The box is the artefact: it is editable, selectable and can be pasted anywhere.
+   * Copying to the clipboard is attempted as a convenience, but a blocked clipboard
+   * is not a failure here because the text is already visible and selected.
+   */
+  function exportPlaylist() {
+    if (!picked.length) {
+      setError('Add at least one course before exporting.');
+      return;
+    }
+    const text = serializePlaylist(
+      saveName.trim() || 'Playlist',
+      picked,
+      shareableSettings(config),
+    );
+    setTransfer(text);
+    setError('');
+    void navigator.clipboard?.writeText(text).catch(() => {
+      // The document is in the box either way.
+    });
+  }
+
+  /**
+   * Resolve a shared document against the live catalogue and apply it.
+   *
+   * The ids are re-validated one at a time exactly like a saved playlist, so an
+   * entry that no longer exists upstream is reported instead of being dropped, and
+   * order and intentional duplicates are preserved because the applied list is the
+   * document's own `ids`.
+   */
+  async function importPlaylist() {
+    if (busy || preparing) {
+      return;
+    }
+    let document;
+    try {
+      document = parsePlaylistDocument(transfer);
+    } catch (parseError) {
+      setError(parseError.message);
+      return;
+    }
+    setBusy(true);
+    setError('');
+    bpPickerBusy(true);
+    try {
+      const state = betterPartyStore.state;
+      const code = state.code;
+      const auth = {
+        code,
+        uid: state.self.uid,
+        session: state.self.session,
+        host: sessionStorage.getItem('bp.host.' + code),
+      };
+      const pending = [...new Set(document.ids)].filter((id) => !names[id]);
+      for (const [index, id] of pending.entries()) {
+        if (
+          betterPartyStore.state.code !== code ||
+          betterPartyStore.state.phase !== 'lobby' ||
+          betterPartyStore.state.config.mapSource !== 'picked'
+        ) {
+          throw Error('The lobby changed while loading the playlist');
+        }
+        const response = await fetch('/api/import', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...auth, id, saved: true }),
+        });
+        const imported = await response.json();
+        if (!response.ok) {
+          throw Error(imported.error || 'Could not load playlist');
+        }
+        setNames((previousNames) => ({ ...previousNames, [id]: imported.title }));
+        setProgress('Checking ' + (index + 1) + ' of ' + pending.length + ' courses…');
+      }
+      update(document.ids);
+      const settings = sanitizedSettings(document.settings);
+      if (Object.keys(settings).length) {
+        updateBetterPartyConfig(settings);
+      }
+      setTransfer('');
+    } catch (importError) {
+      setError(importError.message);
+    } finally {
+      setBusy(false);
+      bpPickerBusy(false);
+      setProgress('');
+    }
+  }
+
   async function loadSaved() {
     const selected = saved.find((playlist) => playlist.id === savedId);
     if (!selected || busy || preparing) {
@@ -1046,6 +1251,34 @@ function CommunityCoursePicker({ config, holeSettings }) {
                     !savedId || busy || preparing,
                     pill,
                     { 'aria-label': 'Delete saved playlist' },
+                  ),
+                ]),
+                createElement('div', { className: 'bp-playlist-transfer mt-3' }, [
+                  createElement('textarea', {
+                    key: 'transfer',
+                    'aria-label': 'Playlist JSON',
+                    className: 'bp-playlist-transfer-text',
+                    placeholder: 'Export a playlist, or paste a shared one here',
+                    value: transfer,
+                    rows: 3,
+                    spellCheck: false,
+                    onChange: (event) => setTransfer(event.target.value),
+                  }),
+                  actionButton(
+                    'Export',
+                    exportPlaylist,
+                    !picked.length || busy || preparing,
+                    pill,
+                    { 'aria-label': 'Export playlist' },
+                  ),
+                  actionButton(
+                    'Import',
+                    importPlaylist,
+                    !transfer.trim() || busy || preparing,
+                    pill,
+                    {
+                      'aria-label': 'Import playlist',
+                    },
                   ),
                 ]),
                 busy &&
