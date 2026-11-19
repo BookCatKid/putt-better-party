@@ -147,6 +147,13 @@ interface TransportBindings {
   readonly clearTimeout: (handle: TimerHandle | undefined) => void;
   readonly setInterval: (handler: () => void, ms: number) => TimerHandle;
   readonly clearInterval: (handle: TimerHandle | undefined) => void;
+  /**
+   * The HTTP status for a party code, used to tell a party that no longer exists
+   * from a connection that merely failed. A refused WebSocket upgrade and a network
+   * blip both surface as an abnormal close, so the close code cannot distinguish
+   * them; `404` can.
+   */
+  readonly probeRoom: (code: string) => Promise<number>;
   readonly partyStore: SnippetStore<SnippetPartyState>;
   readonly gameStore: SnippetStore<SnippetGameState>;
   readonly settingsStore: SnippetStore<SnippetSettingsState>;

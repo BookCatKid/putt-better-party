@@ -32,6 +32,12 @@ function resolveTransportBindings(injected) {
     clearTimeout: provided.clearTimeout ?? globalClearTimeout,
     setInterval: provided.setInterval ?? globalSetInterval,
     clearInterval: provided.clearInterval ?? globalClearInterval,
+    probeRoom:
+      provided.probeRoom ??
+      ((roomCode) =>
+        fetch('/api/room/' + encodeURIComponent(roomCode), {
+          signal: AbortSignal.timeout(5_000),
+        }).then((response) => response.status)),
     partyStore: provided.partyStore ?? transportPartyStore,
     gameStore: provided.gameStore ?? transportGameStore,
     settingsStore: provided.settingsStore ?? transportSettings,
@@ -537,6 +543,9 @@ function connectBetterParty(code, identity, options = {}) {
         return;
       }
       bind.clearTimeout(handshakeTimer);
+      // Captured before the flag is cleared: it says whether *this* socket ever
+      // completed a handshake, which is what makes the probe below worthwhile.
+      const hadSynchronized = synchronized;
       socket = null;
       synchronized = false;
       // The backend explicitly replaces the previous connection using this close reason.
@@ -545,8 +554,46 @@ function connectBetterParty(code, identity, options = {}) {
         terminalError = 'This party is open in another tab.';
       }
       bind.connection(false, terminalError);
+      if (terminalError) {
+        return;
+      }
+      // The retry is scheduled immediately, exactly as before, so a network blip
+      // reconnects with no added latency. The probe below only *cancels* it, and
+      // only when the server says the party is gone.
       scheduleReconnect();
+      if (!hadSynchronized) {
+        void cancelReconnectIfPartyIsGone();
+      }
     };
+  }
+
+  /**
+   * Stop a scheduled retry when the party no longer exists.
+   *
+   * A refused upgrade (a reclaimed or mistyped party) and a network failure both
+   * arrive as an abnormal close with no usable code, so retrying blindly means a
+   * stale URL reconnects every fifteen seconds forever while the page says
+   * "Reconnecting party…". One cheap status check separates them: `404` is the
+   * server saying the party is gone, which is permanent and deserves an
+   * explanation instead of an endless retry. Anything else - including the probe
+   * itself failing - is a connection problem, so the already-scheduled retry
+   * stands.
+   */
+  async function cancelReconnectIfPartyIsGone() {
+    let status;
+    try {
+      status = await bind.probeRoom(code);
+    } catch {
+      return;
+    }
+    // A close or a terminal frame may have landed while the probe was in flight.
+    if (disposed || terminalError || status !== 404) {
+      return;
+    }
+    terminalError = 'This party no longer exists.';
+    bind.clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+    bind.connection(false, terminalError);
   }
 
   let lastPosition = '';

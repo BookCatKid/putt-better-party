@@ -167,6 +167,9 @@ function fakeEnvironment(clockOptions = {}) {
     settingsStore,
     scene,
     connection: (connected, failure) => log.connection.push({ connected, failure }),
+    // Defaults to "the party is still there", so tests that are not about a
+    // vanished party keep retrying exactly as before.
+    probeRoom: async () => 200,
     registerSender: (sender) => {
       registeredSender = sender;
     },
@@ -1066,5 +1069,69 @@ test('a restart of the same course does not let the finished attempt report agai
   const frames = socket.sent.filter((frame) => frame.f === 1);
   expect(frames.length).toBe(2);
   expect(frames[1]).toMatchObject({ s: 1 });
+  dispose();
+});
+
+test('a party that no longer exists stops retrying instead of looping forever', async () => {
+  // A reclaimed or mistyped party refuses the upgrade, which arrives as an
+  // abnormal close indistinguishable from a network blip. Without the probe the
+  // page retries every fifteen seconds forever while claiming to reconnect.
+  let probes = 0;
+  const env = fakeEnvironment();
+  env.bindings.probeRoom = async () => {
+    probes += 1;
+    return 404;
+  };
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  env.WebSocket.sockets[0].open();
+  // Never handshakes: the upgrade itself was refused.
+  env.WebSocket.sockets[0].drop();
+  await Bun.sleep(1);
+  expect(probes).toBe(1);
+  expect(env.log.connection.at(-1)).toEqual({
+    connected: false,
+    failure: 'This party no longer exists.',
+  });
+  // No reconnect is scheduled, however long we wait.
+  env.clock.advance(60_000);
+  expect(env.WebSocket.sockets.length).toBe(1);
+  dispose();
+});
+
+test('a failed probe is treated as a connection problem, not a missing party', async () => {
+  let probes = 0;
+  const env = fakeEnvironment();
+  env.bindings.probeRoom = async () => {
+    probes += 1;
+    throw new Error('network down');
+  };
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  env.WebSocket.sockets[0].open();
+  env.WebSocket.sockets[0].drop();
+  await Bun.sleep(1);
+  expect(probes).toBe(1);
+  // The party may be fine; the network is not. Keep retrying.
+  env.clock.advance(1000);
+  expect(env.WebSocket.sockets.length).toBe(2);
+  dispose();
+});
+
+test('a socket that handshaked and then dropped retries without probing', async () => {
+  // The party was live a moment ago, so the close is a drop, not a refusal. An
+  // HTTP round trip on every blip would be pure overhead.
+  let probes = 0;
+  const env = fakeEnvironment();
+  env.bindings.probeRoom = async () => {
+    probes += 1;
+    return 200;
+  };
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const socket = env.WebSocket.sockets[0];
+  handshake(env, socket);
+  socket.drop();
+  await Bun.sleep(1);
+  expect(probes).toBe(0);
+  env.clock.advance(1000);
+  expect(env.WebSocket.sockets.length).toBe(2);
   dispose();
 });
