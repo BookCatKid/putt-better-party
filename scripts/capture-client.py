@@ -12,6 +12,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import time
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 
@@ -38,10 +39,18 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def fetch(path):
-    # Never execute JS, send credentials, access a party, or follow redirects.
-    if path not in ROUTES and not safe(path):
-        raise ValueError("Unapproved static path: " + path)
+class TransientError(RuntimeError):
+    """A failed fetch that may succeed on a later attempt."""
+
+
+# curl exit codes that describe the network rather than the answer: DNS,
+# connect, transfer timeout and broken streams. Everything else - usage
+# errors, the file-size cap, a refused redirect - is permanent.
+TRANSIENT_CURL_CODES = {5, 6, 7, 28, 35, 52, 55, 56, 92}
+FETCH_ATTEMPTS = 3
+
+
+def fetch_once(path):
     p = subprocess.run(
         [
             "curl",
@@ -61,7 +70,19 @@ def fetch(path):
         capture_output=True,
     )
     if p.returncode:
-        raise RuntimeError(path + ": " + p.stderr.decode(errors="replace").strip())
+        stderr = p.stderr.decode(errors="replace").strip()
+        if p.returncode in TRANSIENT_CURL_CODES:
+            raise TransientError(path + ": " + stderr)
+        # `--fail` reports HTTP errors as exit 22; a 5xx or 429 is worth another
+        # attempt, a 4xx refusal is not.
+        http_status = re.search(r"error: (\d+)", stderr)
+        if (
+            p.returncode == 22
+            and http_status
+            and (int(http_status.group(1)) == 429 or int(http_status.group(1)) >= 500)
+        ):
+            raise TransientError(path + ": HTTP " + http_status.group(1))
+        raise RuntimeError(path + ": " + stderr)
     data, _, status = p.stdout.rpartition(b"\n")
     if status != b"200":
         raise RuntimeError(path + ": HTTP " + status.decode())
@@ -70,6 +91,25 @@ def fetch(path):
     if path not in ROUTES and data.lstrip()[:30].lower().startswith((b"<!doctype html", b"<html")):
         raise RuntimeError(path + ": HTML instead of asset")
     return data
+
+
+def fetch(path):
+    # Never execute JS, send credentials, access a party, or follow redirects.
+    if path not in ROUTES and not safe(path):
+        raise ValueError("Unapproved static path: " + path)
+    # Bounded retry for network faults and transient HTTP statuses only. A 404,
+    # a truncated write that produced no bytes, or an HTML body where an asset
+    # was expected fails on the first attempt: retrying a wrong answer does not
+    # make it right, and recording the first failure keeps it honest.
+    last_error = None
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        try:
+            return fetch_once(path)
+        except TransientError as error:
+            last_error = error
+            if attempt < FETCH_ATTEMPTS:
+                time.sleep(0.5 * attempt)
+    raise last_error
 
 
 class Links(HTMLParser):
