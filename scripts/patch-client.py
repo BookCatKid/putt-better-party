@@ -417,6 +417,14 @@ def game_patch(s):
         "children:[`alive `,a.alive,` · holed `,a.holed]}),",
         "children:[`alive `,a.alive,` · holed `,a.holed]}),(0,J.jsx)(BpUpcoming,{}),",
     )
+    # The results screen is where the next course is actually loaded, so the upcoming
+    # line belongs there too - otherwise "loading" and "could not load" can never be
+    # seen, because the in-game HUD only renders while playing.
+    s = replace_once(
+        s,
+        "children:[c,` still in`]}),",
+        "children:[c,` still in`]}),(0,J.jsx)(BpUpcoming,{}),",
+    )
     s = replace_once(
         s,
         "pointer-events-none absolute right-3 top-3 z-10 w-56 rounded-2xl bg-black/60 p-3",

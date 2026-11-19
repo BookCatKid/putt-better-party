@@ -309,6 +309,14 @@
   color: #a7f3d0;
   font-size: 10px;
 }
+/* A next hole that is still loading, or that failed, must not look like a promise
+   that it will be played. */
+.bp-upcoming[data-state='loading'] {
+  color: #fde68a;
+}
+.bp-upcoming[data-state='error'] {
+  color: #fca5a5;
+}
 .bp-lobby:not(:has(.bp-community)) {
   max-width: 440px;
 }

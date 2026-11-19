@@ -294,17 +294,60 @@ function BpRecoveryNotice() {
       )
     : null;
 }
+/**
+ * The next hole, and what is happening to it.
+ *
+ * Three states, because "Next: <title>" is wrong in two of them: while the next
+ * course is being fetched the title may never arrive, and after a failed fetch it
+ * definitely will not. The index is `holeIndex + 1` and the display number is
+ * `holeIndex + 2`, which is the same hole counted the way the HUD counts it.
+ */
 function BpUpcoming() {
   const ids = useBetterPartyState(betterPartyStore, (partyState) => partyState.holeIds);
   const index = useBetterPartyState(betterPartyStore, (partyState) => partyState.holeIndex);
   const titles = useBetterPartyState(betterPartyStore, (partyState) => partyState.playlistTitles);
-  if (!ids[index + 1] || !titles?.[ids[index + 1]]) {
+  const preparing = useBetterPartyState(betterPartyStore, (partyState) => partyState.preparing);
+  const nextError = useBetterPartyState(betterPartyStore, (partyState) => partyState.nextError);
+  const voting = useBetterPartyState(
+    betterPartyStore,
+    (partyState) => partyState.config?.courseVoting,
+  );
+  const nextId = ids?.[index + 1];
+  if (!nextId) {
+    // The last hole has nothing after it. Saying "Next: …" there would be wrong.
     return null;
   }
-  return BetterPartyReact.createElement(
+  const title = titles?.[nextId];
+  if (!title && voting) {
+    // A voting match has not chosen the next course yet, so a number would imply a
+    // decision that has not been made.
+    return null;
+  }
+  const label = title ?? 'hole ' + (index + 2);
+  const createElement = BetterPartyReact.createElement;
+  if (nextError) {
+    return createElement(
+      'p',
+      {
+        className: 'bp-upcoming',
+        'data-state': 'error',
+        role: 'status',
+        title: nextError,
+      },
+      'Next hole could not load' + (title ? ': ' + title : ''),
+    );
+  }
+  if (preparing) {
+    return createElement(
+      'p',
+      { className: 'bp-upcoming', 'data-state': 'loading', role: 'status' },
+      'Loading next hole: ' + label + '…',
+    );
+  }
+  return createElement(
     'p',
-    { className: 'bp-upcoming', title: titles[ids[index + 1]] },
-    'Next: ' + titles[ids[index + 1]],
+    { className: 'bp-upcoming', 'data-state': 'ready', title: title ?? undefined },
+    'Next: ' + label,
   );
 }
 

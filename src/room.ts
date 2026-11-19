@@ -1734,6 +1734,9 @@ export class Room {
     }
     clearTimeout(this.timer);
     this.loadingNext = true;
+    // A retry begins a new attempt, so the previous failure is no longer the state.
+    // Leaving it set made the snapshot say "failed" while the retry was loading.
+    this.nextLoadError = null;
     this.phase = 'hole-results';
     this.state();
     const match = this.matchId;
