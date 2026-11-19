@@ -182,7 +182,10 @@ async function startOneCourseParty(client) {
   })()`);
   await waitFor(
     client,
-    '!![...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")?.startsWith("Add "))',
+    // Wait for the *named* button, not any "Add " one: the unfiltered page already
+    // has Add buttons, so the loose condition is satisfied before the search lands
+    // and the lookup below then races the debounce.
+    `!![...document.querySelectorAll("button")].find(b=>b.getAttribute("aria-label")===${JSON.stringify('Add ' + COURSE)})`,
     45000,
   );
   const added = await client.evalJS(`(()=>{

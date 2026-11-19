@@ -2350,3 +2350,134 @@ test('a reloaded document cannot claim the hole it abandoned', async () => {
   expect(player.totalStrokes).toBe(total);
   room.dispose();
 });
+
+test('standings rank by holes survived, then life, then strokes, then time, then name', () => {
+  const room = new Room('ABCDE', maps);
+  try {
+    const host = enter(room, 'Host', true);
+    const guest = enter(room, 'Guest');
+    const third = enter(room, 'Third');
+    const fourth = enter(room, 'Fourth');
+    // Set the sort keys directly: this test is about the ordering rule, not about
+    // how a round produces the numbers.
+    const set = (player, fields) => Object.assign(room.players.get(player.identity.uid), fields);
+    set(host, {
+      participated: true,
+      holesSurvived: 2,
+      alive: true,
+      totalStrokes: 9,
+      totalTimeMs: 5000,
+    });
+    set(guest, {
+      participated: true,
+      holesSurvived: 3,
+      alive: false,
+      totalStrokes: 4,
+      totalTimeMs: 1000,
+    });
+    set(third, {
+      participated: true,
+      holesSurvived: 2,
+      alive: true,
+      totalStrokes: 9,
+      totalTimeMs: 1000,
+    });
+    set(fourth, {
+      participated: true,
+      holesSurvived: 2,
+      alive: true,
+      totalStrokes: 9,
+      totalTimeMs: 5000,
+    });
+
+    expect(room.standings().map((row) => row.name)).toEqual(['Guest', 'Third', 'Fourth', 'Host']);
+    // Ranks are dense and consecutive, because the pinned client looks podium slots
+    // up by rank 1, 2, 3 and indexes the medals by rank - 1.
+    expect(room.standings().map((row) => row.rank)).toEqual([1, 2, 3, 4]);
+    // A spectator is not in the standings at all.
+    expect(room.standings().every((row) => row.participated !== false)).toBe(true);
+  } finally {
+    room.dispose();
+  }
+});
+
+test('equal scores get distinct ranks, decided by name', () => {
+  // Party policy, not a claim about the official server: two identical scorecards are
+  // separated rather than sharing a place, because the client renders one medal per
+  // rank and a shared place would leave a podium slot empty.
+  const room = new Room('ABCDE', maps);
+  try {
+    enter(room, 'Host', true);
+    for (const name of ['Bravo', 'Alpha']) {
+      const player = enter(room, name);
+      Object.assign(room.players.get(player.identity.uid), {
+        participated: true,
+        holesSurvived: 3,
+        alive: true,
+        totalStrokes: 10,
+        totalTimeMs: 4000,
+      });
+    }
+    const rows = room.standings();
+    expect(rows.map((row) => row.name)).toEqual(['Alpha', 'Bravo']);
+    expect(rows.map((row) => row.rank)).toEqual([1, 2]);
+  } finally {
+    room.dispose();
+  }
+});
+
+test('the final frame carries a podium whose ranks fill the three medals', async () => {
+  const { room, host } = await playingRoom();
+  const players = [enter(room, 'Guest'), enter(room, 'Third')];
+  // The host wins this one, so the podium order is fully determined by the rule.
+  Object.assign(host.player, {
+    participated: true,
+    holesSurvived: 3,
+    alive: true,
+    totalStrokes: 4,
+    totalTimeMs: 500,
+  });
+  for (const [index, player] of players.entries()) {
+    Object.assign(room.players.get(player.identity.uid), {
+      participated: true,
+      holesSurvived: index,
+      alive: false,
+      totalStrokes: 5 + index,
+      totalTimeMs: 1000 + index,
+    });
+  }
+  room.finalize();
+  const final = host.ws.frames.filter((frame) => frame.t === 'final').at(-1);
+  expect(final.podium).toHaveLength(3);
+  // The client maps `podium` into a table keyed by rank and then reads 1, 2 and 3.
+  expect(final.podium.map((row) => row.rank)).toEqual([1, 2, 3]);
+  expect(final.podium.map((row) => row.name)).toEqual(['Host', 'Third', 'Guest']);
+  expect(final.standings[0]).toMatchObject({ rank: 1, name: 'Host' });
+  room.dispose();
+});
+
+test('a stroke-play non-finisher is charged par plus five and still survives the hole', async () => {
+  // Party policy, documented in docs/scoring.md: a timed-out hole is completed at
+  // par + 5 rather than lost, so a stroke-play round always has a comparable score.
+  const { room } = await playingRoom();
+  const guest = enter(room, 'Guest');
+  Object.assign(room.players.get(guest.identity.uid), {
+    participated: true,
+    alive: true,
+    totalStrokes: 0,
+    totalTimeMs: 0,
+    holesSurvived: 0,
+    strokes: 2,
+    done: false,
+  });
+  const par = room.specs[room.holeIndex].par;
+  room.endHole();
+  const round = room.roundHistory.at(-1);
+  const row = round.rows.find((score) => score.uid === guest.identity.uid);
+  expect(row.status).toBe('timeout');
+  expect(row.strokes).toBe(par + 5);
+  // The charge is recorded on the player too, and the hole counts as survived.
+  expect(guest.player.totalStrokes).toBe(Math.max(2, par + 5));
+  expect(guest.player.holesSurvived).toBe(1);
+  room.dispose();
+});
