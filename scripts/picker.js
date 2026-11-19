@@ -269,6 +269,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
   const saved = savedLoad.playlists;
   const [savedId, setSavedId] = BetterPartyReact.useState('');
   const [confirming, setConfirming] = BetterPartyReact.useState('');
+  const [loadAttempt, setLoadAttempt] = BetterPartyReact.useState(null);
   const [saveName, setSaveName] = BetterPartyReact.useState('');
   const [transfer, setTransfer] = BetterPartyReact.useState('');
   const [courseUrl, setCourseUrl] = BetterPartyReact.useState('');
@@ -415,52 +416,17 @@ function CommunityCoursePicker({ config, holeSettings }) {
       setError(parseError.message);
       return;
     }
-    setBusy(true);
-    setError('');
-    bpPickerBusy(true);
-    try {
-      const state = betterPartyStore.state;
-      const code = state.code;
-      const auth = {
-        code,
-        uid: state.self.uid,
-        session: state.self.session,
-        host: sessionStorage.getItem('bp.host.' + code),
-      };
-      const pending = [...new Set(document.ids)].filter((id) => !names[id]);
-      for (const [index, id] of pending.entries()) {
-        if (
-          betterPartyStore.state.code !== code ||
-          betterPartyStore.state.phase !== 'lobby' ||
-          betterPartyStore.state.config.mapSource !== 'picked'
-        ) {
-          throw Error('The lobby changed while loading the playlist');
-        }
-        const response = await fetch('/api/import', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ...auth, id, saved: true }),
-        });
-        const imported = await response.json();
-        if (!response.ok) {
-          throw Error(imported.error || 'Could not load playlist');
-        }
-        setNames((previousNames) => ({ ...previousNames, [id]: imported.title }));
-        setProgress('Checking ' + (index + 1) + ' of ' + pending.length + ' courses…');
-      }
-      update(document.ids);
-      const settings = sanitizedSettings(document.settings);
-      if (Object.keys(settings).length) {
-        updateBetterPartyConfig(settings);
-      }
-      setTransfer('');
-    } catch (importError) {
-      setError(importError.message);
-    } finally {
-      setBusy(false);
-      bpPickerBusy(false);
-      setProgress('');
+    const failed = await loadIds(document.ids);
+    // A document with unavailable entries is not applied as settings either, so the
+    // player sees exactly what did load before anything else changes.
+    if (failed.length) {
+      return;
     }
+    const settings = sanitizedSettings(document.settings);
+    if (Object.keys(settings).length) {
+      updateBetterPartyConfig(settings);
+    }
+    setTransfer('');
   }
 
   /**
@@ -485,14 +451,21 @@ function CommunityCoursePicker({ config, holeSettings }) {
     setCourseUrl('');
   }
 
-  async function loadSaved() {
-    const selected = saved.find((playlist) => playlist.id === savedId);
-    if (!selected || busy || preparing) {
-      return;
-    }
+  /**
+   * Load a list of course ids, reporting failures per entry.
+   *
+   * A saved playlist is intact data even when one of its courses has been deleted or
+   * made private upstream, so a single refusal must not abort the whole load - that
+   * turned one dead course into "your playlist does not work". Every id is attempted,
+   * the ones that resolve are applied in their original order, and the rest are
+   * reported individually with retry and remove. The saved playlist in storage is
+   * never modified by a load, so nothing is lost either way.
+   */
+  async function loadIds(ids) {
     setBusy(true);
     setError('');
     bpPickerBusy(true);
+    setLoadAttempt(null);
     try {
       const state = betterPartyStore.state;
       const code = state.code;
@@ -502,15 +475,10 @@ function CommunityCoursePicker({ config, holeSettings }) {
         session: state.self.session,
         host: sessionStorage.getItem('bp.host.' + code),
       };
-      const items = [];
-      // A course already named in this session is one upstream has validated: the
-      // catalog only lists public courses and an import only succeeds for one. So
-      // re-fetching it on every saved-playlist load is redundant work - the thing
-      // this avoids. It is not a permanent decision: the match start still retrieves
-      // every course fresh, so a course deleted in the meantime fails there with an
-      // explicit error rather than silently.
-      const uniqueIds = [...new Set(selected.ids)];
-      const pending = uniqueIds.filter((id) => !names[id]);
+      // A course already named in this session is one upstream has validated, so it
+      // is not re-fetched. Match start still retrieves every course fresh.
+      const pending = [...new Set(ids)].filter((id) => !names[id]);
+      const failed = [];
       for (const [index, id] of pending.entries()) {
         if (
           betterPartyStore.state.code !== code ||
@@ -526,15 +494,14 @@ function CommunityCoursePicker({ config, holeSettings }) {
         });
         const imported = await response.json();
         if (!response.ok) {
-          throw Error(imported.error || 'Could not load playlist');
+          // Recorded and skipped, not fatal: the rest of the playlist still loads.
+          failed.push({ id, message: imported.error || 'This course is unavailable.' });
+          setProgress('Checked ' + (index + 1) + ' of ' + pending.length + ' courses…');
+          continue;
         }
-        items.push(imported);
-        setProgress('Loading ' + (index + 1) + ' of ' + pending.length + ' unique courses…');
+        setNames((previousNames) => ({ ...previousNames, [id]: imported.title }));
+        setProgress('Checked ' + (index + 1) + ' of ' + pending.length + ' courses…');
       }
-      setNames((previousNames) => ({
-        ...previousNames,
-        ...Object.fromEntries(items.map((course) => [course.id, course.title])),
-      }));
       if (
         betterPartyStore.state.code !== code ||
         betterPartyStore.state.phase !== 'lobby' ||
@@ -542,14 +509,90 @@ function CommunityCoursePicker({ config, holeSettings }) {
       ) {
         throw Error('The lobby changed while loading the playlist');
       }
-      update([...selected.ids]);
+      const failedIds = new Set(failed.map((entry) => entry.id));
+      const usable = ids.filter((id) => !failedIds.has(id));
+      // Applying an empty list would wipe whatever is selected now, so a playlist
+      // that is entirely unavailable reports itself instead of clearing the board.
+      if (usable.length) {
+        update(usable);
+      }
+      setLoadAttempt({ ids: [...ids], failed });
+      return failed;
     } catch (err) {
       setError(err.message);
+      return [];
     } finally {
       setBusy(false);
       bpPickerBusy(false);
       setProgress('');
     }
+  }
+
+  /** Re-attempt one entry that failed, putting it back in its original position. */
+  async function retryFailed(id) {
+    if (busy || preparing || !loadAttempt) {
+      return;
+    }
+    setBusy(true);
+    setError('');
+    bpPickerBusy(true);
+    try {
+      const state = betterPartyStore.state;
+      const code = state.code;
+      const response = await fetch('/api/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          uid: state.self.uid,
+          session: state.self.session,
+          host: sessionStorage.getItem('bp.host.' + code),
+          id,
+          saved: true,
+        }),
+      });
+      const imported = await response.json();
+      if (!response.ok) {
+        setLoadAttempt({
+          ...loadAttempt,
+          failed: loadAttempt.failed.map((entry) =>
+            entry.id === id
+              ? { ...entry, message: imported.error || 'This course is unavailable.' }
+              : entry,
+          ),
+        });
+        return;
+      }
+      setNames((previousNames) => ({ ...previousNames, [id]: imported.title }));
+      const failed = loadAttempt.failed.filter((entry) => entry.id !== id);
+      const failedIds = new Set(failed.map((entry) => entry.id));
+      setLoadAttempt({ ...loadAttempt, failed });
+      update(loadAttempt.ids.filter((courseId) => !failedIds.has(courseId)));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+      bpPickerBusy(false);
+    }
+  }
+
+  /** Forget a failure for this load. The saved playlist itself is untouched. */
+  function dismissFailed(id) {
+    if (!loadAttempt) {
+      return;
+    }
+    setLoadAttempt({
+      ...loadAttempt,
+      failed: loadAttempt.failed.filter((entry) => entry.id !== id),
+    });
+  }
+
+  async function loadSaved() {
+    const selected = saved.find((playlist) => playlist.id === savedId);
+    if (!selected || busy || preparing) {
+      return;
+    }
+    await loadIds([...selected.ids]);
   }
 
   const titles =
@@ -1523,6 +1566,45 @@ function CommunityCoursePicker({ config, holeSettings }) {
                     'p',
                     { role: 'status', className: 'mt-2 text-xs text-amber-300' },
                     savedLoad.problem,
+                  ),
+                loadAttempt?.failed.length > 0 &&
+                  createElement(
+                    'section',
+                    { className: 'bp-playlist-failures mt-2', role: 'status' },
+                    [
+                      createElement(
+                        'p',
+                        { key: 'summary', className: 'text-xs text-amber-300' },
+                        loadAttempt.failed.length +
+                          (loadAttempt.failed.length === 1
+                            ? ' course could not be loaded.'
+                            : ' courses could not be loaded.') +
+                          ' The saved playlist is unchanged.',
+                      ),
+                      ...loadAttempt.failed.map((entry) =>
+                        createElement('div', { key: entry.id, className: 'bp-playlist-failure' }, [
+                          createElement(
+                            'span',
+                            { key: 'detail', className: 'text-xs' },
+                            entry.message + ' (' + entry.id + ')',
+                          ),
+                          actionButton(
+                            'Retry',
+                            () => void retryFailed(entry.id),
+                            busy || preparing,
+                            pill,
+                            { 'aria-label': 'Retry ' + entry.id },
+                          ),
+                          actionButton(
+                            'Remove',
+                            () => dismissFailed(entry.id),
+                            busy || preparing,
+                            pill,
+                            { 'aria-label': 'Remove ' + entry.id },
+                          ),
+                        ]),
+                      ),
+                    ],
                   ),
                 confirming &&
                   createElement('div', { className: 'bp-playlist-confirm mt-2', role: 'alert' }, [
