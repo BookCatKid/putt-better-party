@@ -1,6 +1,6 @@
 # Architecture and operation
 
-The HTTP service exposes room creation, session issuance, catalog browsing and course retrieval. The independent WebSocket room state machine owns admission, host permissions, round timing, progression, elimination and standings. The original client handles rendering and simulation.
+The HTTP service exposes room creation, session issuance, catalog browsing and course retrieval. The independent WebSocket room state machine owns admission, host permissions, round timing, progression, elimination and standings. The original client handles rendering and simulation. [Module contracts](modules.md) maps which file owns each boundary — server, client script and upstream — and the room's phase diagram.
 
 ## Course selection
 
