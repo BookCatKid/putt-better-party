@@ -72,13 +72,13 @@ export async function shutdownResources<RoomType extends ShutdownRoom>(
       }
     }
     try {
-      resources.checkpoint(room as RoomType);
+      resources.checkpoint(room);
     } catch (error) {
       resources.log('shutdown_checkpoint_error', { signal });
       return { ok: false, error };
     }
     try {
-      resources.disposeRoom(room as RoomType);
+      resources.disposeRoom(room);
     } catch (error) {
       resources.log('shutdown_dispose_error', { signal });
       return { ok: false, error };

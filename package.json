@@ -15,7 +15,7 @@
     "release:archive": "python3 scripts/release.py archive",
     "format": "prettier --write . && ruff format scripts",
     "format:check": "prettier --check . && ruff format --check scripts",
-    "lint": "eslint . --max-warnings 0 && ruff check scripts && shellcheck tests/integration/*.sh",
+    "lint": "eslint . --max-warnings 0 && ruff check scripts && shellcheck tests/integration/*.sh .githooks/pre-commit",
     "lint:fix": "eslint . --fix && ruff check scripts --fix",
     "check": "bun run prepare:client && bun run format:check && bun run lint && bun run typecheck && bun test",
     "test:browser": "bash tests/integration/run-browser-test.sh",

@@ -75,7 +75,10 @@ export default [
   },
   {
     files: ['src/**/*.ts'],
-    languageOptions: { parser: tsParser },
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
     plugins: { '@typescript-eslint': tsPlugin },
     rules: {
       'no-undef': 'off', // The strict compiler checks unresolved names in TypeScript.
@@ -91,6 +94,15 @@ export default [
         'error',
         { 'ts-ignore': true, 'ts-nocheck': true, 'ts-expect-error': true },
       ],
+      // Type-aware rules (parserOptions.projectService): the ones that catch a
+      // real async mistake rather than restating what `strict` already says.
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/await-thenable': 'error',
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        { checksVoidReturn: { attributes: false } },
+      ],
+      '@typescript-eslint/no-unnecessary-type-assertion': 'error',
     },
   },
   {

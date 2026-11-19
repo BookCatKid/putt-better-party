@@ -128,12 +128,12 @@ export function readServerConfig(
   // That is the only situation where transport-security headers make sense: on a
   // plain-HTTP loopback run an HSTS header would be ignored at best, and the
   // `Secure` cookie flag would stop the admin session working at all.
-  const httpsDeployment = new URL(allowedOrigins[0] as string).protocol === 'https:';
+  const httpsDeployment = new URL(allowedOrigins[0]).protocol === 'https:';
 
   return {
     hostname,
     port,
-    canonicalOrigin: allowedOrigins[0] as string,
+    canonicalOrigin: allowedOrigins[0],
     allowedOrigins,
     allowedHosts,
     websocketOrigins,
