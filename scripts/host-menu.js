@@ -1,6 +1,5 @@
 function BpHostMenu({ settingsOpen, closeSettings }) {
   const active = useBetterPartyState(betterPartyStore, (partyState) => partyState.active);
-  const host = useBetterPartyState(betterPartyStore, (partyState) => partyState.isHost);
   const manager = useBetterPartyState(
     betterPartyStore,
     (partyState) => partyState.isHost || partyState.bpCoHost,
@@ -11,21 +10,28 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
   const [remainingTime, setRemainingTime] = BetterPartyReact.useState(null);
   const phase = useBetterPartyState(betterPartyStore, (partyState) => partyState.phase);
   const hole = useBetterPartyState(betterPartyStore, (partyState) => partyState.holeIndex);
+  const match = useBetterPartyState(betterPartyStore, (partyState) => partyState.matchId);
   const nextError = useBetterPartyState(betterPartyStore, (partyState) => partyState.nextError);
   const awaitingPlayers = useBetterPartyState(
     betterPartyStore,
     (partyState) => partyState.awaitingPlayers,
   );
   const roster = useBetterPartyState(betterPartyStore, (partyState) => partyState.roster);
-  const selfUid = useBetterPartyState(betterPartyStore, (partyState) => partyState.self?.uid);
   const [open, setOpen] = BetterPartyReact.useState(false);
   const [confirm, setConfirm] = BetterPartyReact.useState(null);
   const [pending, setPending] = BetterPartyReact.useState(false);
   const [error, setError] = BetterPartyReact.useState('');
   BetterPartyReact.useEffect(() => {
-    setOpen(false);
     setConfirm(null);
-  }, [phase, hole]);
+    setError('');
+  }, [phase, hole, match]);
+  BetterPartyReact.useEffect(() => {
+    if (!active || !manager || phase === 'final' || phase === 'lobby') {
+      setOpen(false);
+      setConfirm(null);
+      setRemainingTime(null);
+    }
+  }, [active, manager, phase]);
   BetterPartyReact.useEffect(() => {
     if (settingsOpen) {
       setOpen(false);
@@ -37,7 +43,7 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
       return;
     }
     const key = (event) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !document.querySelector('dialog[open]')) {
         setOpen(false);
         setConfirm(null);
       }
@@ -58,8 +64,10 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
     setError('');
     try {
       await bpHostAction(action, argument);
-      setOpen(false);
       setConfirm(null);
+      if (action === 'remaining-time') {
+        setRemainingTime(null);
+      }
     } catch (commandError) {
       setError(commandError.message);
     } finally {
@@ -77,14 +85,17 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
       },
       label,
     );
-  // Connected people who could host right now. A spectator is offered only when
-  // nobody else is left, matching how the server picks an involuntary successor:
-  // handing the party to a watcher beats leaving it without a host.
-  const connectedOthers = (roster || []).filter(
-    (member) => member.uid !== selfUid && member.connected,
-  );
-  const presentPlayers = connectedOthers.filter((member) => member.role !== 'spectator');
-  const successors = presentPlayers.length > 0 ? presentPlayers : connectedOthers;
+  const section = (title, children) =>
+    createElement('section', { key: title, className: 'bp-host-section', 'aria-label': title }, [
+      createElement('h4', { key: 'heading' }, title),
+      ...children,
+    ]);
+  const futureSeconds = remainingTime ?? String(Math.round(config.timerMs / 1000));
+  const validTime =
+    futureSeconds.trim() !== '' &&
+    Number.isInteger(Number(futureSeconds)) &&
+    Number(futureSeconds) >= 0 &&
+    Number(futureSeconds) <= 86400;
   const confirmationMessages = {
     end: 'End the party now?',
     skip: 'Skip this hole for everyone?',
@@ -162,85 +173,92 @@ function BpHostMenu({ settingsOpen, closeSettings }) {
                 ]),
               ])
             : [
-                createElement(BpManageRoster, {}),
-                createElement('p', { className: 'text-xs text-white/70' }, 'Match'),
-                actionButton(
-                  paused ? 'Resume match' : 'Pause match',
-                  () => run(paused ? 'resume' : 'pause'),
-                  phase !== 'playing',
-                ),
-                actionButton(config.locked ? 'Unlock party' : 'Lock party', () =>
-                  run(config.locked ? 'unlock-party' : 'lock-party'),
-                ),
-                actionButton('Restart match', () => setConfirm('restart-match')),
-                actionButton(
-                  'Finish current hole',
-                  () => setConfirm('force-next'),
-                  phase !== 'playing',
-                ),
-                actionButton(
-                  'Disable elimination',
-                  () => setConfirm('disable-elimination'),
-                  !live || !config.elimination,
-                ),
-                actionButton(
-                  'Admit all spectators',
-                  () => setConfirm('admit-all'),
-                  !live ||
-                    !roster.some((player) => player.role === 'spectator' && player.connected),
-                ),
-                vote && !vote.resolution && actionButton('End voting now', () => run('skip-vote')),
-                createElement(BpUpcomingEditor, {}),
-                createElement('label', { className: 'bp-management-field' }, [
-                  'Future hole time (s)',
-                  createElement('input', {
-                    type: 'number',
-                    min: 0,
-                    max: 86400,
-                    value: remainingTime ?? Math.round(config.timerMs / 1000),
-                    'aria-label': 'Future hole time in seconds',
-                    onChange: (event) => setRemainingTime(Number(event.target.value)),
-                  }),
+                section('Players', [
+                  createElement(BpManageRoster, {}),
                   actionButton(
-                    'Set',
-                    () =>
-                      run('remaining-time', {
-                        value: remainingTime ?? Math.round(config.timerMs / 1000),
-                      }),
-                    !live,
+                    'Admit all spectators',
+                    () => setConfirm('admit-all'),
+                    !live ||
+                      !roster.some((player) => player.role === 'spectator' && player.connected),
+                  ),
+                  actionButton(config.locked ? 'Unlock party' : 'Lock party', () =>
+                    run(config.locked ? 'unlock-party' : 'lock-party'),
                   ),
                 ]),
-                createElement('p', { className: 'text-xs text-white/70' }, 'Add time to this hole'),
-                createElement(
-                  'div',
-                  { className: 'bp-host-time' },
-                  [15, 30, 60].map((seconds) =>
-                    actionButton(
-                      '+' + seconds + 's',
-                      () => run('time', seconds),
-                      phase !== 'playing',
-                    ),
+                section('Current hole', [
+                  actionButton(
+                    paused ? 'Resume match' : 'Pause match',
+                    () => run(paused ? 'resume' : 'pause'),
+                    phase !== 'playing',
                   ),
-                ),
-                actionButton('Skip level', () => setConfirm('skip'), !live),
-                actionButton('Restart level', () => setConfirm('restart'), !live),
-                nextError && actionButton('Retry next hole', () => run('retry-next')),
-                nextError && actionButton('Skip unloaded hole', () => setConfirm('skip-next')),
-                host &&
-                  successors.length > 0 &&
-                  createElement('div', { className: 'bp-host-transfer' }, [
-                    createElement(
-                      'p',
-                      { className: 'text-xs text-white/70' },
-                      'Make someone else host',
-                    ),
-                    successors.map((member) =>
-                      actionButton(member.name + (member.ready ? ' ✅' : ''), () =>
-                        run('transfer-host', member.uid),
+                  createElement('p', { className: 'bp-host-label' }, 'Add time'),
+                  createElement(
+                    'div',
+                    { className: 'bp-host-time' },
+                    [15, 30, 60].map((seconds) =>
+                      actionButton(
+                        '+' + seconds + 's',
+                        () => run('time', seconds),
+                        phase !== 'playing',
                       ),
                     ),
+                  ),
+                  actionButton('Restart level', () => setConfirm('restart'), !live),
+                  actionButton(
+                    'Finish current hole',
+                    () => setConfirm('force-next'),
+                    phase !== 'playing',
+                  ),
+                  actionButton('Skip level', () => setConfirm('skip'), !live),
+                ]),
+                section('Upcoming holes', [
+                  createElement(BpUpcomingEditor, {}),
+                  vote &&
+                    !vote.resolution &&
+                    actionButton('End voting now', () => run('skip-vote')),
+                  nextError && actionButton('Retry next hole', () => run('retry-next')),
+                  nextError && actionButton('Skip unloaded hole', () => setConfirm('skip-next')),
+                  createElement(
+                    'label',
+                    { className: 'bp-host-label', htmlFor: 'bp-future-hole-time' },
+                    'Time per future hole (seconds)',
+                  ),
+                  createElement('div', { className: 'bp-host-timer-field' }, [
+                    createElement('input', {
+                      id: 'bp-future-hole-time',
+                      type: 'number',
+                      min: 0,
+                      max: 86400,
+                      step: 1,
+                      inputMode: 'numeric',
+                      value: futureSeconds,
+                      'aria-label': 'Future hole time in seconds',
+                      onChange: (event) => setRemainingTime(event.target.value),
+                      onKeyDown: (event) => {
+                        if (event.key === 'Enter' && validTime && live && !pending) {
+                          event.preventDefault();
+                          run('remaining-time', { value: Number(futureSeconds) });
+                        }
+                      },
+                      disabled: !live || pending,
+                    }),
+                    actionButton(
+                      'Set',
+                      () => run('remaining-time', { value: Number(futureSeconds) }),
+                      !live || !validTime,
+                    ),
                   ]),
-                actionButton('End party', () => setConfirm('end'), false, 'bp-danger'),
+                  createElement('p', { className: 'bp-host-hint' }, '0 = unlimited'),
+                ]),
+                section('Match', [
+                  actionButton(
+                    'Disable elimination',
+                    () => setConfirm('disable-elimination'),
+                    !live || !config.elimination,
+                  ),
+                  actionButton('Restart match', () => setConfirm('restart-match')),
+                  actionButton('End party', () => setConfirm('end'), false, 'bp-danger'),
+                ]),
               ],
         ],
       ),

@@ -13,14 +13,14 @@
   place-items: center;
 }
 .bp-host-panel {
-  width: 256px;
+  width: min(320px, calc(100vw - 24px));
   z-index: 30;
   text-align: left;
 }
 .bp-host-time {
   display: flex;
   gap: 6px;
-  margin: 6px 0 12px;
+  margin: 0;
 }
 .bp-host-time .bp-host-item {
   flex: 1;
@@ -47,14 +47,6 @@
 .bp-host-item.bp-danger {
   color: #fca5a5;
 }
-.bp-host-transfer {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-  padding-top: 8px;
-}
-
 .bp-host-confirm p {
   font-size: 13px;
   margin: 8px 0;
@@ -136,9 +128,6 @@
     top: 68px;
     right: 8px;
     width: 190px;
-  }
-  .bp-host-panel {
-    width: 230px;
   }
   .bp-toolbar {
     gap: 4px;
@@ -1547,8 +1536,70 @@ body:has(> #app) {
 }
 
 .bp-host-panel {
-  max-height: min(75vh, 580px);
+  max-height: min(calc(100dvh - 76px), 680px);
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.bp-host-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid #ffffff19;
+  padding-top: 10px;
+  margin-top: 10px;
+}
+.bp-host-section h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffffa6;
+  margin-bottom: 2px;
+}
+.bp-host-section .bp-host-item {
+  margin-top: 0;
+}
+.bp-host-label {
+  font-size: 12px;
+  color: #ffffffb3;
+  margin-top: 5px;
+}
+.bp-host-timer-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+.bp-host-timer-field input {
+  width: 100%;
+  min-width: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  background: #ffffff12;
+  color: white;
+}
+.bp-host-timer-field .bp-host-item {
+  width: auto;
+  padding-inline: 16px;
+}
+.bp-host-hint {
+  font-size: 11px;
+  color: #ffffff80;
+}
+.bp-lobby-notices,
+.bp-dialog-notices {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 85vw;
+  z-index: 2;
+}
+
+/* The native modal top layer needs its own live region while it is open. */
+body:has(.bp-management-dialog[open]) .bp-management-notices:not(.bp-dialog-notices) {
+  visibility: hidden;
 }
 .bp-player-menu-button {
   pointer-events: auto;

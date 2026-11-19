@@ -43,6 +43,7 @@ function BpManagementDialog({ title, children, close }) {
         ),
       ]),
       children,
+      React.createElement(BpManagementNotice, { dialog: true, key: 'management-notice' }),
     ],
   );
 }
@@ -445,30 +446,43 @@ function BpUpcomingEditor() {
   ]);
 }
 
-function BpManagementNotice() {
+function BpManagementNotice({ lobby = false, dialog = false } = {}) {
   const state = useBetterPartyState(betterPartyStore, (partyState) => partyState);
-  if (!state.active) {
+  if (!state.active || (!dialog && (state.phase === 'lobby') !== lobby)) {
     return null;
   }
   const createElement = BetterPartyReact.createElement;
-  return createElement('div', { className: 'bp-management-notices', 'aria-live': 'polite' }, [
-    state.bpPausedAt &&
-      createElement(
-        'p',
-        { className: 'bp-management-pause', key: 'paused' },
-        'Match paused by host',
-      ),
-    state.bpPuttingLocked &&
-      createElement(
-        'p',
-        { className: 'bp-management-pause', key: 'putting' },
-        'Putting disabled by host',
-      ),
-    state.bpHostNotice &&
-      createElement(
-        'p',
-        { className: 'bp-management-toast', key: state.bpHostNotice.id },
-        state.bpHostNotice.message,
-      ),
-  ]);
+  let className = 'bp-management-notices';
+  if (dialog) {
+    className += ' bp-dialog-notices';
+  } else if (lobby) {
+    className += ' bp-lobby-notices';
+  }
+  return createElement(
+    'div',
+    {
+      className,
+      'aria-live': 'polite',
+    },
+    [
+      state.bpPausedAt &&
+        createElement(
+          'p',
+          { className: 'bp-management-pause', key: 'paused' },
+          'Match paused by host',
+        ),
+      state.bpPuttingLocked &&
+        createElement(
+          'p',
+          { className: 'bp-management-pause', key: 'putting' },
+          'Putting disabled by host',
+        ),
+      state.bpHostNotice &&
+        createElement(
+          'p',
+          { className: 'bp-management-toast', key: state.bpHostNotice.id },
+          state.bpHostNotice.message,
+        ),
+    ],
+  );
 }

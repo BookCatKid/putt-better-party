@@ -98,11 +98,15 @@ try {
   await closePlaylistEditor(client);
   await click('Start party');
   await expect('s.phase==="playing"&&s.mapReady');
-  await click('Party controls');
+  if (!(await client.evalJS('!!document.querySelector(".bp-host-panel")'))) {
+    await click('Party controls');
+  }
   await click('Skip level');
   await click('Confirm');
   await expect('s.holeIndex===1&&s.phase==="playing"&&s.mapReady');
-  await click('Party controls');
+  if (!(await client.evalJS('!!document.querySelector(".bp-host-panel")'))) {
+    await click('Party controls');
+  }
   await click('End party');
   await click('Confirm');
   await expect('s.phase==="final"&&s.final?.standings?.length===1');

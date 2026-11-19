@@ -71,18 +71,24 @@ try {
   );
   console.log('HUD bounds', rect);
   assert(rect.statusTop >= rect.toolbarBottom);
-  await click('Party controls');
+  if (!(await client.evalJS('!!document.querySelector(".bp-host-panel")'))) {
+    await click('Party controls');
+  }
   await waitFor(client, '!!document.querySelector(".bp-host-panel")');
   await click('+30s');
   await expect('s.timerEndsAt-s.startAt===90000');
   console.log('PASS host time extension through UI');
-  await click('Party controls');
+  if (!(await client.evalJS('!!document.querySelector(".bp-host-panel")'))) {
+    await click('Party controls');
+  }
   await click('Skip level');
   await click('Confirm');
   await expect('s.holeIndex===1');
   console.log('PASS host skip through UI');
   await expect('s.phase==="playing"');
-  await click('Party controls');
+  if (!(await client.evalJS('!!document.querySelector(".bp-host-panel")'))) {
+    await click('Party controls');
+  }
   await click('End party');
   await click('Confirm');
   await expect('s.phase==="final"');

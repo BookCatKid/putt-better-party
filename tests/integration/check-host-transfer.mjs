@@ -116,15 +116,26 @@ try {
 
   // The host sees who is eligible and hands the crown over from the menu.
   await openHostControls(host);
+  await host.evalJS(
+    '[...document.querySelectorAll(".bp-host-panel button")].find(button=>button.textContent==="Manage players").click()',
+  );
   const offered = await waitFor(
     host,
-    `(()=>{const panel=document.querySelector(".bp-host-panel");if(!panel)return null;const names=[...panel.querySelectorAll(".bp-host-transfer button")].map(b=>b.textContent);return names.length?names:null})()`,
-    15000,
+    '(()=>{const dialog=document.querySelector("dialog[open]");const names=[...(dialog?.querySelectorAll(".bp-host-item")??[])].map(button=>button.textContent);return names.length?names:null})()',
   );
-  assert.deepEqual(offered, ['Guest'], 'only the other connected player is offered');
-  console.log('Host is offered the connected guest', offered);
+  assert.deepEqual(offered, ['Guest'], 'only the other player is offered');
   await host.evalJS(
-    '[...document.querySelectorAll(".bp-host-transfer button")].find(b=>b.textContent.startsWith("Guest")).click()',
+    '[...document.querySelectorAll("dialog[open] button")].find(button=>button.textContent==="Guest").click()',
+  );
+  await waitFor(
+    host,
+    '[...document.querySelectorAll("dialog[open] button")].some(button=>button.textContent==="Transfer host")',
+  );
+  await host.evalJS(
+    '[...document.querySelectorAll("dialog[open] button")].find(button=>button.textContent==="Transfer host").click()',
+  );
+  await host.evalJS(
+    '[...document.querySelectorAll("dialog[open] button")].find(button=>button.textContent==="Confirm").click()',
   );
 
   // Both clients learn about it at once, mid-round, with no reconnect.
@@ -147,7 +158,7 @@ try {
   await guest.evalJS(
     '[...document.querySelectorAll(".bp-host-item")].find(b=>b.textContent==="+30s").click()',
   );
-  await expect(guest, '!document.querySelector(".bp-host-panel")');
+  await expect(guest, '!!document.querySelector(".bp-host-panel")');
   await expect(host, 's.timerEndsAt>0');
   const extended = await read(guest);
   assert.ok(extended.timerMs >= 300000, 'the timer extension reached the new host');

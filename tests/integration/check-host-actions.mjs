@@ -93,18 +93,58 @@ try {
   console.log('HUD bounds', rect);
   assert(rect.statusTop >= rect.toolbarBottom);
   const before = await read();
-  await click('Party controls');
+  if (!(await client.evalJS('!!document.querySelector(".bp-host-panel")'))) {
+    await click('Party controls');
+  }
   await waitFor(client, '!!document.querySelector(".bp-host-panel")');
+  const groups = await client.evalJS(
+    '[...document.querySelectorAll(".bp-host-section h4")].map(heading=>heading.textContent)',
+  );
+  assert.deepEqual(groups, ['Players', 'Current hole', 'Upcoming holes', 'Match']);
+  assert.equal(
+    await client.evalJS(
+      'document.querySelector(".bp-host-panel").textContent.includes("Make someone else host")',
+    ),
+    false,
+  );
+  await client.call('Emulation.setDeviceMetricsOverride', {
+    width: 375,
+    height: 667,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  const timerBounds = await client.evalJS(
+    '(()=>{const input=document.querySelector("#bp-future-hole-time");input.scrollIntoView({block:"nearest"});const rect=input.getBoundingClientRect();return {width:rect.width,left:rect.left,right:rect.right,viewport:innerWidth}})()',
+  );
+  assert(
+    timerBounds.width >= 110 && timerBounds.left >= 0 && timerBounds.right <= timerBounds.viewport,
+    JSON.stringify(timerBounds),
+  );
+  await client.evalJS(
+    '(()=>{const input=document.querySelector("#bp-future-hole-time");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(input,"86400");input.dispatchEvent(new Event("input",{bubbles:true}));})()',
+  );
+  await click('Set');
+  await expect('s.config.timerMs===86400000&&!!document.querySelector(".bp-host-panel")');
+  await client.evalJS(
+    '(()=>{const input=document.querySelector("#bp-future-hole-time");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(input,"60");input.dispatchEvent(new Event("input",{bubbles:true}));})()',
+  );
+  await click('Set');
+  await expect('s.config.timerMs===60000&&!!document.querySelector(".bp-host-panel")');
+  console.log('PASS full-width timer field at 375px and repeated changes', timerBounds);
   await click('+30s');
-  await expect('s.timerEndsAt-s.startAt===90000');
+  await expect('s.timerEndsAt-s.startAt===90000&&!!document.querySelector(".bp-host-panel")');
   const added = await read();
   assert(added.ends - before.ends >= 29500);
   console.log('PASS pointer-based add time', before.ends, added.ends);
-  await click('Party controls');
+  if (!(await client.evalJS('!!document.querySelector(".bp-host-panel")'))) {
+    await click('Party controls');
+  }
   await click('Restart level');
   await click('Confirm');
   await expect(
-    's.matchId!==' + JSON.stringify(before.matchId) + '&&s.phase==="playing"&&s.mapReady',
+    's.matchId!==' +
+      JSON.stringify(before.matchId) +
+      '&&s.phase==="playing"&&s.mapReady&&!!document.querySelector(".bp-host-panel")',
   );
   const restarted = await read();
   assert.equal(restarted.holeIndex, before.holeIndex);
@@ -112,15 +152,21 @@ try {
   assert(restarted.attempt > before.attempt);
   assert.equal(restarted.strokes, 0);
   console.log('PASS pointer-based restart with real game attempt reset', before, restarted);
-  await click('Party controls');
+  if (!(await client.evalJS('!!document.querySelector(".bp-host-panel")'))) {
+    await click('Party controls');
+  }
   await click('Skip level');
   await click('Confirm');
-  await expect('s.holeIndex===1&&s.phase==="playing"&&s.mapReady');
+  await expect(
+    's.holeIndex===1&&s.phase==="playing"&&s.mapReady&&!!document.querySelector(".bp-host-panel")',
+  );
   const skipped = await read();
   assert.notEqual(skipped.name, before.name);
   assert(skipped.attempt > restarted.attempt);
   console.log('PASS pointer-based skip loaded different map', skipped);
-  await click('Party controls');
+  if (!(await client.evalJS('!!document.querySelector(".bp-host-panel")'))) {
+    await click('Party controls');
+  }
   await click('End party');
   await click('Confirm');
   await expect('s.phase==="final"');

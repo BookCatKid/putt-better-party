@@ -85,8 +85,22 @@ try {
     `(()=>{const input=document.querySelector('[aria-label="Player name"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(input,"Renamed");input.dispatchEvent(new Event("input",{bubbles:true}));})()`,
   );
   await click('Save');
-  await state('s.roster.some(p=>p.name==="Renamed")');
+  await state('s.roster.some(p=>p.name==="Renamed")&&!!document.querySelector("dialog[open]")');
+  await waitFor(
+    client,
+    'document.querySelector("dialog[open] .bp-dialog-notices .bp-management-toast")?.textContent.includes("Renamed")',
+  );
+  assert.equal(
+    await client.evalJS(
+      'document.querySelector(".bp-dashboard-header").textContent.includes("was renamed")',
+    ),
+    false,
+  );
   await click('Close management');
+  await waitFor(
+    client,
+    'document.querySelector(".bp-lobby-notices .bp-management-toast")?.textContent.includes("Renamed")',
+  );
   console.log('PASS lobby management dialog and server-authoritative rename');
   host.close();
   host = undefined;

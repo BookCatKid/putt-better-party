@@ -122,6 +122,7 @@ export default [
         BpGuestPlaylist: 'readonly',
         BpGuestStarting: 'readonly',
         BpRecoveryNotice: 'readonly',
+        BpManagementNotice: 'readonly',
         BpManageRoster: 'readonly',
         BpUpcomingEditor: 'readonly',
       },
