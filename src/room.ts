@@ -202,6 +202,15 @@ export class Room {
   bannedNames = new Set<string>();
   pausedAt: number | null = null;
   playlistRevision = 0;
+  /**
+   * Which preparation attempt is current.
+   *
+   * Preparation runs across upstream fetches and can be cancelled, so its result
+   * needs an identity. `starting` cannot serve: it is a boolean that a cancel sets
+   * false and a new start sets true again, so a stale attempt would see `true` and
+   * start a match nobody asked for.
+   */
+  private prepareGeneration = 0;
   private playlistEditPending = false;
   players = new Map<string, Player>();
   phase: RoomPhase = 'lobby';
@@ -1194,6 +1203,27 @@ export class Room {
     // already been told why.
     return this.configRevision !== before;
   }
+  /**
+   * Abandon a preparation that is still running.
+   *
+   * Course loading can stall on an upstream fetch with no bound of its own, and
+   * while it runs the lobby is locked: settings cannot change and the match cannot
+   * start. Without a cancel the only way out was to wait or reload the page, and a
+   * reload leaves the room still preparing for as long as the fetch hangs.
+   */
+  cancelPreparation(): boolean {
+    if (!this.starting) {
+      return false;
+    }
+    // Invalidating the generation is what makes the cancellation real: the fetch
+    // may still resolve later, and its result must be discarded rather than
+    // starting a match the host already gave up on.
+    this.prepareGeneration += 1;
+    this.starting = false;
+    this.announce('The host cancelled course loading');
+    this.state();
+    return true;
+  }
   start(ws: RoomSocket) {
     if (this.config.mapSource === MAP_SOURCE.PICKED && !this.config.selectedHoleIds.length) {
       return this.error(ws, 'empty-playlist', 'Choose at least one course');
@@ -1209,13 +1239,24 @@ export class Room {
       const hostUid = this.hostUid;
       const configuration = structuredClone(this.config);
       const previousSeen = [...this.randomSeen];
+      // Preparation is the one operation that can be cancelled while it runs, so
+      // its result is only valid for the attempt that started it. Every other
+      // check below could pass for a stale attempt - `starting` is a boolean, and a
+      // cancel followed by a new start makes it true again - so the generation is
+      // what actually decides.
+      const generation = ++this.prepareGeneration;
       this.starting = true;
       this.changed();
       this.broadcast(this.snapshot());
       Promise.resolve()
         .then(() => prepareMatch(configuration, previousSeen))
         .then(({ ids, specs, seen, ballots }) => {
-          if (!this.closed && this.phase === 'lobby' && this.starting && this.hostUid === hostUid) {
+          if (
+            generation === this.prepareGeneration &&
+            !this.closed &&
+            this.phase === 'lobby' &&
+            this.hostUid === hostUid
+          ) {
             if (
               configuration.courseVoting &&
               (!ballots ||
@@ -1245,6 +1286,12 @@ export class Room {
           }
         })
         .finally(() => {
+          // A stale attempt must not clear `starting` for the attempt that replaced
+          // it, or a cancel followed by a new start would unlock configuration
+          // while the new preparation is still running.
+          if (generation !== this.prepareGeneration) {
+            return;
+          }
           this.starting = false;
           if (!this.closed) {
             this.changed();
@@ -2039,10 +2086,15 @@ export class Room {
     ) {
       return this.managePlayer(ws, message);
     }
-    if (this.starting && action !== 'transfer-host') {
+    // While courses are loading almost nothing may change, because the prepared
+    // result is built from the configuration as it was. Cancelling is the exception
+    // that makes the lock survivable.
+    if (this.starting && action !== 'transfer-host' && action !== 'cancel-preparation') {
       return false;
     }
     switch (action) {
+      case 'cancel-preparation':
+        return this.cancelPreparation();
       case 'unban': {
         // A banned player is removed from `players`, so there is no uid to target
         // and the ban can only be lifted by name. Without this the ban was

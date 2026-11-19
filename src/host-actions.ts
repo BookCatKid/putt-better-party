@@ -25,6 +25,7 @@ export const HOST_ACTIONS = [
   'revoke-cohost',
   'pause',
   'resume',
+  'cancel-preparation',
   'restart-match',
   'lock-party',
   'unlock-party',

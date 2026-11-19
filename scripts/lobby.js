@@ -243,17 +243,35 @@ function BpLobbyDashboard() {
               ),
             host &&
               !spectator &&
-              createElement(
-                'button',
-                {
-                  type: 'button',
-                  className:
-                    'bp-dashboard-action rounded-full bg-emerald-500 px-5 py-3 text-sm font-bold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-40',
-                  disabled: disabled || empty,
-                  onClick: () => bpStartMatch(),
-                },
-                startLabel,
-              ),
+              (party.preparing
+                ? createElement(
+                    'button',
+                    {
+                      type: 'button',
+                      className:
+                        'bp-dashboard-action rounded-full bg-white/15 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/25',
+                      // Course loading can stall on an upstream fetch that has no
+                      // bound of its own, and while it runs the lobby is locked.
+                      // Without this the only way out was to wait or reload.
+                      // A rejected cancel leaves the lobby exactly as it was and the
+                      // button still available, so there is nothing to report here.
+                      onClick: () => {
+                        void bpHostAction('cancel-preparation').catch(() => {});
+                      },
+                    },
+                    'Cancel loading',
+                  )
+                : createElement(
+                    'button',
+                    {
+                      type: 'button',
+                      className:
+                        'bp-dashboard-action rounded-full bg-emerald-500 px-5 py-3 text-sm font-bold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-40',
+                      disabled: disabled || empty,
+                      onClick: () => bpStartMatch(),
+                    },
+                    startLabel,
+                  )),
           ]),
           !host &&
             !party.preparing &&

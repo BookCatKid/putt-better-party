@@ -2170,3 +2170,85 @@ test('a backed-up socket loses presence but never results or acknowledgements', 
   expect(guest.ws.frames.map((frame) => frame.t)).toEqual(['host-notice', 'roster']);
   room.dispose();
 });
+
+test('the host can cancel a preparation that is still loading', async () => {
+  let settle;
+  const room = new Room('ABCDE', maps, {
+    prepareMatch: () =>
+      new Promise((resolvePreparation) => {
+        settle = resolvePreparation;
+      }),
+  });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, { t: 'start' });
+  await delay(1);
+  expect(room.snapshot().preparing).toBe(true);
+  // Configuration is locked while preparing, which is why a way out matters.
+  room.handle(host.ws, { t: 'config', config: { holes: 9 } });
+  expect(room.config.holes).toBe(3);
+
+  room.handle(host.ws, {
+    t: 'host-action',
+    action: 'cancel-preparation',
+    requestId: 'cancel-1',
+    matchId: room.matchId,
+    holeIndex: room.holeIndex,
+  });
+  expect(
+    host.ws.frames.find(
+      (frame) => frame.t === 'host-ack' && frame.requestId === 'cancel-1' && frame.ok === true,
+    ),
+  ).toBeDefined();
+  expect(room.snapshot().preparing).toBe(false);
+  expect(room.phase).toBe('lobby');
+  // The lobby is usable again: settings can change.
+  room.handle(host.ws, { t: 'config', config: { holes: 9 } });
+  expect(room.config.holes).toBe(9);
+
+  // The abandoned fetch resolves late and must not start anything.
+  settle({ ids: ['p'], specs: [spec], seen: [], ballots: [] });
+  await delay(1);
+  expect(room.phase).toBe('lobby');
+  expect(room.matchId).toBe(null);
+  room.dispose();
+});
+
+test('a cancelled preparation cannot start a match after a new one begins', async () => {
+  const pending = [];
+  const room = new Room('ABCDE', maps, {
+    prepareMatch: () =>
+      new Promise((resolvePreparation) => {
+        pending.push(resolvePreparation);
+      }),
+  });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, { t: 'start' });
+  await delay(1);
+  const cancel = (id) =>
+    room.handle(host.ws, {
+      t: 'host-action',
+      action: 'cancel-preparation',
+      requestId: id,
+      matchId: room.matchId,
+      holeIndex: room.holeIndex,
+    });
+  cancel('cancel-1');
+  // A second attempt begins before the first fetch settles.
+  room.handle(host.ws, { t: 'start' });
+  await delay(1);
+  expect(pending).toHaveLength(2);
+
+  // The first attempt now resolves. `starting` is true again, so a boolean check
+  // alone would let it start a match from the abandoned configuration.
+  pending[0]({ ids: ['p'], specs: [spec], seen: [], ballots: [] });
+  await delay(1);
+  expect(room.phase).toBe('lobby');
+  expect(room.snapshot().preparing).toBe(true);
+
+  // The live attempt still starts normally.
+  pending[1]({ ids: ['p'], specs: [spec], seen: [], ballots: [] });
+  await delay(1);
+  expect(room.snapshot().preparing).toBe(false);
+  expect(room.holeIds).toEqual(['p']);
+  room.dispose();
+});
