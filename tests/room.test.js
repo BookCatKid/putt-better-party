@@ -442,7 +442,7 @@ test('manual playlists exceed nine holes, random count is independent, and custo
   expect(room.config.timerMs).toBe(1800000);
   room.dispose();
 });
-test('lazy manual map preparation reaches later rounds and can be interrupted safely', async () => {
+test('lazy manual map preparation prefetches the next course and can be interrupted safely', async () => {
   let resolveLoad;
   const loads = [];
   const room = new Room('ABCDE', maps, {
@@ -465,18 +465,26 @@ test('lazy manual map preparation reaches later rounds and can be interrupted sa
   room.handle(host.ws, { t: 'start' });
   await delay(15);
   expect(room.phase).toBe('playing');
-  room.handle(host.ws, { t: 'host-action', action: 'skip', matchId: room.matchId, holeIndex: 0 });
-  await delay(1);
-  expect(room.snapshot().preparing).toBe(true);
-  expect(room.holeIndex).toBe(0);
+  // Only the first course was prepared, and the next one is already being fetched
+  // while this hole is played - so the room is not "preparing" at the boundary.
   expect(loads).toEqual(['q']);
+  expect(room.snapshot().preparing).toBe(false);
+
+  // Once it lands, moving on is immediate: no results-screen wait, no second fetch.
   resolveLoad(maps.get('q'));
   await delay(12);
-  expect(room.holeIndex).toBe(1);
-  expect(room.phase).toBe('playing');
-  expect(room.snapshot().preparing).toBe(false);
-  room.handle(host.ws, { t: 'host-action', action: 'skip', matchId: room.matchId, holeIndex: 1 });
+  expect(room.specs[1]).toBeDefined();
+  room.handle(host.ws, { t: 'host-action', action: 'skip', matchId: room.matchId, holeIndex: 0 });
   await delay(1);
+  // The transition costs no fetch: the course was already prefetched.
+  expect(loads).toEqual(['q']);
+  expect(room.holeIndex).toBe(1);
+  await waitForRoom(() => room.phase === 'playing' && room.holeIndex === 1);
+  expect(room.snapshot().preparing).toBe(false);
+
+  // Hole 2 is now prefetched; ending while that fetch is still in flight must not
+  // resurrect the match when it resolves.
+  expect(loads).toEqual(['q', 'p']);
   room.handle(host.ws, { t: 'host-action', action: 'end', matchId: room.matchId, holeIndex: 1 });
   resolveLoad(maps.get('p'));
   await delay(12);
@@ -672,6 +680,8 @@ test('skipping the unloaded hole voids it and continues or finalizes', async () 
     }),
     loadMap: (id) => {
       loads.push(id);
+      // Fails for every attempt while `failFirst` is set, so the failure lands on
+      // the boundary load rather than being consumed by the silent prefetch.
       return failFirst
         ? Promise.reject(Error('upstream unavailable'))
         : Promise.resolve(maps.get(id));
@@ -699,7 +709,9 @@ test('skipping the unloaded hole voids it and continues or finalizes', async () 
   expect(room.roundHistory.some((round) => round.index === 1 && round.status === 'skipped')).toBe(
     true,
   );
-  expect(loads).toEqual(['q', 'p']);
+  // The first 'q' is the prefetch (rejected silently), the second is the boundary
+  // load after the skip, and 'p' follows from skip-next.
+  expect(loads).toEqual(['q', 'q', 'p']);
   await waitForRoom(() => room.phase === 'playing' && room.holeIndex === 2);
   expect(room.snapshot().nextError).toBe(null);
   room.dispose();
@@ -2250,5 +2262,59 @@ test('a cancelled preparation cannot start a match after a new one begins', asyn
   await delay(1);
   expect(room.snapshot().preparing).toBe(false);
   expect(room.holeIds).toEqual(['p']);
+  room.dispose();
+});
+
+test('a prefetch that resolves after the match ended is discarded', async () => {
+  let resolveLoad;
+  const room = new Room('ABCDE', maps, {
+    countdown: 1,
+    prepareMatch: async (connection) => ({
+      ids: connection.selectedHoleIds,
+      specs: [maps.get('p').spec],
+    }),
+    loadMap: () => new Promise((resolve) => (resolveLoad = resolve)),
+  });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p', 'q'], elimination: false },
+  });
+  room.handle(host.ws, { t: 'start' });
+  await waitForRoom(() => room.phase === 'playing');
+  room.handle(host.ws, { t: 'host-action', action: 'end', matchId: room.matchId, holeIndex: 0 });
+  await delay(1);
+  expect(room.phase).toBe('final');
+
+  // The speculative fetch lands after the party is over. Writing it would put a
+  // course into a match that has already been settled.
+  resolveLoad(maps.get('q'));
+  await delay(1);
+  expect(room.specs[1]).toBeUndefined();
+  expect(room.phase).toBe('final');
+  room.dispose();
+});
+
+test('a prefetch failure is silent and leaves the boundary load to report it', async () => {
+  const room = new Room('ABCDE', maps, {
+    countdown: 1,
+    prepareMatch: async (connection) => ({
+      ids: connection.selectedHoleIds,
+      specs: [maps.get('p').spec],
+    }),
+    loadMap: () => Promise.reject(Error('upstream unavailable')),
+  });
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p', 'q'], elimination: false },
+  });
+  room.handle(host.ws, { t: 'start' });
+  await waitForRoom(() => room.phase === 'playing');
+  await delay(5);
+  // Speculative work must not surface an error the player cannot act on; the real
+  // load at the hole boundary reports it, where retry and skip are available.
+  expect(room.snapshot().nextError).toBe(null);
+  expect(room.phase).toBe('playing');
   room.dispose();
 });

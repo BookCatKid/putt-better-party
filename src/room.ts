@@ -211,6 +211,12 @@ export class Room {
    * start a match nobody asked for.
    */
   private prepareGeneration = 0;
+  /**
+   * Which prefetch attempt is current. A prefetch is speculative work whose result
+   * is only valid while the same course still occupies the same slot, so it needs
+   * the same identity a real load has.
+   */
+  private prefetchGeneration = 0;
   private playlistEditPending = false;
   players = new Map<string, Player>();
   phase: RoomPhase = 'lobby';
@@ -1435,6 +1441,67 @@ export class Room {
     this.schedule(() => this.startPlay(), this.countdown);
   }
   /**
+   * Warm the next course while this one is being played.
+   *
+   * A picked playlist deliberately fetches only its first course up front - a
+   * playlist can hold thousands of holes and loading them all before the match
+   * would be a long stall and a lot of upstream traffic. The cost was paid at every
+   * hole boundary instead: the room sat on the previous hole's results while the
+   * next course was fetched. Fetching it a hole early moves that wait into the time
+   * the players are already playing, so the transition is immediate.
+   *
+   * Bounded on purpose: exactly one hole ahead, never a whole playlist, and only
+   * when the specification is actually missing. A prefetch failure is silent -
+   * `loadNext` retries it at the boundary and reports properly there, so a transient
+   * upstream blip cannot leave the room carrying an error it did not need.
+   */
+  private prefetchNext() {
+    const loadMap = this.loadMap;
+    const target = this.holeIndex + 1;
+    const id = this.holeIds[target];
+    if (
+      !loadMap ||
+      !id ||
+      this.specs[target] ||
+      this.closed ||
+      this.loadingNext ||
+      // A voting match is a random match, and a random match prepares every course
+      // up front, so this is currently unreachable - it is kept because it is the
+      // condition that would stop wasted upstream work if random playlists ever
+      // became lazy, and it costs one comparison.
+      this.config.courseVoting ||
+      this.phase !== 'playing'
+    ) {
+      return;
+    }
+    const match = this.matchId;
+    const hole = this.holeIndex;
+    const generation = ++this.prefetchGeneration;
+    // Every condition that would make the result wrong: the match or hole moved,
+    // the room closed, a newer prefetch began, or - the one a hole-index check
+    // alone would miss - the host edited the upcoming list so a different course
+    // now occupies this slot.
+    const stale = () =>
+      this.closed ||
+      this.phase === 'final' ||
+      this.matchId !== match ||
+      this.holeIndex !== hole ||
+      this.holeIds[target] !== id ||
+      this.prefetchGeneration !== generation;
+    Promise.resolve()
+      .then(() => loadMap(id))
+      .then((loadedCourse) => {
+        if (stale() || this.specs[target]) {
+          return;
+        }
+        this.specs[target] = structuredClone(loadedCourse.spec);
+        this.audit('course_prefetched', { target, targetCourseId: id });
+      })
+      .catch(() => {
+        // Deliberately silent; see the comment above.
+      });
+  }
+  /**
    * Players the countdown waits for: connected, participating, and using a
    * client that reports scene readiness. A client that never reports cannot be
    * awaited without stalling every round, so its loading time stays its own.
@@ -1489,6 +1556,7 @@ export class Room {
     if (this.roundTimerMs) {
       this.schedule(() => this.endHole(), this.roundTimerMs);
     }
+    this.prefetchNext();
   }
   /**
    * Every identity the current hole can legitimately be known by. The catalog
