@@ -54,7 +54,9 @@ have behaved differently; that is unknown.
 the client's lookup by construction.
 
 **Only participants are ranked.** A player who never took part in a hole is not in
-the standings at all, so a spectator cannot outrank a player.
+the standings at all, so a spectator cannot outrank a player. When someone becomes a
+participant mid-match — and when they must wait — is set out in
+[late admission and disconnects](late-joins.md).
 
 **Timeout penalty**: a non-finisher who is still in a stroke-play round completes the
 hole at `par + 5`. Elimination, by contrast, removes the player from the hole.
