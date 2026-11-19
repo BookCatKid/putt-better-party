@@ -1,5 +1,6 @@
 import { parseBallAppearance } from './ball-cosmetics.js';
 import { isHostAction, normalizedName } from './host-actions.js';
+import { JoinRefused } from './join-errors.js';
 import { newReplayId, RoundReplayCapture } from './replays.js';
 import { randomUUID, randomBytes, randomInt } from 'node:crypto';
 import { logEvent } from './event-log.js';
@@ -275,26 +276,26 @@ export class Room {
   issue(name: unknown, uid?: unknown, session?: unknown, ball?: unknown): Identity {
     this.lastActivity = Date.now();
     if (typeof name !== 'string' || !name.trim() || name.trim().length > 24) {
-      throw new Error('Name must contain 1–24 characters');
+      throw new JoinRefused('invalid-name', 'Name must contain 1–24 characters');
     }
     const previous = typeof uid === 'string' ? this.issued.get(uid) : undefined;
     if (previous && previous.session === session) {
       return previous;
     }
     if (this.bannedNames.has(normalizedName(name))) {
-      throw new Error('This name is banned from the party.');
+      throw new JoinRefused('banned', 'This name is banned from the party.');
     }
     if (this.config.locked) {
-      throw new Error('This party is locked to existing players.');
+      throw new JoinRefused('locked', 'This party is locked to existing players.');
     }
     if (uid && session) {
-      throw new Error('Session expired; join again with a new identity.');
+      throw new JoinRefused('session-expired', 'Session expired; join again with a new identity.');
     }
     if ([...this.players.values()].filter((player) => player.ws).length >= this.config.maxPlayers) {
-      throw new Error('Party is full.');
+      throw new JoinRefused('full', 'Party is full.');
     }
     if (this.issued.size >= 200) {
-      throw new Error('Room identity limit reached');
+      throw new JoinRefused('identity-limit', 'Room identity limit reached');
     }
     const identity = {
       uid: randomUUID(),

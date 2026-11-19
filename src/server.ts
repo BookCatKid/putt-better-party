@@ -33,6 +33,7 @@ import {
   parsePublicCourseIdList,
   readJsonObject,
 } from './request-guards.js';
+import { JoinRefused, joinRefusalStatus } from './join-errors.js';
 import { ClientScriptAssets } from './client-scripts.js';
 import { readClientBuild } from './client-build.js';
 import { VERSION } from './version.js';
@@ -332,9 +333,21 @@ async function handleRequest(
       if (!room) {
         return response({ error: 'Room does not exist' }, 404);
       }
-      return response(
-        room.issue(requestBody.name, requestBody.uid, requestBody.session, requestBody.ball),
-      );
+      try {
+        return response(
+          room.issue(requestBody.name, requestBody.uid, requestBody.session, requestBody.ball),
+        );
+      } catch (error) {
+        if (error instanceof JoinRefused) {
+          // The code, not the wording, is what the client acts on: an expired
+          // session has a recovery path and a locked party does not.
+          return response(
+            { error: error.message, code: error.code },
+            joinRefusalStatus(error.code),
+          );
+        }
+        throw error;
+      }
     }
     if (pathname === '/api/import' || pathname === '/api/import-playlist') {
       if (req.method !== 'POST') {

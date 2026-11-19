@@ -117,7 +117,11 @@ function usePartyAdmission(code) {
       });
       const identity = await response.json();
       if (!response.ok) {
-        if (identity.error?.includes('Session expired')) {
+        // `code` is the contract. The message fallback keeps an older server
+        // usable, but recovery must not depend on wording: if it did, rephrasing
+        // the expiry message would leave the player stuck behind a Retry button
+        // that can never succeed.
+        if (identity.code === 'session-expired' || identity.error?.includes('Session expired')) {
           sessionStorage.removeItem('bp.uid.' + code);
           sessionStorage.removeItem('bp.session.' + code);
           setSessionExpired(true);

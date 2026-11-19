@@ -80,8 +80,13 @@ try {
       input.dispatchEvent(new Event('input', {bubbles: true}));
     })()
   `);
-  await waitFor(client, '!!document.querySelector(".bp-join-form button:not([disabled])")');
-  await client.evalJS('document.querySelector(".bp-join-form button").click()');
+  // Target the Join button by its label. Selecting the first button in the form
+  // used to work, but the ball picker now renders a "+" button ahead of it, so
+  // the old selector clicked that instead and the suite hung waiting for a lobby
+  // that was never asked for.
+  const joinButton = `[...document.querySelectorAll(".bp-join-form button")].find(b => b.textContent === "Join")`;
+  await waitFor(client, `!!${joinButton} && !${joinButton}.disabled`);
+  await client.evalJS(`${joinButton}.click()`);
   await waitForLobby();
   const originalIdentity = await client.evalJS(
     `(async()=>({code:${partyState}.code, uid:${partyState}.self.uid}))()`,
