@@ -87,6 +87,14 @@ function connectBetterParty(code, identity, options = {}) {
    * enough that a reconnect stays prompt and large enough to break up the herd.
    */
   const retryJitter = 0.2;
+  /**
+   * Bytes queued on our own socket before presence samples are skipped.
+   *
+   * Matches the server's limit for the same reason: presence is the only frame
+   * sent on a timer, so it is the only one worth dropping when the link is behind.
+   * Results and acknowledgements are never dropped here - they are not timer-driven.
+   */
+  const PRESENCE_BACKLOG_LIMIT = 64 * 1024;
   /** @type {WebSocket | null} */
   let socket = null;
   let disposed = false;
@@ -645,6 +653,13 @@ function connectBetterParty(code, identity, options = {}) {
     });
     const now = Date.now();
     if (payload !== lastPosition || now - lastPositionAt >= 2000) {
+      // Presence is the only thing this adapter sends on a timer, so it is the only
+      // thing worth dropping when the socket is behind. Queueing more would make a
+      // slow link's delay permanent rather than temporary; skipping a sample costs a
+      // slightly staler ghost, and the next sample fixes it.
+      if ((socket?.bufferedAmount ?? 0) > PRESENCE_BACKLOG_LIMIT) {
+        return;
+      }
       lastPosition = payload;
       lastPositionAt = now;
       socket?.send(payload);

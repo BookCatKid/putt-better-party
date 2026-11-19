@@ -95,6 +95,18 @@ const BOARD_BURST = 10;
 const BOARD_REFILL_PER_SECOND = 4;
 
 /**
+ * Bytes queued for one socket before its presence updates are dropped.
+ *
+ * Presence is sent ten times a second per player, so a client on a slow link
+ * accumulates a backlog that grows faster than it drains; continuing to queue
+ * makes the delay permanent rather than temporary. Above this, that socket stops
+ * receiving presence until it catches up. The figure is generous - a presence
+ * frame is a few hundred bytes, so this is several seconds of updates - because
+ * dropping them too eagerly makes ghosts stutter on links that are merely busy.
+ */
+const PRESENCE_BACKLOG_LIMIT = 64 * 1024;
+
+/**
  * A token bucket: capacity is the burst, and it refills at a fixed rate. Time is
  * taken as a parameter rather than read here so the decision is the same in a
  * test as in the server.
@@ -368,9 +380,21 @@ export class Room {
       // is nothing to deliver and nothing useful to report per player.
       return;
     }
+    // Presence is the only frame that fans out continuously and is worthless once
+    // stale, so it is the only one a backed-up socket may miss. Results, scores,
+    // rosters, errors and acknowledgements always go: dropping one of those would
+    // leave a client with a state it can never reconcile.
+    const lossy = message.t === 'b';
     for (const player of connected) {
+      const ws = player.ws;
+      if (!ws) {
+        continue;
+      }
+      if (lossy && (ws.getBufferedAmount?.() ?? 0) > PRESENCE_BACKLOG_LIMIT) {
+        continue;
+      }
       try {
-        player.ws?.send(serialized);
+        ws.send(serialized);
       } catch {
         // One broken socket must not stop the others receiving the frame.
       }

@@ -13,6 +13,15 @@ export interface RoomSocket {
   data: { uid?: string | null };
   send(message: string): unknown;
   close(code?: number, reason?: string): unknown;
+  /**
+   * Bytes already queued for this socket, when the transport can report them.
+   *
+   * Bun's `ServerWebSocket` provides this, so the real socket satisfies the shape
+   * without an adapter. It is optional because the test doubles and any other
+   * transport need not implement it, and a socket that cannot report a backlog is
+   * simply never considered backed up.
+   */
+  getBufferedAmount?(): number;
 }
 
 /**

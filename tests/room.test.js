@@ -2145,3 +2145,28 @@ test('a player moved to spectators stops emitting a ghost', async () => {
   expect(room.positions.size).toBe(0);
   room.dispose();
 });
+
+test('a backed-up socket loses presence but never results or acknowledgements', () => {
+  const room = new Room('ABCDE', maps, { countdown: 5 });
+  const host = enter(room, 'Host', true);
+  const guest = enter(room, 'Guest');
+  // The guest's link is behind; the host's is fine.
+  guest.ws.getBufferedAmount = () => 200_000;
+  host.ws.getBufferedAmount = () => 0;
+
+  room.handle(host.ws, { t: 'config', config: { mapSource: 'picked', selectedHoleIds: ['p'] } });
+  room.handle(host.ws, { t: 'start' });
+  room.handle(guest.ws, { x: 1, y: 2, z: 3, px: 0, pz: 0, c: 0, m: 0 });
+  room.tick();
+
+  // Presence is dropped for the backed-up socket only.
+  expect(guest.ws.frames.some((frame) => frame.t === 'b')).toBe(false);
+  expect(host.ws.frames.some((frame) => frame.t === 'b')).toBe(true);
+
+  // Everything a client cannot reconcile without still arrives.
+  guest.ws.frames.length = 0;
+  room.broadcast({ t: 'host-notice', message: 'Hello' });
+  room.broadcast({ t: 'roster', players: [] });
+  expect(guest.ws.frames.map((frame) => frame.t)).toEqual(['host-notice', 'roster']);
+  room.dispose();
+});

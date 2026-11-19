@@ -16,8 +16,7 @@ afterEach(() => {
   Math.random = realRandom;
 });
 
-/** Controllable fake clock replacing setTimeout/setInterval/clearTimeout/clearInterval. */
-function fakeClock() {
+/** Controllable fake clock replacing setTimeout/setInterval/clearTimeout/clearInterval. */ function fakeClock() {
   let now = 0;
   let nextId = 1;
   const timers = new Map();
@@ -94,6 +93,8 @@ function fakeWebSocketFactory() {
       this.url = url;
       this.readyState = 0;
       this.sent = [];
+      // Mirrors the browser property the adapter reads to detect a backlog.
+      this.bufferedAmount = 0;
       sockets.push(this);
     }
     send(data) {
@@ -1204,5 +1205,41 @@ test('presence is published every 100 ms, the cadence the pinned client uses', (
   env.scene.ballPos.x = 4;
   env.clock.advance(100);
   expect(sent()).toBe(before + 2);
+  dispose();
+});
+
+test('a backed-up socket stops publishing presence but still reports results', () => {
+  // Presence is the only timer-driven frame, so it is the only one dropped when the
+  // link cannot keep up. A slow client should get fewer ghosts, not stale results.
+  const env = fakeEnvironment();
+  env.bindings.document.visibilityState = 'visible';
+  const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
+  const socket = env.WebSocket.sockets[0];
+  handshake(env, socket, {
+    phase: 'playing',
+    mapReady: true,
+    holeIds: ['p'],
+    currentMap: { id: 'p' },
+  });
+  env.partyStore.setState({ mapReady: true });
+  const positions = () => socket.sent.filter((frame) => typeof frame.x === 'number').length;
+  const before = positions();
+
+  // A backlog above the limit: the next sample is skipped entirely.
+  socket.bufferedAmount = 200_000;
+  env.scene.ballPos.x = 5;
+  env.clock.advance(100);
+  expect(positions()).toBe(before);
+
+  // Critical traffic is not timer-driven and is never dropped.
+  socket.message({ t: 'roster', players: [] });
+  socket.message({ t: 'board', standings: [], alive: 1, holed: 0 });
+  expect(env.log.errors.filter(Boolean)).toEqual([]);
+
+  // Once it drains, presence resumes without any reset.
+  socket.bufferedAmount = 0;
+  env.scene.ballPos.x = 6;
+  env.clock.advance(100);
+  expect(positions()).toBe(before + 1);
   dispose();
 });
