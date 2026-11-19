@@ -27,7 +27,7 @@ function BpWatchName({ row, isSelf }) {
   const selected = followTarget(party, phase)?.uid === row.uid;
   const className =
     'flex-1 truncate text-xs font-medium ' +
-    (row.alive ? 'text-white/90' : 'text-white/35 line-through');
+    (row.alive ? 'text-white/90' : 'text-white/50 line-through');
   const mark = createElement(BpLeftMark, { row, key: 'left' });
   if (!enabled) {
     return createElement('span', { className }, [row.name + (isSelf ? ' (you)' : ''), mark]);

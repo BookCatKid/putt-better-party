@@ -11,7 +11,7 @@ function BpMatchHistory({ history }) {
   if (!history.length) {
     return createElement(
       'p',
-      { className: 'bp-match-history-empty text-xs text-white/45' },
+      { className: 'bp-match-history-empty text-xs text-white/60' },
       'No completed matches yet.',
     );
   }
@@ -312,7 +312,7 @@ function BpLobbyDashboard() {
             createElement(
               'p',
               {
-                className: 'mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/45',
+                className: 'mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/60',
               },
               'Join code',
             ),
@@ -459,7 +459,7 @@ function BpLobbyDashboard() {
             !party.preparing &&
             createElement(
               'p',
-              { className: 'bp-dashboard-waiting text-xs text-white/50', role: 'status' },
+              { className: 'bp-dashboard-waiting text-xs text-white/60', role: 'status' },
               'Waiting for the host to start…',
             ),
         ]),
@@ -468,7 +468,7 @@ function BpLobbyDashboard() {
           {
             href: '/home',
             className:
-              'mt-3 block text-xs font-semibold text-white/40 no-underline hover:text-white/70',
+              'mt-3 block text-xs font-semibold text-white/60 no-underline hover:text-white/70',
             onClick: () => bpLeaveParty(),
           },
           'Leave party',
