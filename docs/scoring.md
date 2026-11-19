@@ -59,6 +59,22 @@ the standings at all, so a spectator cannot outrank a player.
 **Timeout penalty**: a non-finisher who is still in a stroke-play round completes the
 hole at `par + 5`. Elimination, by contrast, removes the player from the hole.
 
+The `par + 5` value is a **minimum, not an addition**: a player who had already taken
+more strokes than that keeps their real score, so a bad hole is never made worse by
+the clock. Two players who both time out are charged the same amount, and their
+otherwise-equal scorecards are separated by the tie rule above.
+
+It is **fixed policy and deliberately not configurable**. There is no `timeoutPenalty`
+or similar key in the room configuration, and `tests/timeout-penalties.test.js`
+asserts that setting one is ignored. Making it configurable - or changing the value -
+is a **policy decision that requires owner approval**, because it changes the outcome
+of every stroke-play round; it should not be introduced as a quiet edit. The same
+applies to charging the penalty as an addition rather than a minimum.
+
+The scorecard must agree with itself: the per-hole cell for a timeout shows the same
+charged value that is added to the total, and `tests/timeout-penalties.test.js` and
+`check-scorecard-totals.mjs` both assert that the rows add up to the total.
+
 **Rematch** starts a new match with a new `matchId`; the previous rounds stay in
 `roundHistory`, and a restart of the same course keeps the current match identity.
 
