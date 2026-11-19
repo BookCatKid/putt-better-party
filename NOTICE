@@ -1,0 +1,31 @@
+putt-better-party — an independent, self-hosted multiplayer party service
+Copyright (C) 2026 putt-better-party contributors
+
+The independently authored portions of this project — the room server and
+domain code under src/, the authored client scripts, styles and
+compatibility patches under scripts/, the test suites under tests/, the
+documentation under docs/ and the build and release tooling — are licensed
+under the GNU General Public License, either version 3 of the License or
+(at your option) any later version. See LICENSE for the full terms.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE.
+
+Excluded from that license, and belonging to their respective rights
+holders:
+
+- private-client/ — the archived original game client: its bundles,
+  models, textures, sounds, icons and favicon, pinned by SHA-256 in
+  scripts/client-lock.json. These are retained in this repository so the
+  reviewed snapshot survives upstream updates. They are not licensed by
+  this project and must not be redistributed.
+- web/ — the prepared client generated from those assets by
+  `bun run prepare:client`. It is a derived build product, not source, and
+  carries the same restrictions as the originals it is built from.
+
+The wordmark image docs/logo.png and the authored styles in
+scripts/better-party.css are original to this project and are covered by
+the GPL.
+
+Better Party is not affiliated with putt.day.

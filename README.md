@@ -60,6 +60,10 @@ Read the [development guide](docs/development.md) for quality checks, testing an
 
 The service binds to loopback by default and answers `127.0.0.1` and `localhost` for its port, so either local spelling works in a browser. Setting `BP_PUBLIC_ORIGIN` to a bare origin such as `https://party.example.com` turns the service into a proxied deployment: that origin becomes the only one it answers, and a direct loopback request is refused, so the proxy cannot be bypassed. Forwarded headers are not trusted, because trusting them without a configured proxy lets a client choose its own address. Review deployment security before exposing it publicly. Room credentials are stored in the database; keep database backups private. For persistent gameplay logging, set `BP_EVENT_LOG` to a path under the private state directory. Logs rotate at 8 MiB with six archives and omit authentication credentials. Do not commit logs or runtime state.
 
+## License
+
+The independently authored parts of this project are licensed under the [GNU General Public License v3.0 or later](LICENSE). The archived original client and game assets under `private-client/`, and the prepared client generated from them under `web/`, belong to their respective rights holders, are not licensed by this project, and must not be redistributed. [NOTICE](NOTICE) states the exact scope.
+
 ## Compatibility and limitations
 
 Better Party is an independent project and is not affiliated with putt.day. The archived original client and game assets belong to their respective rights holders. The asset archive is for private development and is not independently licensed by this project. Obtain appropriate permission before redistribution or public deployment.

@@ -32,7 +32,11 @@ alters room behaviour is at least a minor bump even if the diff is small.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- The project is now licensed: independently authored code under
+  GPL-3.0-or-later (`LICENSE`), with `NOTICE` documenting that the archived
+  original client and the prepared client built from it are excluded.
 
 ## [1.0.0] — 2026-11-18
 
