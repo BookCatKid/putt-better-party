@@ -203,3 +203,29 @@ test('upcoming course edits are revision-checked, immutable prefix, and restart 
     room.dispose();
   }
 });
+
+test('a ban can be lifted by name, and only the host can lift it', () => {
+  const room = new Room('ABCDE', maps);
+  try {
+    const host = enter(room, 'Host', true);
+    const guest = enter(room, 'Guest');
+    const banned = enter(room, 'Player');
+    apply(room, host, 'ban', target(banned));
+    expect(() => room.issue('Player')).toThrow('banned');
+
+    // A banned player is removed from `players`, so there is no uid left to
+    // target: the ban can only be lifted by the name that was banned.
+    apply(room, host, 'unban', { value: '  player  ' });
+    expect(room.issue('Player').name).toBe('Player');
+
+    // A guest must not be able to lift someone else's ban.
+    apply(room, host, 'ban', target(enter(room, 'Other')));
+    expect(ack(guest, command(room, guest, 'unban', { value: 'Other' }))).toBe(false);
+    expect(() => room.issue('Other')).toThrow('banned');
+
+    // Lifting a name that is not banned is refused rather than reported as done.
+    expect(ack(host, command(room, host, 'unban', { value: 'Nobody' }))).toBe(false);
+  } finally {
+    room.dispose();
+  }
+});

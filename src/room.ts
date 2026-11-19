@@ -210,6 +210,11 @@ export class Room {
    * Deliberately not persisted in the checkpoint. It only orders work within one
    * process lifetime, and a restore means the process that owned any in-flight
    * work is gone, so a fresh counter is correct rather than lossy.
+   *
+   * This is lobby configuration; `playlistRevision` covers a different scope, the
+   * remaining holes edited during play, and increments on `startPrepared` and
+   * `replaceUpcoming`. A lobby edit during a playlist import moves this counter
+   * but not that one, which is why both exist.
    */
   configRevision = 0;
   holeIds: string[] = [];
@@ -1977,6 +1982,20 @@ export class Room {
       return false;
     }
     switch (action) {
+      case 'unban': {
+        // A banned player is removed from `players`, so there is no uid to target
+        // and the ban can only be lifted by name. Without this the ban was
+        // one-way for the life of the room: a host who banned the wrong person,
+        // or banned someone in jest, had no way to undo it.
+        const name = typeof message.value === 'string' ? message.value : '';
+        const normalized = normalizedName(name);
+        if (!normalized || !this.bannedNames.delete(normalized)) {
+          return false;
+        }
+        this.announce('The host lifted a ban on ' + name.trim());
+        this.state();
+        return true;
+      }
       case 'pause':
         if (this.phase !== 'playing' || this.pausedAt !== null) {
           return false;

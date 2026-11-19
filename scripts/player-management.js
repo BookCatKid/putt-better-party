@@ -279,6 +279,82 @@ function BpPlayerEditor({ uid, close }) {
   ]);
 }
 
+function BpBannedNames() {
+  const React = BetterPartyReact;
+  const createElement = React.createElement;
+  const party = useBetterPartyState(betterPartyStore, (state) => state);
+  const [names, setNames] = React.useState([]);
+  const [pending, setPending] = React.useState(false);
+  const [failure, setFailure] = React.useState('');
+  const code = party.code;
+
+  // Bans are moderation state, so they are fetched from a host-only route rather
+  // than carried in the broadcast snapshot, which every player receives.
+  const refresh = React.useCallback(async () => {
+    try {
+      const response = await fetch('/api/bans', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          uid: party.self?.uid,
+          session: party.self?.session,
+          host: sessionStorage.getItem('bp.host.' + code),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok || !Array.isArray(result.names)) {
+        throw Error(result.error || 'Could not load bans');
+      }
+      setNames(result.names);
+    } catch (loadError) {
+      setFailure(loadError.message);
+    }
+  }, [code, party.self?.uid, party.self?.session]);
+
+  React.useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  if (!names.length && !failure) {
+    return null;
+  }
+  async function lift(name) {
+    setPending(true);
+    setFailure('');
+    try {
+      await bpHostAction('unban', { value: name });
+      setNames((previous) => previous.filter((entry) => entry !== name));
+    } catch (commandError) {
+      setFailure(commandError.message);
+    } finally {
+      setPending(false);
+    }
+  }
+  return createElement('section', { className: 'bp-management-group' }, [
+    createElement('p', { className: 'bp-management-meta', key: 'heading' }, 'Banned names'),
+    failure &&
+      createElement(
+        'p',
+        { key: 'failure', role: 'alert', className: 'bp-management-error' },
+        failure,
+      ),
+    ...names.map((name) =>
+      createElement(
+        'button',
+        {
+          type: 'button',
+          key: name,
+          className: 'bp-host-item',
+          disabled: pending,
+          onClick: () => void lift(name),
+        },
+        'Lift ban on ' + name,
+      ),
+    ),
+  ]);
+}
+
 function BpManageRoster() {
   const party = useBetterPartyState(betterPartyStore, (state) => state);
   const React = BetterPartyReact;
@@ -327,6 +403,7 @@ function BpManageRoster() {
                 )
               : createElement('p', {}, 'No other players'),
           ),
+          createElement(BpBannedNames, { key: 'bans' }),
         ),
   ]);
 }

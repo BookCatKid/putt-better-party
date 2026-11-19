@@ -394,6 +394,26 @@ async function handleRequest(
       assertResponseWithinLimit(playlistMeta);
       return response({ holes: playlistMeta });
     }
+    if (pathname === '/api/bans' && req.method === 'POST') {
+      // Moderation state, so it is host-only and deliberately narrower than the
+      // broadcast snapshot: publishing a ban list to the whole party would tell
+      // every player who was removed. The host needs it to be able to lift a ban
+      // by name, because a banned player is gone from `players` and has no uid
+      // left to target.
+      const requestBody = await readJsonObject(req);
+      const room = isRoomCode(requestBody.code) ? rooms.get(requestBody.code) : undefined;
+      const player = room?.players.get(typeof requestBody.uid === 'string' ? requestBody.uid : '');
+      const authorized = () =>
+        !!room &&
+        !!player?.ws &&
+        room.hostUid === requestBody.uid &&
+        requestBody.host === room.hostToken &&
+        requestBody.session === room.issued.get(player.uid)?.session;
+      if (!room || !authorized()) {
+        return response({ error: 'Only the host may view bans' }, 403);
+      }
+      return response({ names: [...room.bannedNames] });
+    }
     if (pathname === '/api/generate-playlist' && req.method === 'POST') {
       const body = await readJsonObject(req);
       const room = rooms.get(typeof body.code === 'string' ? body.code : '');

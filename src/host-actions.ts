@@ -20,6 +20,7 @@ export const HOST_ACTIONS = [
   'unlock-putting',
   'kick',
   'ban',
+  'unban',
   'grant-cohost',
   'revoke-cohost',
   'pause',
