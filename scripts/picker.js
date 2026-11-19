@@ -92,8 +92,15 @@ function CommunityCoursePicker({ config, holeSettings }) {
         host: sessionStorage.getItem('bp.host.' + code),
       };
       const items = [];
-      // Validate saved IDs individually instead of holding a huge HTTP request open.
-      for (const id of new Set(selected.ids)) {
+      // A course already named in this session is one upstream has validated: the
+      // catalog only lists public courses and an import only succeeds for one. So
+      // re-fetching it on every saved-playlist load is redundant work - the thing
+      // this avoids. It is not a permanent decision: the match start still retrieves
+      // every course fresh, so a course deleted in the meantime fails there with an
+      // explicit error rather than silently.
+      const uniqueIds = [...new Set(selected.ids)];
+      const pending = uniqueIds.filter((id) => !names[id]);
+      for (const [index, id] of pending.entries()) {
         if (
           betterPartyStore.state.code !== code ||
           betterPartyStore.state.phase !== 'lobby' ||
@@ -111,9 +118,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
           throw Error(imported.error || 'Could not load playlist');
         }
         items.push(imported);
-        setProgress(
-          'Loading ' + items.length + ' of ' + new Set(selected.ids).size + ' unique courses…',
-        );
+        setProgress('Loading ' + (index + 1) + ' of ' + pending.length + ' unique courses…');
       }
       setNames((previousNames) => ({
         ...previousNames,

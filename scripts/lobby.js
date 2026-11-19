@@ -3,6 +3,11 @@ function BpLobbyDashboard() {
   const party = useBetterPartyState(betterPartyStore, (state) => state);
   const [copied, setCopied] = BetterPartyReact.useState(false);
   const [copyError, setCopyError] = BetterPartyReact.useState(false);
+  const copyReset = BetterPartyReact.useRef(null);
+  // Hooks must run on every render, so these come before the early return below.
+  // Declaring them after it changes the hook count the moment the lobby unmounts -
+  // which is exactly when a match starts - and React throws rather than rendering.
+  BetterPartyReact.useEffect(() => () => clearTimeout(copyReset.current), []);
   const createElement = BetterPartyReact.createElement;
   if (!party.active || party.phase !== 'lobby') {
     return null;
@@ -18,10 +23,6 @@ function BpLobbyDashboard() {
   const empty = config.mapSource === 'picked' && !config.selectedHoleIds?.length;
   const privateLobby = config.locked;
   const invitation = location.origin + '/party/' + party.code;
-  const copyReset = BetterPartyReact.useRef(null);
-  // The feedback is a timer, so it has to be cancelled when the lobby unmounts -
-  // otherwise a late tick sets state on a component that is gone.
-  BetterPartyReact.useEffect(() => () => clearTimeout(copyReset.current), []);
 
   async function copyInvite() {
     try {
