@@ -126,9 +126,11 @@ try {
   await state(
     'document.querySelector(".bp-follow-status")?.textContent.includes("Following Host")',
   );
-  // Instrument Three's original camera lookAt solely in the isolated browser.
+  // The pinned Three bundle exports Object3D (dr) as mt. Matrix4 also has a
+  // lookAt method, so searching exports by that name alone instruments the
+  // wrong implementation. Observe only actual camera instances in this test.
   await client.evalJS(
-    `(async()=>{const three=await import("/assets/three.module-DJ81ilGZ.js");const proto=Object.values(three).find(value=>typeof value==="function"&&value.prototype&&Object.hasOwn(value.prototype,"lookAt"))?.prototype;if(!proto)throw Error("Object3D.lookAt not found");const original=proto.lookAt;proto.lookAt=function(...args){if(this.isCamera){const target=args[0];window.bpTestCameraTarget=typeof target==="object"?[target.x,target.y,target.z]:args.slice(0,3)}return original.apply(this,args)}})()`,
+    `(async()=>{const three=await import("/assets/three.module-DJ81ilGZ.js");const proto=three.mt.prototype;if(!Object.hasOwn(proto,"lookAt")||typeof proto.traverse!=="function")throw Error("Object3D.lookAt not found");const original=proto.lookAt;proto.lookAt=function(...args){if(this.isCamera){const target=args[0];window.bpTestCameraTarget=typeof target==="object"?[target.x,target.y,target.z]:args.slice(0,3)}return original.apply(this,args)}})()`,
   );
   const broadcastBall = (coordX, coordZ) =>
     send({

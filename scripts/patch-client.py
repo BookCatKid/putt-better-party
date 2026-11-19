@@ -174,7 +174,7 @@ const isTransportSpectator = _e;
     source = replace_once(
         source,
         "Se=ge||xe;return",
-        """bpSpectating=w(M,e=>e.active&&e.selfRole===`spectator`),bpHideLocalBall=w(M,e=>e.active&&(!e.bpInitialSnapshot||e.selfRole===`spectator`||!e.roster.some(p=>p.uid===e.self?.uid))),bpWatchPhase=w(B,e=>e.phase),bpFollowId=w(M,e=>followTarget(e,bpWatchPhase)?.id??null),bpObserver=w(M,e=>canWatch(e,bpWatchPhase)),Se=ge||xe||bpSpectating||bpObserver;return""",
+        """bpSpectating=w(M,e=>e.active&&e.selfRole===`spectator`),bpHideLocalBall=w(M,e=>e.active&&(!e.bpInitialSnapshot||e.selfRole===`spectator`||!e.roster.some(p=>p.uid===e.self?.uid))),bpWatchPhase=w(transportGameStore,e=>e.phase),bpFollowId=w(M,e=>followTarget(e,bpWatchPhase)?.id??null),bpObserver=w(M,e=>canWatch(e,bpWatchPhase)),Se=ge||xe||bpSpectating||bpObserver;return""",
     )
     source = replace_once(
         source,
