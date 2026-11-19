@@ -1352,6 +1352,40 @@ body:has(> #app) {
   }
 }
 
+/*
+ * Very short viewports (landscape phones, split-screen) must not clip the
+ * footer. The dashboard pins header and footer and scrolls only the body, so
+ * when header + footer alone approach max-height the footer is pushed past
+ * the box edge and clipped by overflow: hidden — the Start and Leave
+ * controls become unreachable. Compact the decorative chrome below ~440 CSS
+ * px of height so both pinned ends keep fitting; the player list and course
+ * list inside the scrolling body are unchanged.
+ */
+@media (max-height: 440px) {
+  .bp-dashboard-header {
+    margin-bottom: 8px;
+  }
+  .bp-dashboard-header > p:first-child {
+    display: none;
+  }
+  .bp-dashboard-header h2 {
+    margin-bottom: 8px;
+  }
+  .bp-dashboard .bp-dashboard-code {
+    font-size: 1.75rem;
+    letter-spacing: 0.2em;
+  }
+  .bp-dashboard-invite button {
+    margin-top: 6px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .bp-dashboard-footer {
+    margin-top: 8px;
+    gap: 8px;
+  }
+}
+
 .bp-picker-summary {
   display: flex;
   align-items: center;
