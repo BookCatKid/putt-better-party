@@ -52,16 +52,31 @@ function BpLobbyDashboard() {
   }
 
   function playerRows() {
+    // The original row component renders its own `<li>`, so wrapping it would
+    // produce a nested list and rewriting it would drift from the original lobby
+    // layout this project is required to preserve. A dropped player therefore gets
+    // a sibling note row instead, which keeps the original markup untouched.
     return createElement(
       'ul',
       { className: 'bp-dashboard-player-list flex flex-col gap-1.5 text-left' },
-      party.roster.map((player) =>
-        createElement(BpOriginalLobbyPlayer, {
+      party.roster.flatMap((player) => {
+        const row = createElement(BpOriginalLobbyPlayer, {
           key: player.uid,
           player,
           isSelf: player.uid === self?.uid,
-        }),
-      ),
+        });
+        if (player.connected !== false) {
+          return [row];
+        }
+        return [
+          row,
+          createElement(
+            'li',
+            { key: player.uid + ':away', className: 'bp-lobby-away', role: 'status' },
+            player.name + ' is disconnected',
+          ),
+        ];
+      }),
     );
   }
 

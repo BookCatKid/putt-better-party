@@ -92,7 +92,15 @@ function BpScorecard() {
             {},
             final.standings.map((player) =>
               createElement('tr', { key: player.uid }, [
-                createElement('th', {}, player.name),
+                createElement(
+                  'th',
+                  {},
+                  // A dropped player and a player who simply lost look identical in
+                  // the numbers, so the row says which one this was.
+                  player.connected === false
+                    ? [player.name, createElement('small', { key: 'gone' }, ' · left')]
+                    : player.name,
+                ),
                 ...history.map((round) => {
                   const score = round.rows.find((entry) => entry.uid === player.uid);
                   return createElement(

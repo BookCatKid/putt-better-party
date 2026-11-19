@@ -153,6 +153,15 @@ export interface Standing {
   alive: boolean;
   strokes: number;
   finished: boolean;
+  /**
+   * Whether the player still has a live socket.
+   *
+   * The roster has carried this for a while, but the results view reads
+   * `standings`, which did not - so a player who dropped near the end of a match
+   * was indistinguishable from one who simply lost. Results screens need to tell
+   * those apart, and so does anyone reading a scorecard after the fact.
+   */
+  connected: boolean;
 }
 
 /** One row of the roster frame: who is present and what they may do. */

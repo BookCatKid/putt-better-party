@@ -1123,6 +1123,12 @@ body:has(> #app) {
 .bp-dashboard-player-list > li {
   padding: 6px 0;
 }
+/* A dropped player's row keeps the original markup; this note sits under it. */
+.bp-dashboard-player-list > li.bp-lobby-away {
+  padding: 0 0 4px;
+  font-size: 11px;
+  color: rgb(252 165 165);
+}
 .bp-dashboard .bp-lobby-options {
   border: 0;
   padding: 0;

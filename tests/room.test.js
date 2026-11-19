@@ -2048,3 +2048,13 @@ test('a playlist naming an unknown course is refused and changes nothing', () =>
   expect(host.ws.frames.at(-1)).toMatchObject({ t: 'error', code: 'invalid-config' });
   room.dispose();
 });
+
+test('standings distinguish a dropped player from one who lost', async () => {
+  const { room, host } = await playingRoom();
+  // The results view reads `standings`, not `roster`, so the flag has to be here.
+  expect(room.standings()[0].connected).toBe(true);
+
+  room.close(host.ws);
+  expect(room.standings()[0].connected).toBe(false);
+  room.dispose();
+});

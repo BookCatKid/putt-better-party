@@ -476,6 +476,7 @@ export class Room {
         alive: player.alive,
         strokes: this.effectiveStrokes(player),
         finished: player.done,
+        connected: !!player.ws,
       }));
   }
   board(): BoardFrame {
