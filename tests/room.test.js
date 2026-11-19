@@ -2318,3 +2318,35 @@ test('a prefetch failure is silent and leaves the boundary load to report it', a
   expect(room.phase).toBe('playing');
   room.dispose();
 });
+
+test('a reloaded document cannot claim the hole it abandoned', async () => {
+  // The fallback is one-directional: a reload can give ground away but never take it
+  // back. The new document must not be able to finish a hole the old one forfeited.
+  const room = new Room('ABCDE', maps, { countdown: 5, results: 5 });
+  const host = enter(room, 'Host', true);
+  const identity = room.issue('Guest');
+  const ws = socket();
+  room.handle(ws, { t: 'join', ...identity, instance: 'page1', protocol: 2 });
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['p', 'q'], elimination: false },
+  });
+  room.handle(host.ws, { t: 'start' });
+  await delay(10);
+  room.handle(ws, { t: 'prog', st: 4 });
+  room.close(ws);
+
+  const reload = socket();
+  room.handle(reload, { t: 'join', ...identity, instance: 'page2', protocol: 2 });
+  const player = room.players.get(identity.uid);
+  expect(player.role).toBe('spectator');
+  const survived = player.holesSurvived;
+  const total = player.totalStrokes;
+
+  // A completion frame from the new document, claiming a hole in one.
+  room.handle(reload, { f: 1, s: 1, p: maps.get('p').spec.par });
+  expect(player.success).not.toBe(true);
+  expect(player.holesSurvived).toBe(survived);
+  expect(player.totalStrokes).toBe(total);
+  room.dispose();
+});
