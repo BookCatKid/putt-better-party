@@ -17,7 +17,9 @@ const root = path.resolve(import.meta.dir, '..');
 const pickerSource = readFileSync(path.join(root, 'scripts/picker.js'), 'utf8');
 // The catalogue query and the card's maker link live in the catalogue module.
 const catalogSource = readFileSync(path.join(root, 'scripts/picker-catalog.js'), 'utf8');
-const upstreamSource = readFileSync(path.join(root, 'src/upstream.ts'), 'utf8');
+// The recovered browse function lives in the catalogue module; src/upstream.ts
+// is the facade that re-exports it.
+const upstreamSource = readFileSync(path.join(root, 'src/upstream/catalog.ts'), 'utf8');
 
 /** The keys the client puts on the catalogue query string. */
 function clientQueryKeys() {
