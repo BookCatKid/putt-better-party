@@ -220,6 +220,54 @@ try {
     await click('Done');
     await waitFor(client, '!document.querySelector(".bp-playlist-dialog[open]")', 10000);
   }
+
+  /*
+   * Touch and keyboard reorder. HTML5 drag-and-drop does not fire on touch,
+   * so the arrow/remove buttons are the only mobile path: they must be real
+   * buttons at a hittable size, and Space on a focused button must reorder
+   * through the real input pipeline rather than a scripted click().
+   */
+  await viewport(390, 844);
+  await click('Edit playlist');
+  await waitFor(client, 'document.querySelector(".bp-playlist-dialog")?.open', 20000);
+  await waitFor(
+    client,
+    'document.querySelectorAll(".bp-playlist-scroll .bp-playlist-item").length===3',
+  );
+  const targets = await client.evalJS(
+    '[...document.querySelectorAll(".bp-playlist-actions button")].map(b=>{const r=b.getBoundingClientRect();return r.width>=24&&r.height>=24&&b.tagName==="BUTTON"})',
+  );
+  assert.equal(targets.length, 9);
+  assert(targets.every(Boolean), 'playlist action buttons below the 24px touch target');
+  const orderBefore = await client.evalJS(
+    '(async()=>(' + runtime + ').E.state.config.selectedHoleIds.join(","))()',
+  );
+  await client.evalJS('document.querySelectorAll(".bp-playlist-actions button")[1].focus()');
+  for (const type of ['keyDown', 'keyUp']) {
+    await client.call('Input.dispatchKeyEvent', {
+      type,
+      key: ' ',
+      code: 'Space',
+      windowsVirtualKeyCode: 32,
+    });
+  }
+  await waitFor(
+    client,
+    '(async()=>(' +
+      runtime +
+      ').E.state.config.selectedHoleIds.join(","))()!==' +
+      JSON.stringify(orderBefore),
+  );
+  // The real Space press puts the page in keyboard modality, so scripted
+  // focus now matches :focus-visible and the ring must actually paint.
+  await client.evalJS('document.querySelectorAll(".bp-playlist-actions button")[4].focus()');
+  const ring = await client.evalJS(
+    '(()=>{const s=getComputedStyle(document.activeElement);return {w:s.outlineWidth,style:s.outlineStyle}})()',
+  );
+  assert.deepEqual(ring, { w: '2px', style: 'solid' });
+  await click('Done');
+  await waitFor(client, '!document.querySelector(".bp-playlist-dialog[open]")', 10000);
+
   // Restore a neutral viewport and leave the dashboard reachable behind us.
   await viewport(1280, 800, false);
   console.log('check-lobby-responsive: ok');

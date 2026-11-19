@@ -120,7 +120,17 @@
   font-size: 12px;
 }
 .bp-playlist-actions button {
+  /* The ↑/↓/× buttons are the only reorder path on touch, where HTML5
+     drag-and-drop does not fire, so they must stay above the 24px WCAG
+     minimum target — not the ~18px row a 2x5 padding produces at 12px. */
+  min-width: 32px;
+  min-height: 32px;
   padding: 2px 5px;
+  font-size: 15px;
+}
+.bp-playlist-actions button:focus-visible {
+  outline: 2px solid #34d399;
+  outline-offset: 1px;
 }
 .bp-playlist-actions button:disabled {
   opacity: 0.3;
