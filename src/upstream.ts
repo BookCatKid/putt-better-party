@@ -28,7 +28,29 @@ interface CacheEntry<Value> {
 
 const catalogCache = new Map<string, CacheEntry<CatalogPage>>();
 const listedCourses = new Map<string, PublicHole>();
+/**
+ * How many catalogued courses are remembered.
+ *
+ * This map is both a small metadata cache and the "was this course listed?" check
+ * behind `publicStats` and preview, and it grew with **every course ever listed** —
+ * unbounded for the life of the process. The bound is deliberately generous, far
+ * more than one session browses, because eviction only loses metadata: playability
+ * never depends on it. A room keeps its own course index, and a match start
+ * re-fetches every course with `saved: true`, which does not consult this map.
+ */
+const MAX_LISTED_COURSES = 5000;
 const requestQueue = new PacedRequestQueue(MAX_ACTIVE_REQUESTS, REQUEST_INTERVAL_MS);
+
+/**
+ * Remember a listed course, refreshing its position so eviction is least-recently
+ * seen rather than first-ever-seen: a course still appearing on a catalogue page
+ * should not be the one dropped.
+ */
+function rememberListed(entry: PublicHole): void {
+  listedCourses.delete(entry.id);
+  listedCourses.set(entry.id, entry);
+  evictOldest(listedCourses, MAX_LISTED_COURSES);
+}
 
 async function publicFetch(relative: string, options: RequestInit): Promise<Response> {
   const url = new URL(relative, ORIGIN);
@@ -99,7 +121,7 @@ function parseCatalogPage(result: unknown): CatalogPage {
       completionsBucket: hole.completionsBucket,
     };
     holes.push(metadata);
-    listedCourses.set(metadata.id, metadata);
+    rememberListed(metadata);
   }
   return { holes, total: result.total, offset: result.offset, nextOffset: result.nextOffset };
 }
@@ -185,7 +207,7 @@ export function publicRating(id: string) {
 
 export function rememberPublicMetadata(id: string, title?: string): void {
   if (/^[a-zA-Z0-9_-]{5,64}$/.test(id) && !listedCourses.has(id)) {
-    listedCourses.set(id, { id, title });
+    rememberListed({ id, title });
   }
 }
 
@@ -232,6 +254,20 @@ export function parsePublicCourseDetail(
   };
 }
 
+/**
+ * Detail fetches that are already running, by course id.
+ *
+ * Two rooms importing the same course at the same time used to make two upstream
+ * requests for identical data. Sharing the promise is safe because the response is
+ * immutable and the per-call validation above still runs first, so a `saved: true`
+ * caller and a plain caller each get the answer they are entitled to.
+ *
+ * The map is bounded by the fetch queue, not by the catalogue: an entry exists only
+ * while its request does, and a request that cannot be admitted is refused before it
+ * ever reaches here.
+ */
+const inflightDetails = new Map<string, Promise<PublicCourseDetail>>();
+
 export async function detail(
   id: string,
   { saved = false }: { saved?: boolean } = {},
@@ -242,15 +278,31 @@ export async function detail(
   ) {
     throw new Error('Choose a hole from the public catalog first');
   }
-  const course = parsePublicCourseDetail(
-    id,
-    await callPublicFunction(DETAIL_FUNCTION, { id }),
-    listedCourses.get(id),
-  );
-  if (!listedCourses.has(id)) {
-    listedCourses.set(id, { id, title: course.title, author: course.author });
+  const inflight = inflightDetails.get(id);
+  if (inflight) {
+    return inflight;
   }
-  return course;
+  const promise = (async () => {
+    const course = parsePublicCourseDetail(
+      id,
+      await callPublicFunction(DETAIL_FUNCTION, { id }),
+      listedCourses.get(id),
+    );
+    if (!listedCourses.has(id)) {
+      rememberListed({ id, title: course.title, author: course.author });
+    }
+    return course;
+  })();
+  inflightDetails.set(id, promise);
+  // Both outcomes clear the entry. Attaching a handler for the rejection as well as
+  // the resolution keeps this bookkeeping from surfacing as an unhandled rejection.
+  const forget = () => {
+    if (inflightDetails.get(id) === promise) {
+      inflightDetails.delete(id);
+    }
+  };
+  promise.then(forget, forget);
+  return promise;
 }
 
 interface PreviewImage {
