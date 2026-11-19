@@ -844,6 +844,22 @@ function CommunityCoursePicker({ config, holeSettings }) {
     );
   }
 
+  /**
+   * The catalogue query.
+   *
+   * These are exactly the fields the recovered browse function accepts — `search`,
+   * `sort`, `offset`, `minRating`, `daily` and `author` — and nothing else. `author`
+   * is the creator's **id**, which is what the original client sends
+   * (`author: <creator>.id`), not a display name.
+   *
+   * **Par is deliberately absent.** It is not in the catalogue payload at all; it
+   * only exists inside a course specification, which costs one detail fetch per
+   * course. A par filter would therefore either filter just the twenty-four rows
+   * already loaded — presenting a page-local slice as if it were the catalogue — or
+   * fetch every course to filter it, which is the aggressive upstream traffic this
+   * client exists to avoid. Guessing a `par` query field would simply be ignored
+   * upstream and silently return unfiltered results.
+   */
   const params = (offset) =>
     new URLSearchParams({
       search,
