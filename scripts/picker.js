@@ -1,279 +1,14 @@
-// Adapt the original _site.holes community card markup and class names.
-// Party-specific actions replace Play/Fork and account-only controls.
-
 /**
- * A shared playlist is a small versioned document, not a stored object.
+ * The playlist picker dialog: the component that owns the picker's state.
  *
- * It carries the public course ids in order - duplicates included, because a
- * playlist may deliberately play a hole twice - and an optional set of lobby
- * settings. It deliberately carries nothing else: no host capability, no session,
- * no course specification. A specification is the course itself, and copying one
- * into a shareable file would ship upstream geometry and pin a stale version of it;
- * the ids are re-resolved against the live API on import instead.
+ * The responsibilities that stand alone are split into sibling modules that are
+ * concatenated ahead of this file: `picker-playlist.js` (the shared-playlist
+ * document and saved-playlist persistence), `picker-ui.js` (the shared button
+ * and stat atoms), `picker-catalog.js` (the community browse hook and the
+ * course card), and `picker-generator.js` (the generator panel). What remains
+ * here is the state graph itself plus the playlist editing surface, which only
+ * makes sense next to the state it mutates.
  */
-const PLAYLIST_FORMAT = 'better-party.playlist';
-const PLAYLIST_VERSION = 1;
-/** The public course id alphabet the server accepts. */
-const PLAYLIST_COURSE_ID = /^[A-Za-z0-9_-]{5,64}$/;
-const PLAYLIST_MAX_IDS = 10000;
-
-function serializePlaylist(name, ids, settings) {
-  return JSON.stringify(
-    {
-      format: PLAYLIST_FORMAT,
-      version: PLAYLIST_VERSION,
-      name,
-      ids: [...ids],
-      settings,
-    },
-    null,
-    2,
-  );
-}
-
-/**
- * Parse a shared playlist, refusing anything that is not one.
- *
- * Every refusal names what is wrong, because the input came from a person pasting
- * text rather than from our own storage. Unknown top-level keys and unknown setting
- * keys are ignored rather than rejected: a newer export from a future version that
- * still uses version 1 should degrade, not fail.
- */
-function parsePlaylistDocument(text) {
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw Error('That is not valid JSON.');
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw Error('A playlist must be a JSON object.');
-  }
-  if (parsed.format !== PLAYLIST_FORMAT) {
-    throw Error('That is not a Better Party playlist.');
-  }
-  if (parsed.version !== PLAYLIST_VERSION) {
-    throw Error('That playlist was made by a different version.');
-  }
-  if (!Array.isArray(parsed.ids) || parsed.ids.length === 0) {
-    throw Error('A playlist needs at least one course.');
-  }
-  if (parsed.ids.length > PLAYLIST_MAX_IDS) {
-    throw Error('That playlist has too many courses.');
-  }
-  const invalid = parsed.ids.find((id) => typeof id !== 'string' || !PLAYLIST_COURSE_ID.test(id));
-  if (invalid !== undefined) {
-    throw Error('That playlist contains an invalid course ID.');
-  }
-  const name =
-    typeof parsed.name === 'string' && parsed.name.trim()
-      ? parsed.name.trim().slice(0, 60)
-      : 'Imported playlist';
-  return { name, ids: parsed.ids.slice(), settings: parsed.settings };
-}
-
-/** The settings worth sharing, and only the ones this build can validate. */
-function shareableSettings(config) {
-  return {
-    timerMs: config.timerMs,
-    elimination: config.elimination,
-    maxPlayers: config.maxPlayers,
-    lateJoin: config.lateJoin,
-  };
-}
-
-/**
- * Keep only settings that are valid for this build.
- *
- * The document is untrusted input, so a setting is applied only when it passes the
- * same bounds the lobby enforces; anything else is dropped rather than sent to the
- * server to be refused.
- */
-function sanitizedSettings(settings) {
-  const result = {};
-  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
-    return result;
-  }
-  if (Number.isInteger(settings.timerMs) && settings.timerMs >= 0 && settings.timerMs <= 86400000) {
-    result.timerMs = settings.timerMs;
-  }
-  if (typeof settings.elimination === 'boolean') {
-    result.elimination = settings.elimination;
-  }
-  if (
-    Number.isInteger(settings.maxPlayers) &&
-    settings.maxPlayers >= 1 &&
-    settings.maxPlayers <= 50
-  ) {
-    result.maxPlayers = settings.maxPlayers;
-  }
-  if (['never', 'next-hole', 'always'].includes(settings.lateJoin)) {
-    result.lateJoin = settings.lateJoin;
-  }
-  return result;
-}
-
-/**
- * The official public hole link, recovered from the pinned client.
- *
- * The gallery builds share links as `${origin}/h/${id}` and the hole page uses the
- * route `/h/$id`, so that is the shape to accept. Only the **id** is ever taken from
- * the input; the pasted URL is never fetched. That is what makes host leniency safe
- * - `www.` is accepted because a copied link may carry it, not because we would ever
- * contact it.
- */
-const COURSE_URL_HOSTS = ['putt.day', 'www.putt.day'];
-/** The same alphabet `PUBLIC_COURSE_ID` enforces on the server. */
-const COURSE_URL_ID = /^[a-zA-Z0-9_-]{5,64}$/;
-
-function parseCourseUrl(input) {
-  const text = String(input ?? '').trim();
-  if (!text) {
-    throw Error('Paste a course link first.');
-  }
-  // A bare id is what a player gets by copying from our own UI, and it cannot be
-  // confused with a URL, so it is accepted as-is.
-  if (COURSE_URL_ID.test(text)) {
-    return text;
-  }
-  let url;
-  try {
-    url = new URL(text);
-  } catch {
-    throw Error('That does not look like a course link.');
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw Error('That does not look like a course link.');
-  }
-  if (!COURSE_URL_HOSTS.includes(url.hostname)) {
-    throw Error('Only putt.day course links are supported.');
-  }
-  if (url.username || url.password) {
-    throw Error('That does not look like a course link.');
-  }
-  const match = /^\/h\/([^/]+)\/?$/.exec(url.pathname);
-  if (!match || !COURSE_URL_ID.test(match[1])) {
-    throw Error('That link is not a public course link.');
-  }
-  return match[1];
-}
-
-/**
- * Saved playlists, read defensively.
- *
- * The store is a single JSON array under one key, so a corrupt value loses
- * everything at once. The rule here is that nothing is destroyed to recover: an
- * entry that cannot be understood is left in place and reported, so a later fix can
- * still find it, and an older entry with no `id` is given one rather than discarded.
- */
-function normalizePlaylist(entry) {
-  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-    return null;
-  }
-  if (typeof entry.name !== 'string' || !entry.name.trim()) {
-    return null;
-  }
-  if (!Array.isArray(entry.ids) || entry.ids.length === 0) {
-    return null;
-  }
-  if (!entry.ids.every((id) => typeof id === 'string' && PLAYLIST_COURSE_ID.test(id))) {
-    return null;
-  }
-  return {
-    // Migration: an entry written before ids existed still belongs to its owner.
-    id: typeof entry.id === 'string' && entry.id ? entry.id : crypto.randomUUID(),
-    name: entry.name.trim().slice(0, 60),
-    ids: entry.ids.slice(),
-  };
-}
-
-function readSavedPlaylists() {
-  let raw;
-  try {
-    raw = localStorage.getItem('bp.playlists.v1');
-  } catch {
-    return {
-      playlists: [],
-      problem: 'This browser is blocking site storage, so saved playlists are unavailable.',
-    };
-  }
-  if (!raw) {
-    return { playlists: [], problem: '' };
-  }
-  let stored;
-  try {
-    stored = JSON.parse(raw);
-  } catch {
-    return {
-      playlists: [],
-      problem: 'Saved playlists could not be read. The stored data was left untouched.',
-    };
-  }
-  if (!Array.isArray(stored)) {
-    return {
-      playlists: [],
-      problem: 'Saved playlists could not be read. The stored data was left untouched.',
-    };
-  }
-  const playlists = [];
-  let dropped = 0;
-  for (const entry of stored) {
-    const normalized = normalizePlaylist(entry);
-    if (normalized) {
-      playlists.push(normalized);
-    } else {
-      dropped += 1;
-    }
-  }
-  return {
-    playlists: playlists.slice(0, 30),
-    problem: dropped
-      ? dropped +
-        (dropped === 1 ? ' saved playlist could not' : ' saved playlists could not') +
-        ' be read and were left in place.'
-      : '',
-  };
-}
-
-/**
- * A course thumbnail that can fail and recover.
- *
- * Previews come from upstream, so they can be slow, missing, or briefly refused. The
- * old handler dimmed the broken image and left it there, which reads as "this card
- * is disabled" rather than "this picture did not load". This retries once with a
- * cache-busting parameter - a failed preview is not cached server-side, so the retry
- * is a real second attempt rather than the same failure replayed - and then shows a
- * placeholder of the same size, so the grid does not reflow and the card keeps its
- * original dimensions either way.
- */
-function BpCourseThumb({ courseId, title, className, eager }) {
-  const React = BetterPartyReact;
-  const [attempt, setAttempt] = React.useState(0);
-  if (attempt >= 2) {
-    return React.createElement(
-      'div',
-      {
-        className: 'bp-thumb-fallback ' + (className ?? ''),
-        role: 'img',
-        'aria-label': title,
-      },
-      React.createElement(
-        'span',
-        { key: 'mark' },
-        (String(title ?? '').trim()[0] ?? '?').toUpperCase(),
-      ),
-    );
-  }
-  return React.createElement('img', {
-    src: '/api/preview/' + encodeURIComponent(courseId) + (attempt ? '?retry=' + attempt : ''),
-    alt: title,
-    loading: eager ? 'eager' : 'lazy',
-    decoding: 'async',
-    className,
-    onError: () => setAttempt((value) => value + 1),
-  });
-}
-
 function CommunityCoursePicker({ config, holeSettings }) {
   const [pickerOpen, setPickerOpen] = BetterPartyReact.useState(false);
   const dialog = BetterPartyReact.useRef(null);
@@ -283,10 +18,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
   const [rating, setRating] = BetterPartyReact.useState(0);
   const [daily, setDaily] = BetterPartyReact.useState(false);
   const [maker, setMaker] = BetterPartyReact.useState(null);
-  const [page, setPage] = BetterPartyReact.useState({ holes: [] });
-  const [catalogError, setCatalogError] = BetterPartyReact.useState('');
   const [names, setNames] = BetterPartyReact.useState({});
-  const [loading, setLoading] = BetterPartyReact.useState(false);
   const [busy, setBusy] = BetterPartyReact.useState(false);
   const [progress, setProgress] = BetterPartyReact.useState('');
   const [error, setError] = BetterPartyReact.useState('');
@@ -355,16 +87,6 @@ function CommunityCoursePicker({ config, holeSettings }) {
     }
     return entry.avgStrokes.toFixed(1);
   }
-  /** The official stats panel row: a small uppercase term over a bold value. */
-  const statDetail = (label, value) =>
-    createElement('div', {}, [
-      createElement(
-        'dt',
-        { className: 'text-[10px] uppercase tracking-wide text-[var(--sea-ink-soft)]' },
-        label,
-      ),
-      createElement('dd', { className: 'font-bold text-[var(--sea-ink)]' }, value),
-    ]);
   /**
    * Write the whole list, reporting rather than swallowing a failure.
    *
@@ -708,16 +430,6 @@ function CommunityCoursePicker({ config, holeSettings }) {
       holes: Math.max(1, ids.length),
     });
   const createElement = BetterPartyReact.createElement;
-  const pill =
-    'rounded-full border border-[var(--line)] px-3.5 py-1.5 text-sm font-bold text-[var(--sea-ink-soft)] hover:border-emerald-500';
-  const green =
-    'rounded-full bg-emerald-500 px-4 py-1.5 font-bold text-emerald-950 hover:bg-emerald-400 disabled:opacity-50';
-  const actionButton = (label, onClick, disabled = false, classNames = pill, extra = {}) =>
-    createElement(
-      'button',
-      { type: 'button', onClick, disabled, className: classNames, ...extra },
-      label,
-    );
   async function generatorRequest(action, filters) {
     const state = betterPartyStore.state;
     const response = await fetch('/api/generate-playlist', {
@@ -812,298 +524,25 @@ function CommunityCoursePicker({ config, holeSettings }) {
     }
   }
 
-  function generatorPanel() {
-    const fields = [
-      ['rating', 'Average rating', 0, 5, 0.1],
-      ['ratings', 'Rating count', 0, 1000000, 1],
-      ['par', 'Par', 1, 200, 1],
-      ['average', 'Average strokes', 0, 200, 0.1],
-      ['overPar', 'Difficulty (avg strokes − par)', -200, 200, 0.1],
-    ];
-    const select = (label, value, change, options) =>
-      createElement('label', { className: 'bp-gen-field' }, [
-        createElement('span', {}, label),
-        createElement(
-          'select',
-          {
-            value,
-            disabled: busy || preparing,
-            onChange: (event) => change(event.target.value),
-            'aria-label': label,
-          },
-          options.map(([key, title]) => createElement('option', { key, value: key }, title)),
-        ),
-      ]);
-    const job = genJob;
-    let message =
-      'Blank bounds are unrestricted. All specified ranges must match. Courses without the requested statistics are excluded.';
-    if (job?.status === 'running') {
-      message =
-        'Scanned ' +
-        job.progress.scanned +
-        ' of ' +
-        (job.progress.total || '…') +
-        ' · ' +
-        job.progress.matched +
-        ' matching';
-    } else if (job?.status === 'complete') {
-      message = job.selectedCount
-        ? job.selectedCount +
-          ' courses selected from ' +
-          job.progress.matched +
-          ' matching courses.'
-        : 'No matching courses. Your playlist is unchanged.';
-    } else if (job?.status === 'cancelled') {
-      message = 'Generation cancelled. Your playlist is unchanged.';
-    } else if (job?.status === 'failed') {
-      message = job.error || 'Generation failed. Your playlist is unchanged.';
-    }
-    return createElement(
-      'section',
-      { className: 'bp-generator', 'aria-label': 'Playlist generator' },
-      [
-        createElement('h3', { className: 'font-bold' }, 'Generate playlist'),
-        createElement('label', { className: 'bp-gen-field' }, [
-          createElement('span', {}, 'Title or maker'),
-          createElement('input', {
-            value: genSearch,
-            maxLength: 100,
-            disabled: busy || preparing,
-            onChange: (event) => setGenSearch(event.target.value),
-            placeholder: 'Any',
-            'aria-label': 'Playlist search',
-          }),
-        ]),
-        createElement('div', { className: 'bp-gen-ranges' }, [
-          createElement('span', {}, 'Filter'),
-          createElement('span', {}, 'Min'),
-          createElement('span', {}, 'Max'),
-          ...fields.flatMap(([metric, label, lower, upper, step]) => [
-            createElement('span', { key: metric }, label),
-            ...['min', 'max'].map((bound) =>
-              createElement('input', {
-                key: metric + bound,
-                type: 'number',
-                min: lower,
-                max: upper,
-                step,
-                value: genRanges[metric]?.[bound] ?? '',
-                placeholder: 'Any',
-                'aria-label': label + ' ' + bound,
-                disabled: busy || preparing,
-                onChange: (event) =>
-                  setGenRanges((previous) => ({
-                    ...previous,
-                    [metric]: { ...previous[metric], [bound]: event.target.value },
-                  })),
-              }),
-            ),
-          ]),
-        ]),
-        createElement('div', { className: 'bp-gen-presets' }, [
-          createElement('span', {}, 'Difficulty presets'),
-          ...[
-            ['Any', {}],
-            ['At or below par', { max: '0' }],
-            ['0–2 over par', { min: '0', max: '2' }],
-            ['2+ over par', { min: '2' }],
-          ].map(([label, bounds]) =>
-            actionButton(
-              label,
-              () => setGenRanges((previous) => ({ ...previous, overPar: bounds })),
-              busy || preparing,
-              pill,
-              { key: label },
-            ),
-          ),
-        ]),
-        createElement('div', { className: 'bp-gen-options' }, [
-          createElement('label', { className: 'bp-gen-field' }, [
-            createElement(
-              'span',
-              {},
-              genMode === 'append' ? 'Maximum courses to add' : 'Maximum courses',
-            ),
-            createElement('input', {
-              type: 'number',
-              min: 1,
-              max: 10000,
-              step: 1,
-              placeholder: 'Unlimited',
-              'aria-label': 'Maximum courses',
-              value: genMaximum,
-              disabled: busy || preparing,
-              onChange: (event) => setGenMaximum(event.target.value),
-            }),
-          ]),
-          select('Daily holes', genDaily, setGenDaily, [
-            ['any', 'Any'],
-            ['exclude', 'Exclude past dailies'],
-            ['only', 'Past dailies only'],
-          ]),
-          select('Order', genSort, setGenSort, [
-            ['new', 'Newest first'],
-            ['top', 'Top rated'],
-            ['trending', 'Trending'],
-            ['shuffle', 'Shuffle'],
-          ]),
-          select('Playlist action', genMode, setGenMode, [
-            ['replace', 'Replace playlist'],
-            ['append', 'Append unique courses'],
-          ]),
-        ]),
-        createElement(
-          'p',
-          { className: 'text-xs text-[var(--sea-ink-soft)]', role: 'status' },
-          message,
-        ),
-        error && createElement('p', { role: 'alert', className: 'text-xs text-red-300' }, error),
-        createElement('div', { className: 'flex flex-wrap gap-2' }, [
-          actionButton(
-            genMode === 'append' ? 'Generate & append' : 'Generate & replace',
-            generate,
-            busy || preparing,
-            green,
-          ),
-          job?.status === 'running'
-            ? actionButton('Cancel generation', cancelGeneration, false, pill)
-            : actionButton('Close', () => setGeneratorOpen(false), false, pill),
-        ]),
-        createElement(
-          'p',
-          { className: 'text-xs text-[var(--sea-ink-soft)]' },
-          'All matching courses are scanned before ordering and applying the maximum. Nothing changes until the scan succeeds.',
-        ),
-      ],
-    );
-  }
-
   /**
-   * The catalogue query.
-   *
-   * These are exactly the fields the recovered browse function accepts — `search`,
-   * `sort`, `offset`, `minRating`, `daily` and `author` — and nothing else. `author`
-   * is the creator's **id**, which is what the original client sends
-   * (`author: <creator>.id`), not a display name.
-   *
-   * **Par is deliberately absent.** It is not in the catalogue payload at all; it
-   * only exists inside a course specification, which costs one detail fetch per
-   * course. A par filter would therefore either filter just the twenty-four rows
-   * already loaded — presenting a page-local slice as if it were the catalogue — or
-   * fetch every course to filter it, which is the aggressive upstream traffic this
-   * client exists to avoid. Guessing a `par` query field would simply be ignored
-   * upstream and silently return unfiltered results.
+   * Catalogue browsing: state and paging live in `useCatalogBrowse`
+   * (picker-catalog.js); fetched titles fold into the shared name map so the
+   * playlist column can name courses that were never on a card.
    */
-  const params = (offset) =>
-    new URLSearchParams({
-      search,
-      sort,
-      offset: String(offset),
-      minRating: String(rating),
-      daily: String(daily),
-      author: maker?.id ?? '',
-    });
-  async function fetchCatalogPage(offset, signal) {
-    const response = await fetch('/api/catalog?' + params(offset), { signal });
-    const catalogPage = await response.json();
-    if (!response.ok) {
-      throw Error(catalogPage.error || 'Could not load courses');
-    }
-    return catalogPage;
-  }
-  const generation = BetterPartyReact.useRef(0);
-  const [reload, setReload] = BetterPartyReact.useState(0);
-  BetterPartyReact.useEffect(() => {
-    if (config.mapSource !== 'picked' || !pickerOpen) {
-      return;
-    }
-    const abortController = new AbortController();
-    const requestGeneration = ++generation.current;
-    setLoading(true);
-    setError('');
-    setCatalogError('');
-    setPage({ holes: [] });
-    const timer = setTimeout(async () => {
-      try {
-        const catalogPage = await fetchCatalogPage(0, abortController.signal);
-        if (!abortController.signal.aborted && requestGeneration === generation.current) {
-          setPage(catalogPage);
-          setNames((previous) => ({
-            ...previous,
-            ...Object.fromEntries(catalogPage.holes.map((course) => [course.id, course.title])),
-          }));
-        }
-      } catch (err) {
-        if (!abortController.signal.aborted) {
-          setCatalogError(err.message);
-        }
-      } finally {
-        if (!abortController.signal.aborted) {
-          setLoading(false);
-        }
-      }
-    }, 250);
-    return () => {
-      clearTimeout(timer);
-      abortController.abort();
-      generation.current++;
-    };
-  }, [config.mapSource, pickerOpen, search, sort, rating, daily, maker, reload]);
-  async function more() {
-    if (loading || page.nextOffset == null) {
-      return;
-    }
-    const requestGeneration = generation.current;
-    setLoading(true);
-    setCatalogError('');
-    try {
-      const catalogPage = await fetchCatalogPage(page.nextOffset);
-      if (requestGeneration !== generation.current) {
-        return;
-      }
-      const existing = new Set(page.holes.map((course) => course.id));
-      const fresh = catalogPage.holes.filter((course) => !existing.has(course.id));
-      // The catalogue is a moving list, so a cursor can come back pointing at the
-      // page already shown. Without this the button would fetch the same page for
-      // ever while the dedupe hid the fact that nothing was arriving.
-      const advanced = catalogPage.nextOffset != null && catalogPage.nextOffset !== page.nextOffset;
-      if (fresh.length === 0 && !advanced) {
-        setPage((old) => ({ ...old, nextOffset: null }));
-        return;
-      }
-      setPage((old) => ({
-        ...old,
-        total: catalogPage.total,
-        nextOffset: catalogPage.nextOffset,
-        holes: [...old.holes, ...fresh],
-      }));
+  const { page, loading, catalogError, retryCatalog, more } = useCatalogBrowse({
+    open: config.mapSource === 'picked' && pickerOpen,
+    search,
+    sort,
+    rating,
+    daily,
+    maker,
+    onTitles: (holes) =>
       setNames((previous) => ({
         ...previous,
-        ...Object.fromEntries(catalogPage.holes.map((course) => [course.id, course.title])),
-      }));
-    } catch (err) {
-      if (requestGeneration === generation.current) {
-        setCatalogError(err.message);
-      }
-    } finally {
-      if (requestGeneration === generation.current) {
-        setLoading(false);
-      }
-    }
-  }
-  /**
-   * Re-run whichever catalogue request failed.
-   *
-   * A first page that failed has nothing to append to, so the effect is re-run; a
-   * failed "load more" keeps the page it already has and retries the cursor.
-   */
-  function retryCatalog() {
-    if (page.holes.length === 0) {
-      setReload((value) => value + 1);
-      return;
-    }
-    void more();
-  }
+        ...Object.fromEntries(holes.map((course) => [course.id, course.title])),
+      })),
+    clearError: () => setError(''),
+  });
   async function add(course) {
     await addCourseById(course.id, course.title);
   }
@@ -1187,28 +626,6 @@ function CommunityCoursePicker({ config, holeSettings }) {
     }
     update(next);
   }
-  function formatCourseAge(timestamp) {
-    if (!Number.isFinite(timestamp)) {
-      return '';
-    }
-    const daysAgo = Math.floor((Date.now() - timestamp) / 86_400_000);
-    if (daysAgo <= 0) {
-      return 'today';
-    }
-    if (daysAgo === 1) {
-      return 'yesterday';
-    }
-    if (daysAgo < 7) {
-      return daysAgo + 'd ago';
-    }
-    return new Date(timestamp).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  }
-  const image = (courseId, title, classNames, eager = false) =>
-    createElement(BpCourseThumb, { key: courseId, courseId, title, className: classNames, eager });
   const mode = createElement(
     'label',
     { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
@@ -1255,147 +672,6 @@ function CommunityCoursePicker({ config, holeSettings }) {
         }),
       ]),
     ]);
-  }
-  function card(course, index) {
-    const count = picked.filter((id) => id === course.id).length;
-    return createElement(
-      'li',
-      {
-        key: course.id,
-        className:
-          'overflow-hidden rounded-2xl border bg-white/5 transition ' +
-          (count ? 'border-emerald-500/50 ring-1 ring-emerald-500/15' : 'border-[var(--line)]'),
-      },
-      [
-        createElement(
-          'a',
-          {
-            href: 'https://putt.day/h/' + encodeURIComponent(course.id),
-            target: '_blank',
-            rel: 'noopener noreferrer',
-            className: 'relative block',
-          },
-          [
-            image(course.id, course.title, 'aspect-[1200/630] w-full object-cover', index < 4),
-            count > 0 &&
-              createElement(
-                'span',
-                {
-                  className:
-                    'absolute left-2 top-2 rounded-full border border-white/70 bg-emerald-600 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-white shadow-md',
-                },
-                '✓ Added' + (count > 1 ? ' ×' + count : ''),
-              ),
-          ],
-        ),
-        createElement('div', { className: 'p-3' }, [
-          createElement('div', { className: 'flex items-start justify-between gap-2' }, [
-            createElement(
-              'a',
-              {
-                href: 'https://putt.day/h/' + encodeURIComponent(course.id),
-                target: '_blank',
-                rel: 'noopener noreferrer',
-                className: 'font-bold text-[var(--sea-ink)] no-underline hover:underline',
-              },
-              course.title,
-            ),
-            course.scheduledDay != null &&
-              createElement(
-                'a',
-                {
-                  href: 'https://putt.day/day/' + course.scheduledDay,
-                  target: '_blank',
-                  rel: 'noopener noreferrer',
-                  className:
-                    'shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold text-emerald-300 no-underline',
-                },
-                'Daily #' + course.scheduledDay,
-              ),
-          ]),
-          createElement('p', { className: 'mt-0.5 text-xs text-[var(--sea-ink-soft)]' }, [
-            'by ',
-            course.creatorId
-              ? createElement(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'underline',
-                    onClick: () => setMaker({ id: course.creatorId, name: course.author }),
-                  },
-                  course.author,
-                )
-              : course.author,
-            ' · ',
-            createElement(
-              'span',
-              { title: new Date(course.createdAt).toLocaleString() },
-              formatCourseAge(course.createdAt),
-            ),
-          ]),
-          createElement(
-            'div',
-            { className: 'mt-2 flex items-center gap-3 text-xs text-[var(--sea-ink-soft)]' },
-            [
-              Number.isFinite(course.ratingAvg)
-                ? createElement('span', {}, [
-                    createElement('span', { className: 'text-amber-500' }, [
-                      '★'.repeat(Math.max(0, Math.min(5, Math.round(course.ratingAvg)))),
-                      createElement(
-                        'span',
-                        { className: 'text-[var(--line)]' },
-                        '★'.repeat(Math.max(0, 5 - Math.round(course.ratingAvg))),
-                      ),
-                    ]),
-                    ' ' + course.ratingAvg.toFixed(1) + ' (' + (course.ratingCount ?? 0) + ')',
-                  ])
-                : createElement('span', { className: 'opacity-70' }, 'unrated'),
-              createElement(
-                'span',
-                { title: 'Number of completions' },
-                '⛳ ' + (course.completionsBucket ?? '—'),
-              ),
-            ],
-          ),
-          createElement('div', { className: 'mt-3 flex gap-2 text-xs' }, [
-            actionButton(
-              count ? 'Add again' : 'Add to playlist',
-              () => add(course),
-              busy || preparing,
-              green,
-              {
-                'aria-label': 'Add ' + course.title,
-              },
-            ),
-            actionButton(
-              'Stats ' + (statsOpen.has(course.id) ? '▴' : '▾'),
-              () => toggleStats(course),
-              false,
-              'rounded-full border border-[var(--line)] px-4 py-1.5 font-semibold text-[var(--sea-ink-soft)] hover:border-emerald-500',
-              { 'aria-expanded': statsOpen.has(course.id) },
-            ),
-          ]),
-          statsOpen.has(course.id) &&
-            createElement(
-              'dl',
-              {
-                className: 'mt-3 grid grid-cols-2 gap-2 rounded-lg bg-black/[0.03] p-3 text-xs',
-              },
-              [
-                statDetail(
-                  'Completions',
-                  createElement(
-                    'span',
-                    { title: 'Number of completions' },
-                    '⛳ ' + (course.completionsBucket ?? '—'),
-                  ),
-                ),
-                statDetail('Avg strokes', averageStrokes(course.id)),
-              ],
-            ),
-        ]),
-      ],
-    );
   }
   return createElement('div', { className: 'flex flex-col gap-3' }, [
     mode,
@@ -1453,7 +729,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                   false,
                   value === sort
                     ? 'rounded-full bg-emerald-600 px-3.5 py-1.5 text-sm font-bold text-white'
-                    : pill,
+                    : PILL_BUTTON,
                 ),
               ),
               createElement('input', {
@@ -1486,7 +762,9 @@ function CommunityCoursePicker({ config, holeSettings }) {
                 'Ran as a daily',
                 () => setDaily(!daily),
                 false,
-                daily ? 'rounded-full bg-emerald-600 px-3 py-1.5 font-semibold text-white' : pill,
+                daily
+                  ? 'rounded-full bg-emerald-600 px-3 py-1.5 font-semibold text-white'
+                  : PILL_BUTTON,
                 { 'aria-pressed': daily },
               ),
               maker &&
@@ -1502,10 +780,31 @@ function CommunityCoursePicker({ config, holeSettings }) {
               'Auto-generate playlist',
               () => setGeneratorOpen(!generatorOpen),
               busy || preparing,
-              green,
+              GREEN_BUTTON,
               { 'aria-expanded': generatorOpen },
             ),
-            generatorOpen && generatorPanel(),
+            generatorOpen &&
+              createElement(BpGeneratorPanel, {
+                busy,
+                preparing,
+                error,
+                job: genJob,
+                search: genSearch,
+                onSearch: setGenSearch,
+                ranges: genRanges,
+                onRanges: setGenRanges,
+                daily: genDaily,
+                onDaily: setGenDaily,
+                sort: genSort,
+                onSort: setGenSort,
+                mode: genMode,
+                onMode: setGenMode,
+                maximum: genMaximum,
+                onMaximum: setGenMaximum,
+                onGenerate: generate,
+                onCancel: cancelGeneration,
+                onClose: () => setGeneratorOpen(false),
+              }),
             createElement('div', { className: 'bp-catalog-layout' }, [
               createElement('section', { className: 'bp-catalog-scroll' }, [
                 error &&
@@ -1521,7 +820,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                       { key: 'message', className: 'text-sm text-red-300' },
                       catalogError,
                     ),
-                    actionButton('Try again', retryCatalog, loading, pill, {
+                    actionButton('Try again', retryCatalog, loading, PILL_BUTTON, {
                       'aria-label': 'Retry catalogue',
                     }),
                   ]),
@@ -1532,7 +831,21 @@ function CommunityCoursePicker({ config, holeSettings }) {
                         className:
                           'grid grid-cols-1 gap-4 sm:grid-cols-2 ' + (loading ? 'opacity-60' : ''),
                       },
-                      page.holes.map(card),
+                      page.holes.map((course, index) =>
+                        createElement(BpCatalogCard, {
+                          key: course.id,
+                          course,
+                          index,
+                          count: picked.filter((id) => id === course.id).length,
+                          expanded: statsOpen.has(course.id),
+                          average: averageStrokes(course.id),
+                          busy,
+                          preparing,
+                          onMaker: setMaker,
+                          onAdd: add,
+                          onToggleStats: toggleStats,
+                        }),
+                      ),
                     )
                   : createElement(
                       'p',
@@ -1597,7 +910,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                           },
                         },
                         [
-                          image(id, names[id] ?? titles[id] ?? id, '', index < 4),
+                          courseThumb(id, names[id] ?? titles[id] ?? id, '', index < 4),
                           createElement('div', {}, [
                             createElement(
                               'p',
@@ -1644,9 +957,9 @@ function CommunityCoursePicker({ config, holeSettings }) {
                   ],
                 ),
                 picked.length > 0 &&
-                  actionButton('Clear', () => update([]), busy || preparing, pill + ' mt-3'),
+                  actionButton('Clear', () => update([]), busy || preparing, PILL_BUTTON + ' mt-3'),
                 picked.length > 1 &&
-                  actionButton('Shuffle', shufflePicked, busy || preparing, pill + ' mt-3', {
+                  actionButton('Shuffle', shufflePicked, busy || preparing, PILL_BUTTON + ' mt-3', {
                     'aria-label': 'Shuffle playlist order',
                   }),
                 createElement('div', { className: 'bp-saved-playlists' }, [
@@ -1661,7 +974,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                     'Save',
                     save,
                     !saveName.trim() || !picked.length || busy || preparing,
-                    pill,
+                    PILL_BUTTON,
                     {
                       'aria-label': 'Save playlist',
                     },
@@ -1688,22 +1001,28 @@ function CommunityCoursePicker({ config, holeSettings }) {
                         ),
                     ],
                   ),
-                  actionButton('Load', loadSaved, !savedId || busy || preparing, pill, {
+                  actionButton('Load', loadSaved, !savedId || busy || preparing, PILL_BUTTON, {
                     'aria-label': 'Load saved playlist',
                   }),
                   actionButton(
                     'Rename',
                     renameSaved,
                     !savedId || !saveName.trim() || busy || preparing,
-                    pill,
+                    PILL_BUTTON,
                     {
                       'aria-label': 'Rename saved playlist',
                     },
                   ),
-                  actionButton('Duplicate', duplicateSaved, !savedId || busy || preparing, pill, {
-                    'aria-label': 'Duplicate saved playlist',
-                  }),
-                  actionButton('Delete', deleteSaved, !savedId || busy || preparing, pill, {
+                  actionButton(
+                    'Duplicate',
+                    duplicateSaved,
+                    !savedId || busy || preparing,
+                    PILL_BUTTON,
+                    {
+                      'aria-label': 'Duplicate saved playlist',
+                    },
+                  ),
+                  actionButton('Delete', deleteSaved, !savedId || busy || preparing, PILL_BUTTON, {
                     'aria-label': 'Delete saved playlist',
                   }),
                 ]),
@@ -1738,14 +1057,14 @@ function CommunityCoursePicker({ config, holeSettings }) {
                             'Retry',
                             () => void retryFailed(entry.id),
                             busy || preparing,
-                            pill,
+                            PILL_BUTTON,
                             { 'aria-label': 'Retry ' + entry.id },
                           ),
                           actionButton(
                             'Remove',
                             () => dismissFailed(entry.id),
                             busy || preparing,
-                            pill,
+                            PILL_BUTTON,
                             { 'aria-label': 'Remove ' + entry.id },
                           ),
                         ]),
@@ -1771,12 +1090,18 @@ function CommunityCoursePicker({ config, holeSettings }) {
                         }
                       },
                       busy || preparing,
-                      pill,
+                      PILL_BUTTON,
                       { 'aria-label': 'Confirm playlist change' },
                     ),
-                    actionButton('Cancel', () => setConfirming(''), busy || preparing, pill, {
-                      'aria-label': 'Cancel playlist change',
-                    }),
+                    actionButton(
+                      'Cancel',
+                      () => setConfirming(''),
+                      busy || preparing,
+                      PILL_BUTTON,
+                      {
+                        'aria-label': 'Cancel playlist change',
+                      },
+                    ),
                   ]),
                 createElement('div', { className: 'bp-course-url mt-3' }, [
                   createElement('input', {
@@ -1796,7 +1121,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                     'Add link',
                     () => void addFromUrl(),
                     !courseUrl.trim() || busy || preparing,
-                    pill,
+                    PILL_BUTTON,
                     { 'aria-label': 'Add course from URL' },
                   ),
                 ]),
@@ -1815,14 +1140,14 @@ function CommunityCoursePicker({ config, holeSettings }) {
                     'Export',
                     exportPlaylist,
                     !picked.length || busy || preparing,
-                    pill,
+                    PILL_BUTTON,
                     { 'aria-label': 'Export playlist' },
                   ),
                   actionButton(
                     'Import',
                     importPlaylist,
                     !transfer.trim() || busy || preparing,
-                    pill,
+                    PILL_BUTTON,
                     {
                       'aria-label': 'Import playlist',
                     },

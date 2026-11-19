@@ -15,13 +15,15 @@ import path from 'node:path';
 
 const root = path.resolve(import.meta.dir, '..');
 const pickerSource = readFileSync(path.join(root, 'scripts/picker.js'), 'utf8');
+// The catalogue query and the card's maker link live in the catalogue module.
+const catalogSource = readFileSync(path.join(root, 'scripts/picker-catalog.js'), 'utf8');
 const upstreamSource = readFileSync(path.join(root, 'src/upstream.ts'), 'utf8');
 
 /** The keys the client puts on the catalogue query string. */
 function clientQueryKeys() {
-  const start = pickerSource.indexOf('const params = (offset) =>');
+  const start = catalogSource.indexOf('const params = (offset) =>');
   expect(start).toBeGreaterThan(-1);
-  const body = pickerSource.slice(start, pickerSource.indexOf('});', start));
+  const body = catalogSource.slice(start, catalogSource.indexOf('});', start));
   const keys = [];
   for (const line of body.split('\n')) {
     // Handles both `offset: String(offset),` and the shorthand `search,`.
@@ -96,6 +98,9 @@ test('the rating filter offers only the thresholds the API accepts', () => {
 test('the creator filter sends the creator id, as the original client does', () => {
   // Recovered from the pinned gallery: `author: <creator>.id`. Sending a display
   // name would return nothing, and would look like "this maker has no courses".
-  expect(pickerSource).toContain('author: maker?.id ??');
-  expect(pickerSource).toContain('setMaker({ id: course.creatorId, name: course.author })');
+  expect(catalogSource).toContain('author: maker?.id ??');
+  // The card calls its callback with the same shape the filter state expects,
+  // and the component binds that callback to setMaker.
+  expect(catalogSource).toContain('onMaker({ id: course.creatorId, name: course.author })');
+  expect(pickerSource).toContain('onMaker: setMaker');
 });

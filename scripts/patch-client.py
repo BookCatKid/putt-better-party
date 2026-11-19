@@ -24,6 +24,19 @@ if not web.is_dir():
 
 
 # Executed by prepare-client.py after copying immutable bundles.
+def authored_module(path):
+    """
+    Read a script written as an ES module for concatenation into the bundle.
+
+    The `export` markers exist so the file lints and reads as a module, but the
+    bundle shares one scope, so they are stripped on the way in. Only the
+    keyword ahead of a declaration is removed: `export function` would also
+    match the start of an identifier like `exportPlaylist`, which is why the
+    lookahead names the declaration forms rather than the word alone.
+    """
+    return re.sub(r"export (?=(?:async )?function |const |let |var )", "", path.read_text())
+
+
 def replace_once(s, a, b):
     count = s.count(a)
     assert count == 1, (a[:100], count)
@@ -370,7 +383,19 @@ def game_patch(s):
     s = (
         s[:a]
         + "\nconst BetterPartyReact = q, useBetterPartyState = j, betterPartyStore = R, updateBetterPartyConfig = L;\n"
-        + (root / "scripts/picker.js").read_text()
+        # The picker is split by responsibility. Each sibling is authored as a
+        # module; the bundle is concatenated, so the `export` keywords are
+        # stripped here the same way results-export.js is handled below.
+        + "".join(
+            authored_module(root / "scripts" / name)
+            for name in (
+                "picker-playlist.js",
+                "picker-ui.js",
+                "picker-catalog.js",
+                "picker-generator.js",
+                "picker.js",
+            )
+        )
         + "\nfunction At(props){return CommunityCoursePicker(props)}\n"
         + s[b:]
     )
@@ -381,9 +406,7 @@ def game_patch(s):
     # The export helpers are pure and used by both the scorecard and the lobby, so
     # they go in once, ahead of both. They are authored as a module; the bundle is
     # concatenated, so the `export` keywords are stripped here.
-    results_export_source = (
-        (root / "scripts/results-export.js").read_text().replace("export function ", "function ")
-    )
+    results_export_source = authored_module(root / "scripts/results-export.js")
     s = (
         s[:a]
         + "\nconst bpSetReady = de, bpStartMatch = le, BpOriginalLobbyPlayer = jt;\n"
@@ -652,6 +675,10 @@ build_inputs = [root / "scripts" / "patch-client.py"] + sorted(
         "party-route.js",
         "party-runtime.js",
         "party-transport.js",
+        "picker-playlist.js",
+        "picker-ui.js",
+        "picker-catalog.js",
+        "picker-generator.js",
         "picker.js",
         "results-export.js",
         "lobby.js",
