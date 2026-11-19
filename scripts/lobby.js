@@ -18,16 +18,49 @@ function BpLobbyDashboard() {
   const empty = config.mapSource === 'picked' && !config.selectedHoleIds?.length;
   const privateLobby = config.locked;
   const invitation = location.origin + '/party/' + party.code;
+  const copyReset = BetterPartyReact.useRef(null);
+  // The feedback is a timer, so it has to be cancelled when the lobby unmounts -
+  // otherwise a late tick sets state on a component that is gone.
+  BetterPartyReact.useEffect(() => () => clearTimeout(copyReset.current), []);
 
   async function copyInvite() {
     try {
       await navigator.clipboard.writeText(invitation);
       setCopyError(false);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      clearTimeout(copyReset.current);
+      copyReset.current = setTimeout(() => setCopied(false), 1500);
     } catch {
+      // A later refusal must not leave the previous success showing: the label and
+      // the live region would both still claim the link was copied.
+      clearTimeout(copyReset.current);
+      setCopied(false);
       setCopyError(true);
     }
+  }
+
+  /**
+   * Focus and select the fallback link the moment it appears.
+   *
+   * Clipboard access is refused in more places than it is granted: a non-secure
+   * origin, a permission the player declined, an older browser with no
+   * `navigator.clipboard` at all. Showing the URL is only a fallback if the player
+   * can then copy it, and asking them to find, focus and select it is the part that
+   * goes wrong. Selecting it here means Cmd/Ctrl+C works immediately.
+   */
+  function selectFallback(element) {
+    if (element) {
+      element.focus();
+      element.select();
+    }
+  }
+
+  let copyStatus = '';
+  if (copied) {
+    copyStatus = 'Invite link copied to the clipboard.';
+  } else if (copyError) {
+    copyStatus =
+      'Copying is blocked in this browser. The link below is selected; press Ctrl or Cmd and C.';
   }
 
   function panel(title, children, extra, className = '') {
@@ -181,8 +214,21 @@ function BpLobbyDashboard() {
               },
               copied ? '✅ Link copied' : '🔗 Copy invite link',
             ),
+            // A live region, always mounted so the announcement is reliable: a
+            // region added at the same moment as its text is often not read out.
+            createElement(
+              'p',
+              {
+                key: 'copy-status',
+                role: 'status',
+                className: 'mt-1 text-[11px] text-white/60',
+              },
+              copyStatus,
+            ),
             copyError &&
               createElement('input', {
+                key: 'copy-fallback',
+                ref: selectFallback,
                 className: 'bp-dashboard-invite-fallback',
                 'aria-label': 'Invite link',
                 value: invitation,
