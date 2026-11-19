@@ -483,6 +483,11 @@ test('configuration outside the bounds the room itself enforces is rejected', ()
     // Team play is a flag too, and must not accept a truthy stand-in.
     { teams: 'yes' },
     { teams: 1 },
+    // Tournament play and its round count are bounded like every other setting.
+    { tournament: 'yes' },
+    { tournament: true, tournamentRounds: 1 },
+    { tournament: true, tournamentRounds: 21 },
+    { tournament: true, tournamentRounds: 'three' },
   ];
   const store = new RoomStore(':memory:');
   seedRow(store, 'ABCDE', checkpointPayload());
@@ -573,6 +578,53 @@ test('a malformed match history is rejected rather than half-loaded', () => {
   };
   for (const [code, matchHistory] of Object.entries(malformed)) {
     seedRow(store, code, checkpointPayload({ code, matchHistory }));
+  }
+  const { result: rooms, messages } = captureErrors(() => store.load(new Map()));
+  expect([...rooms.keys()]).toEqual(['ABCDE']);
+  expect(messages.filter((message) => message.includes('(corrupt)')).length).toBe(
+    Object.keys(malformed).length,
+  );
+  rooms.get('ABCDE').dispose();
+  store.close();
+});
+
+test('a malformed tournament table is rejected rather than half-loaded', () => {
+  const store = new RoomStore(':memory:');
+  seedRow(store, 'ABCDE', checkpointPayload());
+  const table = {
+    rounds: 3,
+    completed: 1,
+    finished: false,
+    standings: [
+      {
+        uid: 'uid-host',
+        name: 'Host',
+        hue: 200,
+        rank: 1,
+        points: 3,
+        wins: 1,
+        matches: 1,
+        totalStrokes: 2,
+      },
+    ],
+  };
+  const malformed = {
+    NOTOBJ: 'nope',
+    BADROUNDS: { ...table, rounds: 1 },
+    BADCOMPLETED: { ...table, completed: 4 },
+    BADFINISHED: { ...table, finished: 'yes' },
+    NOROWS: { ...table, standings: 'nope' },
+    TOOMANYROWS: { ...table, standings: new Array(51).fill(table.standings[0]) },
+    BADUID: { ...table, standings: [{ ...table.standings[0], uid: '' }] },
+    BADNAME: { ...table, standings: [{ ...table.standings[0], name: '' }] },
+    BADHUE: { ...table, standings: [{ ...table.standings[0], hue: 400 }] },
+    BADRANK: { ...table, standings: [{ ...table.standings[0], rank: 0 }] },
+    BADPOINTS: { ...table, standings: [{ ...table.standings[0], points: -1 }] },
+    BADWINS: { ...table, standings: [{ ...table.standings[0], wins: 99 }] },
+    BADSTROKES: { ...table, standings: [{ ...table.standings[0], totalStrokes: -5 }] },
+  };
+  for (const [code, tournament] of Object.entries(malformed)) {
+    seedRow(store, code, checkpointPayload({ code, tournament }));
   }
   const { result: rooms, messages } = captureErrors(() => store.load(new Map()));
   expect([...rooms.keys()]).toEqual(['ABCDE']);
@@ -689,6 +741,9 @@ test('a well-formed checkpoint restores every persisted field', () => {
     courseVoting: true,
     // The row predates team play, so it restores as an ordinary party.
     teams: false,
+    // Nor did it have tournaments: off, with the default round count.
+    tournament: false,
+    tournamentRounds: 3,
   });
   expect(room.randomSeen).toEqual(['seen-before', 'seen-again']);
   // Play cannot resume after a restart, so a mid-match row recovers as a lobby.

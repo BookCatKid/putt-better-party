@@ -80,6 +80,14 @@ or to rejoin as somebody. The current match's per-hole rounds are separate and a
 cleared by a rematch; the history is not. Older checkpoints without a history load
 with an empty one.
 
+### Tournament tables
+
+A checkpoint also carries the party's current tournament, when one is configured: the
+round count, how many matches have been played, whether the run is complete, and each
+competitor's points, wins, matches and cumulative strokes. It is a summary like the
+match history and holds no course specification, session or token. A checkpoint written
+before tournaments existed restores with no table.
+
 ### Exporting results
 
 Two exports, both built by explicit projection rather than serialising the store, so

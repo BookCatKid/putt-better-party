@@ -208,6 +208,36 @@ function BpLobbyDashboard() {
             onChange: (event) => updateBetterPartyConfig({ teams: event.target.checked }),
           }),
         ]),
+        // A tournament is a run of matches ranked by accumulated points. The round
+        // count is fixed for the run, so it is chosen here rather than mid-way.
+        createElement('label', { className: 'bp-number-row bp-dashboard-rule' }, [
+          createElement('span', {}, 'Tournament'),
+          createElement('input', {
+            type: 'checkbox',
+            'aria-label': 'Tournament',
+            checked: !!config.tournament,
+            disabled,
+            onChange: (event) => updateBetterPartyConfig({ tournament: event.target.checked }),
+          }),
+        ]),
+        config.tournament
+          ? createElement('label', { className: 'bp-number-row bp-dashboard-rule' }, [
+              createElement('span', {}, 'Rounds'),
+              createElement(
+                'select',
+                {
+                  'aria-label': 'Tournament rounds',
+                  value: config.tournamentRounds ?? 3,
+                  disabled,
+                  onChange: (event) =>
+                    updateBetterPartyConfig({ tournamentRounds: Number(event.target.value) }),
+                },
+                [2, 3, 4, 5, 6, 8, 10].map((count) =>
+                  createElement('option', { key: count, value: count }, count + ' matches'),
+                ),
+              ),
+            ])
+          : null,
       ]
     : [
         readOnly(
@@ -216,6 +246,12 @@ function BpLobbyDashboard() {
         ),
         readOnly('Mode', config.elimination ? 'Elimination' : 'Stroke play'),
         readOnly('Scoring', config.teams ? 'Two teams' : 'Individual'),
+        readOnly(
+          'Format',
+          config.tournament
+            ? 'Tournament · ' + (config.tournamentRounds ?? 3) + ' matches'
+            : 'Single match',
+        ),
       ];
 
   const partySettings = host
@@ -338,6 +374,14 @@ function BpLobbyDashboard() {
             ),
             panel('Match rules', matchRules, null, 'bp-dashboard-rules'),
             panel('Party settings', partySettings, null, 'bp-dashboard-settings'),
+            party.tournament
+              ? panel(
+                  'Tournament',
+                  createElement(BpTournament, { compact: true }),
+                  null,
+                  'bp-dashboard-tournament',
+                )
+              : null,
             history.length
               ? panel(
                   'Recent matches',

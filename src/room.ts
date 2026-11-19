@@ -33,6 +33,8 @@ import type {
   RateBudget,
   MatchSummary,
   TeamSummary,
+  TournamentRow,
+  TournamentState,
 } from './room-types.js';
 import type { BoardFrame, ServerFrame } from './protocol.js';
 
@@ -129,6 +131,30 @@ const TEAM_NAMES = ['Team 1', 'Team 2'] as const;
 const TEAM_HUES = [205, 25] as const;
 
 /**
+ * A tournament is a small fixed number of matches. Twenty is a generous evening and
+ * keeps the accumulated table meaningful; the per-match history is bounded separately.
+ */
+const MIN_TOURNAMENT_ROUNDS = 2;
+const MAX_TOURNAMENT_ROUNDS = 20;
+
+/**
+ * Tournament order: points, then match wins, then the lower cumulative score, then
+ * name. Dense ranks are assigned after sorting so the client can render a numbered
+ * list without inventing an order of its own.
+ */
+function compareTournament(
+  left: { points: number; wins: number; totalStrokes: number; name: string },
+  right: { points: number; wins: number; totalStrokes: number; name: string },
+): number {
+  return (
+    right.points - left.points ||
+    right.wins - left.wins ||
+    left.totalStrokes - right.totalStrokes ||
+    left.name.localeCompare(right.name)
+  );
+}
+
+/**
  * The one ranking rule, for players and teams alike.
  *
  * Survival first, then the lower score, then the faster time, then the name. The
@@ -206,6 +232,8 @@ export const defaults: Readonly<RoomConfig> = Object.freeze({
   lateJoin: LATE_JOIN.ALWAYS,
   courseVoting: false,
   teams: false,
+  tournament: false,
+  tournamentRounds: 3,
 });
 function isIntegerInRange(value: unknown, minimum: number, maximum: number): value is number {
   return (
@@ -282,6 +310,14 @@ export class Room {
    * grow it without limit.
    */
   matchHistory: MatchSummary[] = [];
+  /**
+   * Tournament progress, kept across matches and rematches.
+   *
+   * `null` when tournament play is off. It is reset when the first match of a new
+   * tournament starts, not when the previous one ends, so the final board and the
+   * lobby can keep showing the result until the host starts again.
+   */
+  tournament: TournamentState | null = null;
   initialPlayers = 0;
   private readonly admittedParticipants = new Set<string>();
   config: RoomConfig = { ...defaults, selectedHoleIds: [] };
@@ -505,6 +541,7 @@ export class Room {
       roundHistory: this.roundHistory,
       matchHistory: this.matchHistory,
       teams: this.teams(),
+      tournament: this.config.tournament ? this.tournament : null,
       initialPlayers: this.initialPlayers,
       phase: this.phase,
       holeIndex: this.holeIndex,
@@ -1285,6 +1322,8 @@ export class Room {
       'lateJoin',
       'courseVoting',
       'teams',
+      'tournament',
+      'tournamentRounds',
     ]) {
       if (key in configuration) {
         candidate[key] = configuration[key];
@@ -1298,6 +1337,8 @@ export class Room {
       typeof candidate.excludeDaily !== 'boolean' ||
       typeof candidate.courseVoting !== 'boolean' ||
       typeof candidate.teams !== 'boolean' ||
+      typeof candidate.tournament !== 'boolean' ||
+      !isIntegerInRange(candidate.tournamentRounds, MIN_TOURNAMENT_ROUNDS, MAX_TOURNAMENT_ROUNDS) ||
       (candidate.lateJoin !== LATE_JOIN.NEVER &&
         candidate.lateJoin !== LATE_JOIN.NEXT_HOLE &&
         candidate.lateJoin !== LATE_JOIN.ALWAYS) ||
@@ -1320,6 +1361,8 @@ export class Room {
       lateJoin: candidate.lateJoin,
       courseVoting: candidate.courseVoting && candidate.mapSource === MAP_SOURCE.RANDOM,
       teams: candidate.teams,
+      tournament: candidate.tournament,
+      tournamentRounds: candidate.tournamentRounds,
     };
     if (next.mapSource === MAP_SOURCE.RANDOM) {
       const count = 'holes' in configuration ? configuration.holes : this.config.randomHoles;
@@ -1330,6 +1373,11 @@ export class Room {
       next.holes = count;
     } else {
       next.holes = Math.max(1, next.selectedHoleIds.length);
+    }
+    if (!next.tournament) {
+      // Progress for a rule that is no longer on would be stale, and turning it back
+      // on should start cleanly rather than resume a forgotten table.
+      this.tournament = null;
     }
     this.config = next;
     this.configRevision += 1;
@@ -1538,6 +1586,16 @@ export class Room {
     // Teams are formed from the players actually in the party at this moment, so a
     // rematch re-forms them rather than carrying a stale split.
     this.assignTeams();
+    if (this.config.tournament && (!this.tournament || this.tournament.finished)) {
+      // A finished tournament stays on screen until the host starts again; this is
+      // the moment a new one begins.
+      this.tournament = {
+        rounds: this.config.tournamentRounds,
+        completed: 0,
+        standings: [],
+        finished: false,
+      };
+    }
     this.audit('match_started', {
       config: this.config,
       courses: this.holeIds.map((id) => ({ id, title: this.playlistTitle(id) })),
@@ -2598,6 +2656,7 @@ export class Room {
     // already contains the match that just ended.
     const standings = this.standings();
     this.recordMatchSummary(standings);
+    this.recordTournamentRound(standings);
     this.state();
     this.audit('match_finalized', { standings, rounds: this.roundHistory });
     this.broadcast({ t: 'final', podium: standings.slice(0, 3), standings });
@@ -2638,6 +2697,54 @@ export class Room {
       },
       ...this.matchHistory,
     ].slice(0, MAX_MATCH_HISTORY);
+  }
+  /**
+   * Add one finished match to the tournament table.
+   *
+   * Points are `competitors - rank + 1`, so the winner of a larger field earns more and
+   * last place still earns one for turning up. A competitor who missed a match keeps
+   * their earlier points and is not charged for the gap.
+   *
+   * The competitor is whatever the final board ranked: a player normally, a team slot
+   * in team play. Keying on that id is what makes the tournament table and the board
+   * agree about who earned what.
+   */
+  private recordTournamentRound(standings: Standing[]) {
+    if (!this.config.tournament || !this.tournament || this.tournament.finished) {
+      return;
+    }
+    if (!standings.length) {
+      return;
+    }
+    const byUid = new Map(this.tournament.standings.map((row) => [row.uid, row]));
+    for (const row of standings) {
+      const entry: TournamentRow = byUid.get(row.uid) ?? {
+        uid: row.uid,
+        name: row.name,
+        hue: row.hue,
+        rank: 0,
+        points: 0,
+        wins: 0,
+        matches: 0,
+        totalStrokes: 0,
+      };
+      entry.name = row.name;
+      entry.hue = row.hue;
+      entry.points += standings.length - row.rank + 1;
+      entry.wins += row.rank === 1 ? 1 : 0;
+      entry.matches += 1;
+      entry.totalStrokes += row.totalStrokes;
+      byUid.set(row.uid, entry);
+    }
+    const completed = this.tournament.completed + 1;
+    this.tournament = {
+      rounds: this.tournament.rounds,
+      completed,
+      standings: [...byUid.values()]
+        .sort(compareTournament)
+        .map((row, index) => ({ ...row, rank: index + 1 })),
+      finished: completed >= this.tournament.rounds,
+    };
   }
   endHole() {
     if (this.phase !== 'playing') {
@@ -2819,6 +2926,12 @@ export class Room {
         courses: match.courses.map((course) => ({ ...course })),
         standings: match.standings.map((row) => ({ ...row })),
       })),
+      tournament: this.tournament
+        ? {
+            ...this.tournament,
+            standings: this.tournament.standings.map((row) => ({ ...row })),
+          }
+        : null,
       phase: this.phase,
       starting: this.starting,
       lastActivity: this.lastActivity,
@@ -2849,6 +2962,9 @@ export class Room {
     this.matchHistory = Array.isArray(data.matchHistory)
       ? data.matchHistory.slice(0, MAX_MATCH_HISTORY)
       : [];
+    // Optional for the same reason as the history: rows written before tournaments
+    // existed restore as an ordinary party.
+    this.tournament = data.tournament ?? null;
     this.lastActivity = data.lastActivity;
     this.recoveryNotice = !!data.recoveryNotice || data.phase !== 'lobby' || !!data.starting;
     for (const id of this.config.selectedHoleIds) {

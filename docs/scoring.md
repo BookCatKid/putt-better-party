@@ -62,6 +62,10 @@ participant mid-match — and when they must wait — is set out in
 two teams whose score is the sum of their members. Formation, survival, readiness and
 disconnect behaviour are set out in [team play](teams.md).
 
+**Tournament play** is an optional run of matches ranked by accumulated points rather
+than by a single result. Structure and scoring are set out in
+[tournaments](tournaments.md).
+
 **Timeout penalty**: a non-finisher who is still in a stroke-play round completes the
 hole at `par + 5`. Elimination, by contrast, removes the player from the hole.
 

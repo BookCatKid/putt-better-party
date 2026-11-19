@@ -1156,6 +1156,61 @@ body:has(> #app) {
   min-height: 0;
 }
 /* Completed matches in the lobby: a compact summary, not a replay. */
+/* Tournament progress: a compact ordered table, on the results screen and in the lobby. */
+.bp-tournament {
+  margin: 0 0 14px;
+  text-align: left;
+}
+.bp-tournament-heading {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgb(255 255 255 / 60%);
+}
+.bp-tournament[data-tournament-state='finished'] .bp-tournament-heading {
+  color: #a7f3d0;
+}
+.bp-tournament-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bp-tournament-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0;
+  border-bottom: 1px solid #ffffff10;
+  font-size: 12px;
+}
+.bp-tournament-list li:last-child {
+  border-bottom: 0;
+}
+.bp-tournament-rank {
+  width: 14px;
+  text-align: right;
+  font-weight: 700;
+  color: rgb(255 255 255 / 45%);
+  font-variant-numeric: tabular-nums;
+}
+.bp-tournament-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bp-tournament-points {
+  font-variant-numeric: tabular-nums;
+  color: rgb(255 255 255 / 70%);
+}
+.bp-tournament-compact .bp-tournament-heading {
+  margin-bottom: 4px;
+}
 .bp-match-history {
   display: flex;
   flex-direction: column;

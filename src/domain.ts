@@ -19,6 +19,10 @@ export interface RoomConfig {
   courseVoting: boolean;
   /** Team play: players are split into two teams and the party is scored by team. */
   teams: boolean;
+  /** Tournament: several matches in sequence, ranked by accumulated points. */
+  tournament: boolean;
+  /** How many matches one tournament runs for. */
+  tournamentRounds: number;
 }
 
 /** The original game owns the rest of the specification's schema. */

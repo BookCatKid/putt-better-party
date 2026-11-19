@@ -126,6 +126,7 @@ export default [
         BpManagementNotice: 'readonly',
         BpManageRoster: 'readonly',
         BpUpcomingEditor: 'readonly',
+        BpTournament: 'readonly',
         bpResultsCsv: 'readonly',
         bpHistoryJson: 'readonly',
         bpDownloadResults: 'readonly',

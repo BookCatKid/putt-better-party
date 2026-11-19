@@ -158,6 +158,8 @@ export interface RoomCheckpoint {
   randomSeen: string[];
   /** Completed matches, newest first. Absent in rows written before it existed. */
   matchHistory?: MatchSummary[];
+  /** Tournament progress. Absent when tournament play is off or never used. */
+  tournament?: TournamentState | null;
   phase: RoomPhase;
   starting: boolean;
   lastActivity: number;
@@ -244,6 +246,31 @@ export interface TeamSummary {
   members: string[];
 }
 
+/**
+ * One competitor's accumulated tournament record.
+ *
+ * The competitor is a player in ordinary play and a team slot in team play, keyed by
+ * the same id the final board used, so the two views cannot disagree about who earned
+ * what.
+ */
+export interface TournamentRow {
+  uid: string;
+  name: string;
+  hue: number;
+  rank: number;
+  points: number;
+  wins: number;
+  matches: number;
+  totalStrokes: number;
+}
+
+export interface TournamentState {
+  rounds: number;
+  completed: number;
+  standings: TournamentRow[];
+  finished: boolean;
+}
+
 export interface PartySnapshot {
   t: 'party';
   pausedAt?: number | null;
@@ -279,6 +306,8 @@ export interface PartySnapshot {
   matchHistory: MatchSummary[];
   /** Teams for the current match; empty when team play is off. */
   teams: TeamSummary[];
+  /** Tournament progress; null when tournament play is off. */
+  tournament: TournamentState | null;
   initialPlayers: number;
   phase: RoomPhase;
   holeIndex: number;

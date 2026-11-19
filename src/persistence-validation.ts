@@ -1,7 +1,7 @@
 import { parseBallAppearance } from './ball-cosmetics.js';
 import { MAP_SOURCE, isRecord, type MapSource, type RoomConfig, type RoomPhase } from './domain.js';
 import { LATE_JOIN, type LateJoinPolicy } from './domain.js';
-import type { Identity, MatchSummary, RoomCheckpoint } from './room-types.js';
+import type { Identity, MatchSummary, RoomCheckpoint, TournamentState } from './room-types.js';
 
 /**
  * Structural validation for a persisted room checkpoint.
@@ -62,6 +62,11 @@ const MAX_MATCH_HISTORY = 10;
 const MAX_HISTORY_COURSES = 100;
 const MAX_HISTORY_ROWS = MAX_PLAYERS;
 const MAX_MATCH_ID_LENGTH = 100;
+const MIN_TOURNAMENT_ROUNDS = 2;
+const MAX_TOURNAMENT_ROUNDS = 20;
+const MAX_TOURNAMENT_ROWS = MAX_PLAYERS;
+/** Generous for twenty matches of very long playlists, but still bounded. */
+const MAX_TOURNAMENT_STROKES = 100_000_000;
 const MAX_PAR = 1000;
 const MAX_TOTAL_STROKES = 2_000_000;
 /** An epoch timestamp or a match duration; both are milliseconds. */
@@ -202,6 +207,7 @@ function readCheckpoint(value: unknown): RoomCheckpoint {
     titles: readTitles(value.titles),
     randomSeen: readRandomSeen(value.randomSeen),
     matchHistory: readMatchHistory(value.matchHistory),
+    tournament: readTournament(value.tournament),
     phase: readPhase(value.phase),
     starting: readBoolean(value, 'starting'),
     lastActivity: readLastActivity(value),
@@ -248,6 +254,19 @@ function readOptionalBoolean(
     return fallback;
   }
   return readBoolean(record, key);
+}
+
+function readOptionalInteger(
+  record: Record<string, unknown>,
+  key: string,
+  minimum: number,
+  maximum: number,
+  fallback: number,
+): number {
+  if (typeof record[key] === 'undefined') {
+    return fallback;
+  }
+  return readInteger(record, key, minimum, maximum);
 }
 
 function readInteger(
@@ -409,6 +428,15 @@ function readConfig(value: unknown): RoomConfig {
     // Team play was added after the first checkpoints were written, so a row without
     // it is an ordinary non-team party rather than corruption.
     teams: readOptionalBoolean(value, 'teams', false),
+    // Tournament play was added later too; a row without it is an ordinary party.
+    tournament: readOptionalBoolean(value, 'tournament', false),
+    tournamentRounds: readOptionalInteger(
+      value,
+      'tournamentRounds',
+      MIN_TOURNAMENT_ROUNDS,
+      MAX_TOURNAMENT_ROUNDS,
+      3,
+    ),
   };
 }
 
@@ -537,6 +565,49 @@ function readMatchHistory(value: unknown): MatchSummary[] {
     );
   }
   return value.map((entry) => readMatchSummary(entry));
+}
+
+/**
+ * Tournament progress. Optional on read, and `null` is a real value: a party that has
+ * tournament play off has no table, which is not the same as corruption.
+ */
+function readTournament(value: unknown): TournamentState | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    reject('corrupt', `tournament must be an object or null, not ${describeValue(value)}`);
+  }
+  const rounds = readInteger(value, 'rounds', MIN_TOURNAMENT_ROUNDS, MAX_TOURNAMENT_ROUNDS);
+  const completed = readInteger(value, 'completed', 0, MAX_TOURNAMENT_ROUNDS);
+  if (completed > rounds) {
+    reject('corrupt', `tournament.completed ${completed} exceeds its ${rounds} rounds`);
+  }
+  const finished = readBoolean(value, 'finished');
+  const rawStandings = value.standings;
+  if (!Array.isArray(rawStandings) || rawStandings.length > MAX_TOURNAMENT_ROWS) {
+    reject('corrupt', `tournament.standings must be an array of at most ${MAX_TOURNAMENT_ROWS}`);
+  }
+  return {
+    rounds,
+    completed,
+    finished,
+    standings: rawStandings.map((entry) => {
+      if (!isRecord(entry)) {
+        reject('corrupt', 'a tournament row must be an object');
+      }
+      return {
+        uid: readString(entry, 'uid', MAX_MATCH_ID_LENGTH),
+        name: readString(entry, 'name', MAX_TITLE_LENGTH),
+        hue: readInteger(entry, 'hue', 0, MAX_HUE),
+        rank: readInteger(entry, 'rank', 1, MAX_TOURNAMENT_ROWS),
+        points: readInteger(entry, 'points', 0, MAX_TOURNAMENT_STROKES),
+        wins: readInteger(entry, 'wins', 0, MAX_TOURNAMENT_ROUNDS),
+        matches: readInteger(entry, 'matches', 0, MAX_TOURNAMENT_ROUNDS),
+        totalStrokes: readInteger(entry, 'totalStrokes', 0, MAX_TOURNAMENT_STROKES),
+      };
+    }),
+  };
 }
 
 function readMatchSummary(value: unknown): MatchSummary {

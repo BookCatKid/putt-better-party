@@ -106,6 +106,53 @@ function bpRelativeToPar(strokes, parFaced) {
   return relative > 0 ? '+' + relative : '−' + Math.abs(relative);
 }
 
+/**
+ * Tournament progress: how far through the run is, and who is leading.
+ *
+ * Renders nothing when tournament play is off, so an ordinary party is unchanged. The
+ * rows are the server's own order, with points accumulated from every finished match;
+ * a competitor who missed a match keeps their earlier points and is not charged for the
+ * gap.
+ */
+function BpTournament({ compact }) {
+  const tournament = useBetterPartyState(betterPartyStore, (partyState) => partyState.tournament);
+  if (!tournament) {
+    return null;
+  }
+  const createElement = BetterPartyReact.createElement;
+  // Count what has been played rather than naming the next round: the same panel is
+  // shown on the results screen and in the lobby, and "round 2 of 2" would be wrong
+  // on the screen that has just finished round 1.
+  const heading = tournament.finished
+    ? 'Tournament complete'
+    : 'Tournament · ' + tournament.completed + ' of ' + tournament.rounds + ' matches played';
+  return createElement(
+    'section',
+    {
+      className: 'bp-tournament' + (compact ? ' bp-tournament-compact' : ''),
+      'data-tournament-state': tournament.finished ? 'finished' : 'running',
+    },
+    [
+      createElement('p', { key: 'heading', className: 'bp-tournament-heading' }, heading),
+      createElement(
+        'ol',
+        { key: 'list', className: 'bp-tournament-list' },
+        tournament.standings.map((row) =>
+          createElement('li', { key: row.uid }, [
+            createElement('span', { key: 'rank', className: 'bp-tournament-rank' }, row.rank),
+            createElement('span', { key: 'name', className: 'bp-tournament-name' }, row.name),
+            createElement(
+              'span',
+              { key: 'points', className: 'bp-tournament-points' },
+              row.points + ' pts',
+            ),
+          ]),
+        ),
+      ),
+    ],
+  );
+}
+
 function BpScorecard() {
   const history = useBetterPartyState(betterPartyStore, (partyState) => partyState.roundHistory);
   const final = useBetterPartyState(betterPartyStore, (partyState) => partyState.final);
