@@ -35,15 +35,18 @@ export function bpAck(message) {
  */
 export function bpHostAction(action, argument) {
   const partyState = partyRuntimeStore.state;
-  if (!partyState.isHost || !partyState.bpConnected || !u) {
+  if (!(partyState.isHost || partyState.bpCoHost) || !partyState.bpConnected || !u) {
     return Promise.reject(Error('Party is disconnected. Reconnect or create a new party.'));
   }
   const requestId = crypto.randomUUID();
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      bpPending.delete(requestId);
-      reject(Error('No response from party server. Check the connection.'));
-    }, 4000);
+    const timer = setTimeout(
+      () => {
+        bpPending.delete(requestId);
+        reject(Error('No response from party server. Check the connection.'));
+      },
+      action === 'add-course' ? 30000 : 4000,
+    );
     bpPending.set(requestId, { resolve, reject, timer });
     if (
       sendPartyCommand({
@@ -51,6 +54,7 @@ export function bpHostAction(action, argument) {
         action,
         seconds: typeof argument === 'number' ? argument : undefined,
         uid: typeof argument === 'string' ? argument : undefined,
+        ...(argument && typeof argument === 'object' ? argument : {}),
         matchId: partyState.matchId,
         holeIndex: partyState.holeIndex,
         requestId,
@@ -138,4 +142,28 @@ export function bpWatchLive(value) {
   if (partyRuntimeStore.state.bpWatchLive !== value) {
     partyRuntimeStore.setState((state) => ({ ...state, bpWatchLive: value }));
   }
+}
+
+export function bpHostNotice(message) {
+  const notice = { message, id: crypto.randomUUID() };
+  partyRuntimeStore.setState((state) => ({ ...state, bpHostNotice: notice }));
+  setTimeout(() => {
+    if (partyRuntimeStore.state.bpHostNotice?.id === notice.id) {
+      partyRuntimeStore.setState((state) => ({ ...state, bpHostNotice: null }));
+    }
+  }, 4500);
+}
+
+export function bpPhysicsPaused() {
+  const state = partyRuntimeStore.state;
+  return state.active && !!state.bpPausedAt;
+}
+
+export function bpInputBlocked() {
+  const state = partyRuntimeStore.state;
+  return state.active && !!(state.bpPausedAt || state.bpPuttingLocked || state.bpResetPending);
+}
+
+export function bpClockNow() {
+  return partyRuntimeStore.state.bpPausedAt || Date.now();
 }

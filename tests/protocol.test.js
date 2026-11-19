@@ -34,7 +34,11 @@ const runtimeSource = readFileSync(path.join(root, 'scripts/party-runtime.js'), 
 function serverInboundTags() {
   const tags = new Set();
   const pattern = /case '([a-z][a-z-]*)':/g;
-  for (const match of serverSource.matchAll(pattern)) {
+  const dispatcher = serverSource.slice(
+    serverSource.indexOf('  handle(ws:'),
+    serverSource.indexOf('  configure(ws:'),
+  );
+  for (const match of dispatcher.matchAll(pattern)) {
     tags.add(match[1]);
   }
   return tags;

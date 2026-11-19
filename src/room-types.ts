@@ -29,6 +29,10 @@ export interface Identity {
   session: string;
   name: string;
   hue: number;
+  colorOverride?: boolean;
+  coHost?: boolean;
+  hostSpectator?: boolean;
+  puttingLocked?: boolean;
 }
 export interface Player {
   uid: string;
@@ -49,6 +53,14 @@ export interface Player {
   done: boolean;
   success?: boolean;
   roundSpectator?: boolean;
+  /** Explicit host spectator selection persists until the host returns the player. */
+  hostSpectator?: boolean;
+  colorOverride?: boolean;
+  coHost?: boolean;
+  puttingLocked?: boolean;
+  /** Server-controlled epoch separates individual attempts on the same course. */
+  attempt?: number;
+  strokeAdjustment?: number;
   /** A newcomer must wait until the room advances beyond this hole. */
   joinAfterHole?: number;
   /** The client reported its level prepared for the current round. */
@@ -95,6 +107,7 @@ export interface RoomCheckpoint {
   hostToken: string;
   hostUid: string | null;
   issued: Identity[];
+  bannedNames?: string[];
   config: RoomConfig;
   titles: Record<string, string>;
   randomSeen: string[];
@@ -151,9 +164,19 @@ export interface RosterEntry {
   ready: boolean;
   alive: boolean;
   connected: boolean;
+  colorOverride?: boolean;
+  coHost?: boolean;
+  hostSpectator?: boolean;
+  puttingLocked?: boolean;
+  attempt?: number;
+  strokeAdjustment?: number;
+  resetPending?: boolean;
 }
 export interface PartySnapshot {
   t: 'party';
+  pausedAt?: number | null;
+  playlistRevision?: number;
+  recordEligible?: boolean;
   replayId?: string | null;
   recoveryNotice: boolean;
   randomHistoryCount: number;

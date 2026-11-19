@@ -374,7 +374,9 @@ function BpSpectating() {
   }
   const player = roster.find((entry) => entry.uid === uid);
   let detail = 'You can play when the next match starts.';
-  if (player?.spectatorReason === 'next-hole') {
+  if (player?.spectatorReason === 'host-spectator') {
+    detail = 'The host moved you to spectators. They can return you to play.';
+  } else if (player?.spectatorReason === 'next-hole') {
     detail = 'You’ll join at the next hole if the match continues.';
   } else if (player?.spectatorReason === 'eliminated') {
     detail = 'You’re out of this match. Watch the remaining players.';
@@ -434,7 +436,8 @@ function BpHoleClock() {
     return null;
   }
   const player = board?.standings?.find((entry) => entry.uid === uid);
-  const elapsed = player?.holeTimeMs ?? Math.max(0, Math.min(now, end || now) - start);
+  const clock = betterPartyStore.state.bpPausedAt || now;
+  const elapsed = player?.holeTimeMs ?? Math.max(0, Math.min(clock, end || clock) - start);
   return BetterPartyReact.createElement(
     'p',
     { className: 'bp-hole-clock' },
@@ -505,6 +508,8 @@ function BpCourseVote() {
   const uid = useBetterPartyState(betterPartyStore, (state) => state.self?.uid);
   const connected = useBetterPartyState(betterPartyStore, (state) => state.bpConnected);
   const [now, setNow] = BetterPartyReact.useState(Date.now);
+  const manager = useBetterPartyState(betterPartyStore, (state) => state.isHost || state.bpCoHost);
+  const [error, setError] = BetterPartyReact.useState('');
   BetterPartyReact.useEffect(() => {
     if (!vote?.id) {
       return;
@@ -542,6 +547,21 @@ function BpCourseVote() {
         ? seconds + 's remaining · Random selection weighted by votes'
         : 'Choosing the next course…',
     ),
+    manager &&
+      createElement(
+        'button',
+        {
+          key: 'skip',
+          type: 'button',
+          className: 'bp-host-action',
+          disabled: !connected || !seconds,
+          onClick: () => {
+            bpHostAction('skip-vote').catch((err) => setError(err.message));
+          },
+        },
+        'End voting now',
+      ),
+    error && createElement('p', { key: 'error', role: 'alert' }, error),
     createElement(
       'div',
       { key: 'choices', className: 'bp-vote-grid' },

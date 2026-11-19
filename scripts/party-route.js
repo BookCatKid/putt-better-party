@@ -12,6 +12,7 @@ function PartyRoute() {
   const holeIndex = usePartyState((state) => state.holeIndex);
   const currentMap = usePartyState((state) => state.currentMap);
   const matchId = usePartyState((state) => state.matchId);
+  const attempt = usePartyState((state) => state.bpAttempt ?? 0);
   const phase = usePartyState((state) => state.phase);
   const openingVote = usePartyState((state) => state.vote?.target === 0);
   const error = usePartyState((state) => state.error);
@@ -83,7 +84,7 @@ function PartyRoute() {
     return () => {
       cancelled = true;
     };
-  }, [active, holeId, holeIndex, matchId, currentMap, retry, openingVote]);
+  }, [active, holeId, holeIndex, matchId, currentMap, retry, openingVote, attempt]);
 
   React.useEffect(() => () => resetPartyRuntime(), []);
   React.useEffect(() => {

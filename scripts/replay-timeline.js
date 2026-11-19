@@ -59,6 +59,8 @@ export function createReplayRecorder() {
     sample(party, game, scene, now, force = false) {
       if (
         party.phase !== 'playing' ||
+        party.bpPausedAt ||
+        party.bpResetPending ||
         !party.mapReady ||
         party.selfRole === 'spectator' ||
         !party.matchId ||
@@ -68,7 +70,7 @@ export function createReplayRecorder() {
       ) {
         return false;
       }
-      const round = party.matchId + ':' + party.holeIndex;
+      const round = party.matchId + ':' + party.holeIndex + ':' + (party.bpAttempt ?? 0);
       if (key !== round) {
         key = round;
         samples = [];
@@ -106,7 +108,10 @@ export function createReplayRecorder() {
     },
     /** @param {SnippetPartyState} party @param {SnippetGameState} game @param {SnippetScene} scene */
     payload(party, game, scene, final = false) {
-      if (key !== party.matchId + ':' + party.holeIndex || (!samples.length && !final)) {
+      if (
+        key !== party.matchId + ':' + party.holeIndex + ':' + (party.bpAttempt ?? 0) ||
+        (!samples.length && !final)
+      ) {
         return undefined;
       }
       /** @type {{samples: number[], states: ReplayDeviceState[], native?: {path:number[], trajectory:number[], events: {sample:number,node:string}[]}}} */

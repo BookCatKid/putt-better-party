@@ -99,6 +99,7 @@ export default [
       'scripts/picker.js',
       'scripts/match-details.js',
       'scripts/host-menu.js',
+      'scripts/player-management.js',
       'scripts/lobby.js',
     ],
     languageOptions: {
@@ -121,6 +122,8 @@ export default [
         BpGuestPlaylist: 'readonly',
         BpGuestStarting: 'readonly',
         BpRecoveryNotice: 'readonly',
+        BpManageRoster: 'readonly',
+        BpUpcomingEditor: 'readonly',
       },
     },
     rules: {
@@ -302,6 +305,7 @@ export default [
         bpConnection: 'readonly',
         bpAck: 'readonly',
         bpReceiveVote: 'readonly',
+        bpHostNotice: 'readonly',
       },
     },
     rules: {

@@ -187,6 +187,7 @@ function readCheckpoint(value: unknown): RoomCheckpoint {
     hostUid: readHostUid(value),
     hostTransfer: readHostTransfer(value),
     issued: readIdentities(value),
+    ...(value.bannedNames === undefined ? {} : { bannedNames: readBannedNames(value.bannedNames) }),
     config: readConfig(value.config),
     titles: readTitles(value.titles),
     randomSeen: readRandomSeen(value.randomSeen),
@@ -195,6 +196,17 @@ function readCheckpoint(value: unknown): RoomCheckpoint {
     lastActivity: readLastActivity(value),
     recoveryNotice: readBoolean(value, 'recoveryNotice'),
   };
+}
+
+function readBannedNames(value: unknown): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > 200 ||
+    !value.every((name) => typeof name === 'string' && name.length > 0 && name.length <= 432)
+  ) {
+    reject('corrupt', 'bannedNames must be a bounded list of normalized names');
+  }
+  return value as string[];
 }
 
 function readString(record: Record<string, unknown>, key: string, maximumLength: number): string {
@@ -330,7 +342,19 @@ function readIdentity(value: unknown): Identity {
     reject('corrupt', 'issued entry name must contain a visible character');
   }
   const hue = readInteger(value, 'hue', 0, MAX_HUE);
-  return { uid, session, name, hue };
+  if (value.colorOverride !== undefined && typeof value.colorOverride !== 'boolean') {
+    reject('corrupt', 'Invalid color override');
+  }
+  const identity: Identity = { uid, session, name, hue };
+  for (const key of ['colorOverride', 'coHost', 'hostSpectator', 'puttingLocked'] as const) {
+    if (value[key] !== undefined && typeof value[key] !== 'boolean') {
+      reject('corrupt', 'Invalid identity flag');
+    }
+    if (value[key] === true) {
+      identity[key] = true;
+    }
+  }
+  return identity;
 }
 
 function readConfig(value: unknown): RoomConfig {

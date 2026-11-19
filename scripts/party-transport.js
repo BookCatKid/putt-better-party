@@ -54,6 +54,7 @@ function resolveTransportBindings(injected) {
     sceneReadyLevelId: provided.sceneReadyLevelId ?? transportSceneReadyLevelId,
     isSpectator: provided.isSpectator ?? isTransportSpectator,
     ack: provided.ack ?? bpAck,
+    notice: provided.notice ?? (provided.partyStore ? () => {} : bpHostNotice),
     updateVote: provided.updateVote ?? (provided.partyStore ? () => {} : bpReceiveVote),
   };
 }
@@ -119,9 +120,15 @@ function connectBetterParty(code, identity, options = {}) {
     }
     const frame = /** @type {Record<string, unknown>} */ (message);
     let packet = frame;
-    if (frame.t === 'prog' || frame.t === 'forfeit' || frame.f === 1) {
-      const { matchId, holeIndex } = bind.partyStore.state;
-      packet = { ...frame, matchId, holeIndex };
+    if (
+      frame.t === 'prog' ||
+      frame.t === 'forfeit' ||
+      frame.t === 'replay-samples' ||
+      frame.t === 'scene' ||
+      frame.f === 1
+    ) {
+      const { matchId, holeIndex, bpAttempt } = bind.partyStore.state;
+      packet = { ...frame, matchId, holeIndex, ...(bpAttempt ? { attempt: bpAttempt } : {}) };
     }
     if (!socket) {
       return false;
@@ -143,10 +150,14 @@ function connectBetterParty(code, identity, options = {}) {
     if (!party.matchId || !levelId || levelId !== party.currentMap?.id) {
       return;
     }
-    if (party.phase !== 'countdown') {
+    if (
+      (party.bpResetPending && (roundChangePending || !party.mapReady)) ||
+      (party.phase !== 'countdown' && !(party.phase === 'playing' && party.bpResetPending))
+    ) {
       return;
     }
-    const key = party.matchId + ':' + party.holeIndex + ':' + levelId;
+    const key =
+      party.matchId + ':' + party.holeIndex + ':' + levelId + ':' + (party.bpAttempt ?? 0);
     if (announcedSceneKey === key) {
       return;
     }
@@ -164,12 +175,14 @@ function connectBetterParty(code, identity, options = {}) {
       roundChangePending ||
       party.phase !== 'playing' ||
       !party.mapReady ||
+      party.bpPausedAt ||
+      party.bpResetPending ||
       party.selfRole === 'spectator'
     ) {
       return;
     }
     const game = bind.gameStore.state;
-    if (game.strokes !== lastStrokeCount && game.phase !== 'holed') {
+    if (!party.bpPuttingLocked && game.strokes !== lastStrokeCount && game.phase !== 'holed') {
       if (send({ t: 'prog', st: game.strokes })) {
         lastStrokeCount = game.strokes;
       }
@@ -294,6 +307,11 @@ function connectBetterParty(code, identity, options = {}) {
       }
     }
 
+    if (message.pausedAt && !previous.bpPausedAt) {
+      completionSent = false;
+      forfeitSent = false;
+      lastStrokeCount = -1;
+    }
     bind.updateParty(message);
     if (
       (message.phase === 'countdown' || message.phase === 'playing') &&
@@ -303,6 +321,9 @@ function connectBetterParty(code, identity, options = {}) {
     }
     awaitingSnapshot = false;
     completeHandshake();
+    if (previous.bpPausedAt && !message.pausedAt) {
+      reportProgress();
+    }
   }
 
   /**
@@ -347,10 +368,33 @@ function connectBetterParty(code, identity, options = {}) {
       case 'party':
         receiveSnapshot(message);
         return;
-      case 'roster':
+      case 'roster': {
+        const previousAttempt = bind.partyStore.state.bpAttempt ?? 0;
+        const member = Array.isArray(message.players)
+          ? message.players.find(
+              /** @param {{uid?: string, attempt?: number}} player */ (player) =>
+                player.uid === identity.uid,
+            )
+          : undefined;
+        if (member && (member.attempt ?? 0) !== previousAttempt) {
+          roundChangePending = true;
+          sawMapReadyFalse = true;
+          attemptAtRoundChange = bind.gameStore.state.attemptSeq ?? null;
+          announcedSceneKey = '';
+          completionSent = false;
+          forfeitSent = false;
+          lastStrokeCount = -1;
+          lastPosition = '';
+        }
         bind.setRoster(message.players);
         receivedRoster = true;
         completeHandshake();
+        return;
+      }
+      case 'host-notice':
+        if (typeof message.message === 'string') {
+          bind.notice(message.message);
+        }
         return;
       case 'course-vote':
         bind.updateVote(message);
@@ -487,6 +531,9 @@ function connectBetterParty(code, identity, options = {}) {
   let lastPosition = '';
   let lastPositionAt = 0;
   function publishPosition() {
+    if (bind.partyStore.state.bpResetPending || roundChangePending) {
+      reportProgress();
+    }
     const party = bind.partyStore.state;
     if (
       !synchronized ||
@@ -494,6 +541,7 @@ function connectBetterParty(code, identity, options = {}) {
       bind.document.visibilityState === 'hidden' ||
       !bind.settingsStore.state.ghosts ||
       !party.mapReady ||
+      party.bpResetPending ||
       roundChangePending ||
       !['countdown', 'playing'].includes(party.phase) ||
       bind.isSpectator()
@@ -519,6 +567,7 @@ function connectBetterParty(code, identity, options = {}) {
       ...position,
       matchId: party.matchId,
       holeIndex: party.holeIndex,
+      ...(party.bpAttempt ? { attempt: party.bpAttempt } : {}),
     });
     const now = Date.now();
     if (payload !== lastPosition || now - lastPositionAt >= 2000) {
@@ -561,6 +610,9 @@ function connectBetterParty(code, identity, options = {}) {
       return;
     }
     const party = bind.partyStore.state;
+    if (party.bpPausedAt || party.bpResetPending) {
+      return;
+    }
     const game = bind.gameStore.state;
     replayRecorder.sample(party, game, bind.scene, Date.now());
   }, 50);
@@ -569,7 +621,12 @@ function connectBetterParty(code, identity, options = {}) {
       return;
     }
     const party = bind.partyStore.state;
-    if (party.phase !== 'playing' || party.selfRole === 'spectator') {
+    if (
+      party.phase !== 'playing' ||
+      party.bpPausedAt ||
+      party.bpResetPending ||
+      party.selfRole === 'spectator'
+    ) {
       return;
     }
     const replay = replayRecorder.payload(party, bind.gameStore.state, bind.scene);

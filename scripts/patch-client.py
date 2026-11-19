@@ -116,7 +116,7 @@ const isTransportSpectator = _e;
     source = replace_once(
         source,
         "ne=(0,J.useCallback)(()=>{window.setTimeout(()=>j(!0),2500)},[])",
-        "ne=(0,J.useCallback)(()=>{bpScenePrepared(l.id);window.setTimeout(()=>j(!0),2500)},[l.id])",
+        "ne=(0,J.useCallback)(()=>{bpScenePrepared(l.id);window.setTimeout(()=>j(!0),2500)},[l])",
     )
     # The original Dn ball starts at [0, radius, 0] and consumes the
     # runtime's one-shot teleport AFTER the physics step. A replacement
@@ -173,6 +173,38 @@ const isTransportSpectator = _e;
     # Keep the canvas, course and socket mounted for spectators.
     source = replace_once(
         source,
+        "let l=(0,J.useMemo)(()=>wt(e),[e]);Wr(l);",
+        "let l=(0,J.useMemo)(()=>wt(e),[e]);Wr(l);const bpPaused=w(transportPartyStore,e=>!!e.bpPausedAt),bpAdminAttempt=w(transportPartyStore,e=>e.bpAttempt??0);",
+    )
+    source = replace_once(
+        source, "paused:Ye(l)===2,debug:Gr", "paused:Ye(l)===2||bpPaused,debug:Gr"
+    )
+    source = replace_once(
+        source,
+        "Ye(l)===2?`${l.id}:2`:`legacy`",
+        "(Ye(l)===2?`${l.id}:2`:`legacy`)+':'+bpAdminAttempt",
+    )
+    source = replace_once(source, "!t&&e&&n>0?(Yt.copy", "!t&&e&&n>0&&j()?(Yt.copy")
+    source = replace_once(
+        source,
+        "d=w(A,k),p=w(A,te)",
+        "bpColor=w(transportPartyStore,e=>{const player=e.roster.find(p=>p.uid===e.self?.uid);return player?.colorOverride?'hsl('+player.hue+',75%,62%)':null}),d=w(A,k),p=w(A,te)",
+    )
+    source = replace_once(source, "m.color.set(d)", "m.color.set(bpColor??d)")
+    # Use roster hue for actual remote ball mesh, not just the name tag.
+    source = source.replace(
+        "t.ballColor?$.set(t.ballColor):$.setHSL(t.hue/360,.75,.62)", "bpGhostColor(e,t,$)"
+    )
+    source += """
+function bpGhostColor(id,ghost,color){
+  const player=transportPartyStore.state.roster.find(member=>member.id===id);
+  if(player?.colorOverride){color.setHSL(player.hue/360,.75,.62);return}
+  if(ghost.ballColor){color.set(ghost.ballColor);return}
+  color.setHSL((player?.hue??ghost.hue)/360,.75,.62)
+}
+"""
+    source = replace_once(
+        source,
         "Se=ge||xe;return",
         """bpSpectating=w(M,e=>e.active&&e.selfRole===`spectator`),bpHideLocalBall=w(M,e=>e.active&&(!e.bpInitialSnapshot||e.selfRole===`spectator`||!e.roster.some(p=>p.uid===e.self?.uid))),bpWatchPhase=w(transportGameStore,e=>e.phase),bpFollowId=w(M,e=>followTarget(e,bpWatchPhase)?.id??null),bpObserver=w(M,e=>canWatch(e,bpWatchPhase)),Se=ge||xe||bpSpectating||bpObserver;return""",
     )
@@ -202,12 +234,28 @@ const isTransportSpectator = _e;
     )
     return (
         "import{bpConnection,bpAck,bpScenePrepared,transportSceneReadyLevelId,"
-        'receiveTransportHostToken,clearTransportHostToken,bpReceiveVote,bpWatchLive}from"./runtime-DL2fiDAQ.js";'
+        'receiveTransportHostToken,clearTransportHostToken,bpReceiveVote,bpWatchLive,bpHostNotice}from"./runtime-DL2fiDAQ.js";'
         'import{followTarget,canWatch,liveGhost}from"./bp-spectator-follow.js";' + source
     )
 
 
 patch("GameCanvas-C5hQh1sR.js", transport_patch)
+
+
+def pause_physics_patch(source):
+    source = 'import{bpPhysicsPaused}from"./runtime-DL2fiDAQ.js";' + source
+    source = replace_once(
+        source, "r?.version!==2&&e(t,n)", "r?.version!==2&&!bpPhysicsPaused()&&e(t,n)"
+    )
+    source = replace_once(
+        source,
+        "if(document.hidden){e.clock.setHidden(!0);return}let a=[...e.subscribers]",
+        "let bpHidden=document.hidden||bpPhysicsPaused();if(e.clock.hidden!==bpHidden)e.clock.setHidden(bpHidden);if(bpHidden)return;let a=[...e.subscribers]",
+    )
+    return source
+
+
+patch("AppearanceClone-CBos6VT9.js", pause_physics_patch)
 
 
 def runtime_patch(s):
@@ -216,27 +264,41 @@ def runtime_patch(s):
     s = replace_once(
         s,
         "active:!0,code:e,hostToken:n,self:t,selfRole:",
-        "active:!0,replayId:null,vote:null,bpWatchChoice:null,bpWatchLive:false,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
+        "active:!0,replayId:null,vote:null,bpAttempt:0,bpResetPending:false,bpPausedAt:null,bpCoHost:false,bpPuttingLocked:false,bpStrokeAdjustment:0,bpHostNotice:null,bpWatchChoice:null,bpWatchLive:false,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
     )
     s = replace_once(
         s,
         "active:!1,selfRole:",
-        "active:!1,replayId:null,vote:null,bpWatchChoice:null,bpWatchLive:false,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,selfRole:",
+        "active:!1,replayId:null,vote:null,bpAttempt:0,bpResetPending:false,bpPausedAt:null,bpCoHost:false,bpPuttingLocked:false,bpStrokeAdjustment:0,bpHostNotice:null,bpWatchChoice:null,bpWatchLive:false,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,selfRole:",
     )
     s = replace_once(
         s,
         "phase:e.phase,holeIndex:e.holeIndex",
-        "replayId:e.replayId??null,vote:e.vote?{...e.vote,endsAt:Date.now()+e.vote.endsAt-e.now}:null,bpInitialSnapshot:true,recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,awaitingPlayers:e.awaitingPlayers??0,nextError:e.nextError??null,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
+        "bpPlaylistRevision:e.playlistRevision??0,bpPausedAt:e.pausedAt?Date.now()+e.pausedAt-e.now:null,recordEligible:e.recordEligible!==false,replayId:e.replayId??null,vote:e.vote?{...e.vote,endsAt:Date.now()+e.vote.endsAt-e.now}:null,bpInitialSnapshot:true,recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,awaitingPlayers:e.awaitingPlayers??0,nextError:e.nextError??null,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
     )
     s = replace_once(
         s,
         "e.active?c()||e.phase!==`playing`||!e.mapReady",
-        "e.active?!e.bpConnected||c()||e.phase!==`playing`||!e.mapReady",
+        "e.active?!e.bpConnected||bpInputBlocked()||c()||e.phase!==`playing`||!e.mapReady",
     )
     s = replace_once(
         s,
         "t.state.active&&(e.phase===`holed`",
         "(t.state.active||(i.state.active&&i.state.phase===`playing`&&i.state.selfRole===`player`))&&(e.phase===`holed`",
+    )
+    # Roster updates also carry host-issued attempt epochs and the input gate.
+    # Preserve the native store identity and role/fly-camera transitions.
+    s = replace_once(
+        s,
+        "roster:e,count:e.length,isHost:a?.isHost??t.isHost",
+        "roster:e,count:e.length,bpCoHost:!!a?.coHost,bpPuttingLocked:!!a?.puttingLocked,bpResetPending:!!a?.resetPending,bpStrokeAdjustment:a?.strokeAdjustment??0,bpAttempt:a?.attempt??0,...((a?.attempt??0)!==(t.bpAttempt??0)?{mapReady:false,bpSceneReady:null}:{}),isHost:a?.isHost??t.isHost",
+    )
+    # The release path checks the same input authorization as pointer-down.
+    # Cancel charging without touching an already rolling ball.
+    s = replace_once(
+        s,
+        "function A(e){w.state.phase===`charging`&&",
+        "function A(e){if(bpInputBlocked()){V.aim.active=false;V.aim.power=0;k();return}w.state.phase===`charging`&&",
     )
     return s + "\nconst partyRuntimeStore = i;\n" + (root / "scripts/party-runtime.js").read_text()
 
@@ -246,8 +308,9 @@ patch("runtime-DL2fiDAQ.js", runtime_patch)
 
 def game_patch(s):
     s = replace_once(s, "children:Pt(c)", "children:i?Pt(c):`∞`")
+    s = replace_once(s, "let c=i?i-Date.now():0", "let c=i?i-bpClockNow():0")
     s = (
-        'import{bpHostAction,bpPickerBusy,bpLeaveParty,bpCastVote,bpSelectWatchTarget}from"./runtime-DL2fiDAQ.js";'
+        'import{bpHostAction,bpPickerBusy,bpLeaveParty,bpCastVote,bpSelectWatchTarget,bpClockNow}from"./runtime-DL2fiDAQ.js";'
         + s
     )
     a = s.index("function At(")
@@ -399,7 +462,7 @@ def game_patch(s):
     s = replace_once(
         s,
         "O=x||E||D,k=()=>",
-        "bpObserver=w&&T===`playing`&&(D||i===`holed`||i===`forfeit`),O=x||E||D||bpObserver,k=()=>",
+        "bpStrokeAdjustment=j(R,e=>e.bpStrokeAdjustment??0),bpObserver=w&&T===`playing`&&(D||i===`holed`||i===`forfeit`),O=x||E||D||bpObserver,k=()=>",
     )
     s = replace_once(
         s,
@@ -412,10 +475,35 @@ def game_patch(s):
         "O&&!bpObserver&&(0,J.jsx)(`p`,{className:`rounded-full bg-black/50 px-4 py-1.5 text-xs font-medium`,children:`Free cam:",
     )
     s += "\nconst followGameStore=z;\n" + (root / "scripts/follow-controls.js").read_text()
+    s = replace_once(
+        s,
+        "children:[o,` `,(0,J.jsxs)",
+        "children:[Math.max(0,o+bpStrokeAdjustment),` `,(0,J.jsxs)",
+    )
+    s = replace_once(
+        s,
+        "(0,J.jsx)(BpWatchName,{row:e,isSelf:t})",
+        "(0,J.jsx)(BpWatchName,{row:e,isSelf:t}),(0,J.jsx)(BpPlayerMenu,{uid:e.uid})",
+    )
+    s = replace_once(
+        s,
+        "children:e.role===`spectator`?`👀`:e.ready?`✅`:`·`})]",
+        "children:e.role===`spectator`?`👀`:e.ready?`✅`:`·`}),(0,J.jsx)(BpPlayerMenu,{uid:e.uid})]",
+    )
+    s = replace_once(
+        s,
+        "(0,J.jsx)(BpSpectating,{}),(0,J.jsx)(BpFollowControls,{})",
+        "(0,J.jsx)(BpSpectating,{}),(0,J.jsx)(BpManagementNotice,{}),(0,J.jsx)(BpFollowControls,{})",
+    )
     # Host menu is a sibling of the settings wrapper, not inside it.
     a = s.index("function It(")
     s = s[:a] + (root / "scripts/match-details.js").read_text() + s[a:]
-    s = s[:a] + (root / "scripts/host-menu.js").read_text() + s[a:]
+    s = (
+        s[:a]
+        + (root / "scripts/host-menu.js").read_text()
+        + (root / "scripts/player-management.js").read_text()
+        + s[a:]
+    )
     s = replace_once(
         s,
         '})]})]})]})]}),(0,J.jsxs)(`div`,{"data-overview-hud":`bottom`',
@@ -493,6 +581,7 @@ build_inputs = [root / "scripts" / "patch-client.py"] + sorted(
         "lobby.js",
         "match-details.js",
         "host-menu.js",
+        "player-management.js",
         "better-party.css",
         "party-replay-scene.js",
         "replay-timeline.js",

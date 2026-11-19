@@ -1,3 +1,4 @@
+import { isHostAction, normalizedName } from './host-actions.js';
 import { newReplayId, RoundReplayCapture } from './replays.js';
 import { randomUUID, randomBytes, randomInt } from 'node:crypto';
 import { logEvent } from './event-log.js';
@@ -184,6 +185,10 @@ export class Room {
   hostTransfer: { fromUid: string; toUid: string; at: number } | null = null;
   hostSuccessionTimer: ReturnType<typeof setTimeout> | undefined;
   issued = new Map<string, Identity>();
+  bannedNames = new Set<string>();
+  pausedAt: number | null = null;
+  playlistRevision = 0;
+  private playlistEditPending = false;
   players = new Map<string, Player>();
   phase: RoomPhase = 'lobby';
   roundHistory: RoundRecord[] = [];
@@ -270,6 +275,9 @@ export class Room {
     if (previous && previous.session === session) {
       return previous;
     }
+    if (this.bannedNames.has(normalizedName(name))) {
+      throw new Error('This name is banned from the party.');
+    }
     if (this.config.locked) {
       throw new Error('This party is locked to existing players.');
     }
@@ -340,6 +348,9 @@ export class Room {
   snapshot(): PartySnapshot {
     return {
       t: 'party',
+      pausedAt: this.pausedAt,
+      playlistRevision: this.playlistRevision,
+      recordEligible: this.recordEligible,
       replayId: this.replayAvailable ? this.replayId : null,
       recoveryNotice: this.recoveryNotice,
       randomHistoryCount: this.randomSeen.length,
@@ -375,6 +386,9 @@ export class Room {
   spectatorReason(player: Player) {
     if (player.role !== 'spectator') {
       return null;
+    }
+    if (player.hostSpectator) {
+      return 'host-spectator';
     }
     if (player.participated) {
       return player.alive ? 'round-forfeit' : 'eliminated';
@@ -422,6 +436,12 @@ export class Room {
         ready: player.ready,
         alive: player.alive,
         connected: !!player.ws,
+        ...(player.colorOverride ? { colorOverride: true } : {}),
+        ...(player.coHost ? { coHost: true } : {}),
+        ...(player.hostSpectator ? { hostSpectator: true } : {}),
+        ...(player.puttingLocked ? { puttingLocked: true } : {}),
+        ...(player.attempt ? { attempt: player.attempt, resetPending: !player.sceneReady } : {}),
+        ...(player.strokeAdjustment ? { strokeAdjustment: player.strokeAdjustment } : {}),
       }));
   }
   standings(): Standing[] {
@@ -445,7 +465,7 @@ export class Room {
         totalTimeMs: player.totalTimeMs ?? 0,
         holeTimeMs: player.holeTimeMs ?? null,
         alive: player.alive,
-        strokes: player.strokes,
+        strokes: this.effectiveStrokes(player),
         finished: player.done,
       }));
   }
@@ -504,11 +524,15 @@ export class Room {
         uid: identity.uid,
         name: identity.name,
         hue: identity.hue,
+        colorOverride: identity.colorOverride,
+        coHost: identity.coHost && identity.uid !== this.hostUid,
+        hostSpectator: identity.hostSpectator,
+        puttingLocked: identity.puttingLocked,
         id: '',
         ws: null,
-        role: this.phase === 'lobby' ? 'player' : 'spectator',
+        role: this.phase === 'lobby' && !identity.hostSpectator ? 'player' : 'spectator',
         ready: false,
-        alive: this.phase === 'lobby',
+        alive: this.phase === 'lobby' && !identity.hostSpectator,
         participated: false,
         holesSurvived: 0,
         totalStrokes: 0,
@@ -527,17 +551,19 @@ export class Room {
         player.joinAfterHole = this.holeIndex;
       }
     }
-    if (this.vote?.target === 0 && !player.participated) {
+    if (this.vote?.target === 0 && !player.participated && !player.hostSpectator) {
       // No hole has started yet: allow new arrivals to join the opening vote
       // and play from hole one, regardless of the mid-match admission policy.
       this.admitLatePlayer(player);
     }
     if (
       player.joinAfterHole !== undefined &&
+      !player.hostSpectator &&
       !player.participated &&
       (this.phase === 'countdown' ||
         (this.phase === 'playing' &&
-          (!this.roundTimerMs || Date.now() < this.startsAt + this.roundTimerMs))) &&
+          (!this.roundTimerMs ||
+            (this.pausedAt ?? Date.now()) < this.startsAt + this.roundTimerMs))) &&
       (this.config.lateJoin === LATE_JOIN.ALWAYS ||
         (this.phase === 'countdown' && player.joinAfterHole < this.holeIndex))
     ) {
@@ -565,7 +591,7 @@ export class Room {
       player.roundSpectator = true;
       player.role = 'spectator';
     }
-    if (reload && this.phase === 'countdown') {
+    if (reload && (this.phase === 'countdown' || player.attempt)) {
       // The page reloaded, so the previous document's prepared scene is gone.
       player.sceneReady = false;
     }
@@ -622,6 +648,11 @@ export class Room {
     }
     const previous = this.players.get(fromUid);
     this.hostUid = toUid;
+    next.coHost = false;
+    const identity = this.issued.get(toUid);
+    if (identity) {
+      identity.coHost = false;
+    }
     this.audit('host_transferred', { fromUid, toUid, reason: 'manual' });
     this.hostTransfer = { fromUid, toUid, at: Date.now() };
     this.clearHostSuccession();
@@ -682,6 +713,11 @@ export class Room {
     }
     const previousUid = this.hostUid;
     this.hostUid = successor.uid;
+    successor.coHost = false;
+    const identity = this.issued.get(successor.uid);
+    if (identity) {
+      identity.coHost = false;
+    }
     this.audit('host_transferred', {
       fromUid: previousUid,
       toUid: successor.uid,
@@ -773,6 +809,7 @@ export class Room {
     }
     this.lastActivity = Date.now();
     const host = player.uid === this.hostUid;
+    const manager = host || player.coHost === true;
     const now = Date.now();
     if (!spend(player.messageBudget, MESSAGE_BURST, MESSAGE_REFILL_PER_SECOND, now)) {
       // Dropping rather than answering is deliberate: a client that is flooding
@@ -785,7 +822,11 @@ export class Room {
       return;
     }
     if (
-      (message.t === 'prog' || message.t === 'forfeit' || message.f === 1 || 'x' in message) &&
+      (message.t === 'prog' ||
+        message.t === 'forfeit' ||
+        message.t === 'replay-samples' ||
+        message.f === 1 ||
+        'x' in message) &&
       ('matchId' in message || 'holeIndex' in message) &&
       (message.matchId !== this.matchId || message.holeIndex !== this.holeIndex)
     ) {
@@ -793,6 +834,17 @@ export class Room {
         uid: player.uid,
         kind: message.f === 1 ? 'finish' : message.t,
       });
+      return;
+    }
+    if (
+      (message.t === 'prog' ||
+        message.t === 'forfeit' ||
+        message.t === 'replay-samples' ||
+        message.f === 1 ||
+        'x' in message) &&
+      player.attempt &&
+      (message.attempt !== player.attempt || !player.sceneReady)
+    ) {
       return;
     }
     switch (message.t) {
@@ -844,8 +896,8 @@ export class Room {
             this.send(ws, { t: 'host-ack', requestId: message.requestId, ok, msg });
           }
         };
-        if (!host) {
-          this.error(ws, 'not-host', 'Only the host can manage the party.');
+        if (!manager) {
+          this.error(ws, 'not-host', 'Only the host or a co-host can manage the party.');
           return ack(false, 'Only the host can manage the party.');
         }
         // A hand-over is a party-level action, not a round action: it stays
@@ -857,17 +909,13 @@ export class Room {
         ) {
           return ack(false, 'The round changed. Try again.');
         }
-        const action = [
-          'end',
-          'skip',
-          'time',
-          'restart',
-          'retry-next',
-          'skip-next',
-          'transfer-host',
-        ].includes(String(message.action))
-          ? String(message.action)
-          : 'unknown';
+        const action = isHostAction(message.action) ? message.action : 'unknown';
+        if (action === 'unknown') {
+          return ack(false, 'Unknown host action.');
+        }
+        if (!host && ['transfer-host', 'grant-cohost', 'revoke-cohost'].includes(action)) {
+          return ack(false, 'Only the host can change party authority.');
+        }
         const actionMatch = this.matchId;
         const actionHole = this.holeIndex;
         this.audit('host_action_requested', {
@@ -875,18 +923,21 @@ export class Room {
           action,
           ...(typeof message.seconds === 'number' ? { seconds: message.seconds } : {}),
         });
-        const ok = this.hostAction(ws, message);
-        this.audit('host_action_result', {
-          uid: player.uid,
-          action,
-          accepted: ok === true,
-          previousMatchId: actionMatch,
-          previousHoleIndex: actionHole,
-        });
-        return ack(
-          ok === true,
-          ok === true ? undefined : 'That action is not available right now.',
-        );
+        const complete = (ok: boolean) => {
+          this.audit('host_action_result', {
+            uid: player.uid,
+            action,
+            accepted: ok,
+            previousMatchId: actionMatch,
+            previousHoleIndex: actionHole,
+          });
+          return ack(ok, ok ? undefined : 'That action is not available right now.');
+        };
+        if (action === 'add-course') {
+          void this.addUpcomingCourse(player, message).then(complete, () => complete(false));
+          return;
+        }
+        return complete(this.hostAction(ws, message));
       }
       case 'rematch':
         if (host && this.phase === 'final') {
@@ -899,7 +950,11 @@ export class Room {
         this.leave(ws, player);
         return;
       case 'prog':
-        if (this.playable(player) && isIntegerInRange(message.st, 0, 200)) {
+        if (
+          this.playable(player) &&
+          !player.puttingLocked &&
+          isIntegerInRange(message.st, 0, 200)
+        ) {
           // A progress report is a level, not an event: repeating the count
           // already recorded changes nothing, so it must not cost a board
           // broadcast to every player. Without this, one client could make the
@@ -933,6 +988,7 @@ export class Room {
     if (message.f === 1) {
       if (
         this.playable(player) &&
+        (!player.puttingLocked || message.s === player.strokes) &&
         isIntegerInRange(message.s, Math.max(1, player.strokes), 200) &&
         message.p === this.specs[this.holeIndex]?.par
       ) {
@@ -1155,7 +1211,11 @@ export class Room {
     this.startPrepared();
   }
   startPrepared() {
-    this.recordEligible = !this.config.courseVoting;
+    this.pausedAt = null;
+    this.playlistRevision++;
+    this.recordEligible =
+      !this.config.courseVoting &&
+      ![...this.players.values()].some((player) => player.puttingLocked || player.hostSpectator);
     this.replayId = this.onReplayRound ? newReplayId() : null;
     this.replayAvailable = false;
     this.replayCapture = null;
@@ -1172,9 +1232,9 @@ export class Room {
         continue;
       }
       Object.assign(player, {
-        role: 'player',
-        alive: true,
-        participated: true,
+        role: player.hostSpectator ? 'spectator' : 'player',
+        alive: !player.hostSpectator,
+        participated: !player.hostSpectator,
         roundSpectator: false,
         holesSurvived: 0,
         totalStrokes: 0,
@@ -1215,6 +1275,7 @@ export class Room {
   }
   begin() {
     this.vote = null;
+    this.pausedAt = null;
     this.replayCapture = this.replayId
       ? new RoundReplayCapture(this.specs[this.holeIndex] ?? null)
       : null;
@@ -1228,18 +1289,20 @@ export class Room {
       if (
         player.ws &&
         !player.participated &&
+        !player.hostSpectator &&
         player.joinAfterHole !== undefined &&
         player.joinAfterHole < this.holeIndex
       ) {
         this.admitLatePlayer(player);
       }
       player.strokes = 0;
+      player.strokeAdjustment = 0;
       player.done = false;
       player.holeTimeMs = undefined;
       player.success = false;
       player.lastPosition = 0;
       player.sceneReady = false;
-      if (player.roundSpectator && player.alive) {
+      if (player.roundSpectator && player.alive && !player.hostSpectator) {
         player.role = 'player';
         player.roundSpectator = false;
       }
@@ -1265,6 +1328,7 @@ export class Room {
         player.participated &&
         player.ws &&
         !player.roundSpectator &&
+        !player.hostSpectator &&
         player.reportsSceneReadiness,
     );
   }
@@ -1326,7 +1390,11 @@ export class Room {
    * newer round.
    */
   acknowledgeScene(ws: RoomSocket, message: Record<string, unknown>, player: Player) {
-    if (message.matchId !== this.matchId || message.holeIndex !== this.holeIndex) {
+    if (
+      message.matchId !== this.matchId ||
+      message.holeIndex !== this.holeIndex ||
+      (player.attempt && message.attempt !== player.attempt)
+    ) {
       return;
     }
     if (typeof message.levelId === 'string' && !this.knownLevelIds().includes(message.levelId)) {
@@ -1336,6 +1404,9 @@ export class Room {
       return;
     }
     player.sceneReady = true;
+    if (player.attempt) {
+      this.rosterBroadcast();
+    }
     this.audit('scene_ready', { uid: player.uid });
     if (this.phase === 'countdown') {
       this.startPlay();
@@ -1522,6 +1593,8 @@ export class Room {
   playable(player: Player) {
     return (
       this.phase === 'playing' &&
+      this.pausedAt === null &&
+      player.role === 'player' &&
       player.alive &&
       player.participated &&
       !player.done &&
@@ -1532,7 +1605,10 @@ export class Room {
     if (this.phase === 'countdown') {
       return 0;
     }
-    return Math.max(0, Math.min(this.roundTimerMs || Infinity, Date.now() - this.startsAt));
+    return Math.max(
+      0,
+      Math.min(this.roundTimerMs || Infinity, (this.pausedAt ?? Date.now()) - this.startsAt),
+    );
   }
   finish(player: Player, success: boolean) {
     player.holeTimeMs = this.elapsedHoleMs();
@@ -1549,7 +1625,7 @@ export class Room {
       this.broadcast({
         t: 'f',
         id: player.id,
-        s: player.strokes,
+        s: this.effectiveStrokes(player),
         p: this.specs[this.holeIndex].par,
       });
     }
@@ -1559,6 +1635,7 @@ export class Room {
   checkRoundDone() {
     if (
       this.phase === 'playing' &&
+      this.pausedAt === null &&
       [...this.players.values()]
         .filter((player) => player.participated && player.alive)
         .every((player) => player.done)
@@ -1566,7 +1643,435 @@ export class Room {
       this.endHole();
     }
   }
-  hostAction(ws: RoomSocket, message: Record<string, unknown>) {
+  effectiveStrokes(player: Player) {
+    return Math.min(
+      200,
+      Math.max(player.success ? 1 : 0, player.strokes + (player.strokeAdjustment ?? 0)),
+    );
+  }
+
+  private announce(message: string) {
+    this.broadcast({ t: 'host-notice', message });
+  }
+
+  private changedGameplay(message: string) {
+    if (this.matchId && this.phase !== 'final') {
+      this.recordEligible = false;
+    }
+    this.announce(message);
+  }
+
+  private resetPlayerAttempt(player: Player) {
+    player.attempt = (player.attempt ?? 0) + 1;
+    player.strokes = 0;
+    player.strokeAdjustment = 0;
+    player.done = false;
+    player.success = false;
+    player.holeTimeMs = undefined;
+    player.sceneReady = false;
+    player.lastPosition = 0;
+    this.positions.delete(player.id);
+    this.broadcast({ t: 'bye', id: player.id });
+    this.replayCapture?.resetPlayer(player.uid);
+  }
+
+  private returnPlayer(player: Player) {
+    player.hostSpectator = false;
+    const identity = this.issued.get(player.uid);
+    if (identity) {
+      identity.hostSpectator = false;
+    }
+    player.roundSpectator = false;
+    player.role = 'player';
+    player.alive = true;
+    player.joinAfterHole = undefined;
+    if (this.phase !== 'lobby') {
+      if (!player.participated) {
+        this.admitLatePlayer(player);
+      }
+      this.resetPlayerAttempt(player);
+    }
+  }
+
+  private managePlayer(ws: RoomSocket, message: Record<string, unknown>): boolean {
+    const target = typeof message.uid === 'string' ? this.players.get(message.uid) : undefined;
+    if (
+      !target ||
+      target.uid === ws.data.uid ||
+      (target.uid === this.hostUid && ws.data.uid !== this.hostUid)
+    ) {
+      return false;
+    }
+    const value = message.value;
+    const live = this.phase === 'playing' || this.phase === 'countdown';
+    let notice: string;
+    switch (message.action) {
+      case 'rename': {
+        if (
+          typeof value !== 'string' ||
+          !value.trim() ||
+          value.trim().length > 24 ||
+          this.bannedNames.has(normalizedName(value))
+        ) {
+          return false;
+        }
+        const previous = target.name;
+        target.name = value.trim();
+        const identity = this.issued.get(target.uid);
+        if (identity) {
+          identity.name = target.name;
+        }
+        notice = previous + ' was renamed to ' + target.name;
+        break;
+      }
+      case 'color': {
+        if (!isIntegerInRange(value, 0, 359)) {
+          return false;
+        }
+        target.hue = value;
+        target.colorOverride = true;
+        const identity = this.issued.get(target.uid);
+        if (identity) {
+          identity.hue = value;
+          identity.colorOverride = true;
+        }
+        notice = target.name + ' changed ball color';
+        break;
+      }
+      case 'grant-cohost':
+      case 'revoke-cohost':
+        if (ws.data.uid !== this.hostUid || target.uid === this.hostUid) {
+          return false;
+        }
+        target.coHost = message.action === 'grant-cohost';
+        notice = target.name + (target.coHost ? ' is now a co-host' : ' is no longer a co-host');
+        break;
+      case 'restart-player':
+        if (!live || !target.ws || !target.alive || target.role !== 'player') {
+          return false;
+        }
+        this.resetPlayerAttempt(target);
+        notice = target.name + ' restarted the hole';
+        break;
+      case 'forfeit-player':
+        if (!live || !target.alive || target.done || target.role !== 'player') {
+          return false;
+        }
+        target.role = 'spectator';
+        target.roundSpectator = true;
+        target.done = true;
+        target.success = false;
+        target.holeTimeMs = this.elapsedHoleMs();
+        this.positions.delete(target.id);
+        this.broadcast({ t: 'bye', id: target.id });
+        notice = target.name + ' forfeited the hole';
+        break;
+      case 'spectate-player':
+        if (this.phase === 'final' || target.hostSpectator) {
+          return false;
+        }
+        target.hostSpectator = true;
+        target.role = 'spectator';
+        target.alive = false;
+        target.done = true;
+        target.success = false;
+        target.ready = false;
+        target.joinAfterHole = undefined;
+        this.positions.delete(target.id);
+        this.broadcast({ t: 'bye', id: target.id });
+        notice = target.name + ' was moved to spectators';
+        break;
+      case 'return-player':
+      case 'revive-player':
+        if (
+          !(live || this.phase === 'lobby') ||
+          !target.ws ||
+          (target.role === 'player' && target.alive)
+        ) {
+          return false;
+        }
+        this.returnPlayer(target);
+        notice = target.name + ' returned to play';
+        break;
+      case 'reset-strokes':
+      case 'adjust-strokes': {
+        if (!live || !target.participated || !target.alive) {
+          return false;
+        }
+        const current = this.effectiveStrokes(target);
+        if (message.action === 'adjust-strokes' && !isIntegerInRange(value, -200, 200)) {
+          return false;
+        }
+        const desired = message.action === 'reset-strokes' ? 0 : current + Number(value);
+        target.strokeAdjustment =
+          Math.max(target.success ? 1 : 0, Math.min(200, desired)) - target.strokes;
+        notice = target.name + ' now has ' + this.effectiveStrokes(target) + ' strokes';
+        break;
+      }
+      case 'lock-putting':
+      case 'unlock-putting':
+        if (this.phase === 'final') {
+          return false;
+        }
+        target.puttingLocked = message.action === 'lock-putting';
+        notice = target.name + (target.puttingLocked ? ' cannot putt' : ' can putt again');
+        break;
+      case 'kick':
+      case 'ban': {
+        if (target.uid === this.hostUid) {
+          return false;
+        }
+        if (message.action === 'ban') {
+          if (this.bannedNames.size >= 200) {
+            return false;
+          }
+          this.bannedNames.add(normalizedName(target.name));
+        }
+        this.issued.delete(target.uid);
+        this.players.delete(target.uid);
+        this.positions.delete(target.id);
+        this.vote?.ballots.delete(target.uid);
+        if (target.ws) {
+          this.error(
+            target.ws,
+            'invalid-join',
+            message.action === 'ban'
+              ? 'You were banned from this party.'
+              : 'You were kicked from this party.',
+          );
+          target.ws.data.uid = null;
+          target.ws.close(1008, 'Removed by host');
+        }
+        this.broadcast({ t: 'bye', id: target.id });
+        this.broadcastVote();
+        notice = target.name + (message.action === 'ban' ? ' was banned' : ' was kicked');
+        break;
+      }
+      default:
+        return false;
+    }
+    const identity = this.issued.get(target.uid);
+    if (identity) {
+      identity.coHost = target.coHost;
+      identity.hostSpectator = target.hostSpectator;
+      identity.puttingLocked = target.puttingLocked;
+    }
+    if (['color', 'grant-cohost', 'revoke-cohost'].includes(String(message.action))) {
+      this.announce(notice);
+    } else {
+      this.changedGameplay(notice);
+    }
+    this.state();
+    if (this.phase === 'final') {
+      const standings = this.standings();
+      this.broadcast({ t: 'final', podium: standings.slice(0, 3), standings });
+    }
+    this.checkRoundDone();
+    return true;
+  }
+
+  private editablePlaylist() {
+    return ['playing', 'countdown'].includes(this.phase) && !this.starting && !this.loadingNext;
+  }
+
+  private replaceUpcoming(ids: string[], added?: { id: string; spec: CourseSpecification }) {
+    if (!this.editablePlaylist() || ids.length + this.holeIndex + 1 > 10000) {
+      return false;
+    }
+    const previous = new Map(this.holeIds.map((id, index) => [id, this.specs[index]]));
+    const prefix = this.holeIndex + 1;
+    this.holeIds = [...this.holeIds.slice(0, prefix), ...ids];
+    const specs = this.specs.slice(0, prefix);
+    for (const [index, id] of ids.entries()) {
+      const spec = added?.id === id ? added.spec : (previous.get(id) ?? this.catalog.get(id)?.spec);
+      if (spec) {
+        specs[prefix + index] = structuredClone(spec);
+      }
+    }
+    this.specs = specs;
+    this.voteCourses = [];
+    this.config = { ...this.config, holes: this.holeIds.length, courseVoting: false };
+    this.playlistRevision++;
+    this.changedGameplay('The host edited the remaining holes');
+    this.state();
+    return true;
+  }
+
+  private async addUpcomingCourse(player: Player, message: Record<string, unknown>) {
+    if (
+      !this.editablePlaylist() ||
+      this.playlistEditPending ||
+      message.revision !== this.playlistRevision ||
+      typeof message.value !== 'string' ||
+      !/^[a-zA-Z0-9_-]{1,128}$/.test(message.value) ||
+      !this.loadMap ||
+      this.holeIds.length >= 10000
+    ) {
+      return false;
+    }
+    const id = message.value;
+    const match = this.matchId;
+    const hole = this.holeIndex;
+    const revision = this.playlistRevision;
+    this.playlistEditPending = true;
+    try {
+      const loaded = await this.loadMap(id);
+      if (
+        this.closed ||
+        !player.ws ||
+        this.players.get(player.uid) !== player ||
+        (player.uid !== this.hostUid && !player.coHost) ||
+        this.matchId !== match ||
+        this.holeIndex !== hole ||
+        this.playlistRevision !== revision ||
+        !this.editablePlaylist()
+      ) {
+        return false;
+      }
+      return this.replaceUpcoming([...this.holeIds.slice(hole + 1), id], { id, spec: loaded.spec });
+    } finally {
+      this.playlistEditPending = false;
+    }
+  }
+
+  private scheduleRemainingTime() {
+    clearTimeout(this.timer);
+    if (this.phase === 'playing' && this.pausedAt === null && this.roundTimerMs) {
+      this.schedule(
+        () => this.endHole(),
+        Math.max(0, this.startsAt + this.roundTimerMs - Date.now()),
+      );
+    }
+  }
+
+  hostAction(ws: RoomSocket, message: Record<string, unknown>): boolean {
+    const action = message.action;
+    const live = this.phase === 'playing' || this.phase === 'countdown';
+    if (
+      [
+        'rename',
+        'color',
+        'restart-player',
+        'forfeit-player',
+        'spectate-player',
+        'return-player',
+        'revive-player',
+        'reset-strokes',
+        'adjust-strokes',
+        'lock-putting',
+        'unlock-putting',
+        'kick',
+        'ban',
+        'grant-cohost',
+        'revoke-cohost',
+      ].includes(String(action))
+    ) {
+      return this.managePlayer(ws, message);
+    }
+    if (this.starting && action !== 'transfer-host') {
+      return false;
+    }
+    switch (action) {
+      case 'pause':
+        if (this.phase !== 'playing' || this.pausedAt !== null) {
+          return false;
+        }
+        this.pausedAt = Date.now();
+        clearTimeout(this.timer);
+        this.changedGameplay('The host paused the match');
+        this.state();
+        return true;
+      case 'resume':
+        if (this.phase !== 'playing' || this.pausedAt === null) {
+          return false;
+        }
+        this.startsAt += Date.now() - this.pausedAt;
+        this.pausedAt = null;
+        this.announce('The host resumed the match');
+        this.state();
+        this.scheduleRemainingTime();
+        this.checkRoundDone();
+        return true;
+      case 'lock-party':
+      case 'unlock-party':
+        this.config = { ...this.config, locked: action === 'lock-party' };
+        this.announce(
+          this.config.locked ? 'The host locked the party' : 'The host unlocked the party',
+        );
+        this.state();
+        return true;
+      case 'skip-vote':
+        if (!this.vote || this.vote.resolved) {
+          return false;
+        }
+        this.resolveVote();
+        return true;
+      case 'remaining-time':
+        if (!live || !isIntegerInRange(message.value, 0, 86400)) {
+          return false;
+        }
+        this.config = { ...this.config, timerMs: message.value * 1000 };
+        this.changedGameplay('The host changed the time limit for future holes');
+        this.state();
+        return true;
+      case 'disable-elimination':
+        if (!live || !this.config.elimination) {
+          return false;
+        }
+        this.config = { ...this.config, elimination: false };
+        this.changedGameplay('The host disabled elimination');
+        this.state();
+        return true;
+      case 'admit-all': {
+        if (!live) {
+          return false;
+        }
+        const targets = [...this.players.values()].filter(
+          (player) => player.ws && player.role === 'spectator',
+        );
+        if (!targets.length) {
+          return false;
+        }
+        for (const player of targets) {
+          this.returnPlayer(player);
+        }
+        this.changedGameplay('The host admitted all spectators');
+        this.state();
+        return true;
+      }
+      case 'force-next':
+        if (this.phase !== 'playing') {
+          return false;
+        }
+        this.changedGameplay('The host ended the current hole');
+        this.endHole();
+        return true;
+      case 'restart-match':
+        if (!this.matchId || this.phase === 'final' || this.loadingNext || !this.specs[0]) {
+          return false;
+        }
+        this.nextLoadGeneration++;
+        this.voteCourses = [];
+        this.pausedAt = null;
+        this.startPrepared();
+        this.changedGameplay('The host restarted the match with the same courses');
+        this.broadcast(this.snapshot());
+        return true;
+      case 'playlist': {
+        const ids = message.ids;
+        const upcoming = new Set(this.holeIds.slice(this.holeIndex + 1));
+        if (
+          message.revision !== this.playlistRevision ||
+          !Array.isArray(ids) ||
+          ids.length > 10000 ||
+          !ids.every((id): id is string => typeof id === 'string' && upcoming.has(id))
+        ) {
+          return false;
+        }
+        return this.replaceUpcoming(ids);
+      }
+    }
+
     if (message.action === 'transfer-host') {
       // Deliberate hand-over: the named player must be connected right now.
       return this.transferHost(
@@ -1583,14 +2088,14 @@ export class Room {
             .filter((player) => player.participated && player.alive)
             .map((player) => ({
               uid: player.uid,
-              strokes: player.success ? player.strokes : null,
+              strokes: player.success ? this.effectiveStrokes(player) : null,
               status: player.success ? 'holed' : 'ended',
               timeMs: player.holeTimeMs ?? this.elapsedHoleMs(),
             })),
         );
         for (const player of this.players.values()) {
           if (player.participated && player.alive && player.success) {
-            player.totalStrokes += player.strokes;
+            player.totalStrokes += this.effectiveStrokes(player);
             player.totalTimeMs =
               (player.totalTimeMs ?? 0) + (player.holeTimeMs ?? this.elapsedHoleMs());
             player.holesSurvived++;
@@ -1601,6 +2106,7 @@ export class Room {
       return true;
     }
     if (message.action === 'skip' && ['countdown', 'playing'].includes(this.phase)) {
+      this.changedGameplay('The host skipped the hole');
       clearTimeout(this.timer);
       this.recordRound('skipped', []);
       // Administrative skip voids this hole for everybody: no strokes or eliminations.
@@ -1621,15 +2127,13 @@ export class Room {
         return true; // An unlimited round cannot be extended.
       }
       this.roundTimerMs = Math.min(86_400_000, this.roundTimerMs + message.seconds * 1000);
-      this.schedule(
-        () => this.endHole(),
-        Math.max(0, this.startsAt + this.roundTimerMs - Date.now()),
-      );
+      this.changedGameplay('The host extended the current hole');
+      this.scheduleRemainingTime();
       this.broadcast(this.snapshot());
       return true;
     }
     if (message.action === 'restart' && ['countdown', 'playing'].includes(this.phase)) {
-      this.recordEligible = false;
+      this.changedGameplay('The host restarted the hole');
       // New match identity forces the original route to reload even when the map ID is unchanged.
       this.matchId = randomUUID();
       this.begin();
@@ -1720,6 +2224,7 @@ export class Room {
     this.vote = null;
     this.voteCourses = [];
     this.phase = 'final';
+    this.pausedAt = null;
     this.onFinalize(this);
     this.state();
     const standings = this.standings();
@@ -1740,7 +2245,7 @@ export class Room {
       if (player.success) {
         return {
           uid: player.uid,
-          strokes: player.strokes,
+          strokes: this.effectiveStrokes(player),
           status: 'holed',
           timeMs: player.holeTimeMs ?? this.elapsedHoleMs(),
         };
@@ -1755,7 +2260,7 @@ export class Room {
       }
       return {
         uid: player.uid,
-        strokes: Math.max(player.strokes, this.specs[this.holeIndex].par + 5),
+        strokes: Math.max(this.effectiveStrokes(player), this.specs[this.holeIndex].par + 5),
         status: 'timeout',
         timeMs: this.roundTimerMs || player.holeTimeMs || this.elapsedHoleMs(),
       };
@@ -1765,14 +2270,17 @@ export class Room {
       player.done = true;
       player.holeTimeMs ??= this.elapsedHoleMs();
       if (player.success) {
-        player.totalStrokes += player.strokes;
+        player.totalStrokes += this.effectiveStrokes(player);
         player.totalTimeMs = (player.totalTimeMs ?? 0) + player.holeTimeMs;
         player.holesSurvived++;
       } else if (this.config.elimination) {
         player.alive = false;
         player.role = 'spectator';
       } else {
-        player.totalStrokes += Math.max(player.strokes, this.specs[this.holeIndex].par + 5);
+        player.totalStrokes += Math.max(
+          this.effectiveStrokes(player),
+          this.specs[this.holeIndex].par + 5,
+        );
         player.holeTimeMs = this.roundTimerMs || player.holeTimeMs;
         player.totalTimeMs = (player.totalTimeMs ?? 0) + player.holeTimeMs;
         player.holesSurvived++;
@@ -1787,6 +2295,7 @@ export class Room {
       }
     }
     this.phase = 'hole-results';
+    this.pausedAt = null;
     this.audit('round_results', { standings: this.standings(), scores });
     this.state();
     this.schedule(() => {
@@ -1810,6 +2319,18 @@ export class Room {
     this.nextLoadError = null;
     this.retryingNext = false;
     this.phase = 'lobby';
+    this.config = {
+      ...this.config,
+      holes:
+        this.config.mapSource === MAP_SOURCE.RANDOM
+          ? this.config.randomHoles
+          : this.config.selectedHoleIds.length,
+    };
+    for (const identity of this.issued.values()) {
+      identity.hostSpectator = false;
+      identity.puttingLocked = false;
+    }
+    this.pausedAt = null;
     this.vote = null;
     this.voteCourses = [];
     this.recoveryNotice = false;
@@ -1842,6 +2363,9 @@ export class Room {
         totalTimeMs: 0,
         holeTimeMs: undefined,
         roundSpectator: false,
+        hostSpectator: false,
+        puttingLocked: false,
+        strokeAdjustment: 0,
         joinAfterHole: undefined,
       });
     }
@@ -1869,6 +2393,7 @@ export class Room {
       hostUid: this.hostUid,
       hostTransfer: this.hostTransfer ? { ...this.hostTransfer } : null,
       issued: [...this.issued.values()],
+      ...(this.bannedNames.size ? { bannedNames: [...this.bannedNames] } : {}),
       config: structuredClone(this.config),
       titles,
       randomSeen: [...this.randomSeen],
@@ -1887,6 +2412,7 @@ export class Room {
         ? { fromUid: transfer.fromUid, toUid: transfer.toUid, at: Number(transfer.at) || 0 }
         : null;
     this.issued = new Map(data.issued.map((identity) => [identity.uid, identity]));
+    this.bannedNames = new Set(data.bannedNames ?? []);
     this.config = {
       ...defaults,
       ...data.config,

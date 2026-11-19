@@ -39,9 +39,13 @@ interface SnippetPartyState {
   matchId: string | null;
   mapReady: boolean;
   startAt?: number;
+  bpPausedAt?: number | null;
+  bpAttempt?: number;
+  bpResetPending?: boolean;
+  bpPuttingLocked?: boolean;
   currentMap: { id: string } | null;
   config: Record<string, unknown>;
-  roster: { id: string }[];
+  roster: { id: string; uid?: string; attempt?: number; colorOverride?: boolean; hue?: number }[];
   board: unknown;
   final: unknown;
   vote: unknown;
@@ -86,6 +90,7 @@ declare const transportScene: SnippetScene;
 declare const partyRuntimeStore: SnippetStore<SnippetPartyState>;
 declare const betterPartyStore: SnippetStore<SnippetPartyState>;
 declare function bpConnection(connected: boolean, errorMessage?: string | null): void;
+declare function bpHostNotice(message: string): void;
 declare function bpAck(message: { requestId: string; ok: boolean; msg?: string }): void;
 declare function bpReceiveVote(message: { vote: SnippetPartyState['vote']; now: number }): void;
 declare function registerTransportSender(
@@ -172,6 +177,7 @@ interface TransportBindings {
   readonly sceneReadyLevelId: () => string | null;
   readonly isSpectator: () => boolean;
   readonly ack: (message: { requestId: string; ok: boolean; msg?: string }) => void;
+  readonly notice: (message: string) => void;
   readonly updateVote: (message: { vote: SnippetPartyState['vote']; now: number }) => void;
 }
 

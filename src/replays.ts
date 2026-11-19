@@ -104,6 +104,18 @@ export class RoundReplayCapture {
     return track;
   }
 
+  resetPlayer(uid: string) {
+    const previous = this.tracks.get(uid);
+    if (!previous) {
+      return;
+    }
+    this.sampleCount -= previous.samples.length / SAMPLE_FIELDS;
+    previous.samples = [];
+    previous.states = [];
+    previous.native = undefined;
+    previous.truncated = false;
+  }
+
   append(player: Player, payload: unknown, elapsed: number, finished = false) {
     if (
       !isRecord(payload) ||

@@ -45,14 +45,15 @@ export interface PlayerIdentity {
 export interface RoundIdentity {
   matchId: string | null;
   holeIndex: number;
+  attempt?: number;
 }
 
 /**
  * A host command. The set is closed because the server rejects anything else as
  * `unknown`, so listing it here keeps the client and the server's switch in step.
  */
-export type HostAction =
-  'end' | 'skip' | 'time' | 'restart' | 'retry-next' | 'skip-next' | 'transfer-host';
+export type { HostAction } from './host-actions.js';
+import type { HostAction } from './host-actions.js';
 
 /* ------------------------------------------------------------------ client */
 
@@ -81,7 +82,7 @@ export interface SceneFrame extends Partial<RoundIdentity> {
 }
 
 /** A stroke count update. `st` is the original wire name for strokes. */
-export interface ProgressFrame {
+export interface ProgressFrame extends Partial<RoundIdentity> {
   t: 'prog';
   st: number;
 }
@@ -164,6 +165,9 @@ export interface HostActionFrame extends Partial<RoundIdentity> {
   requestId?: string;
   seconds?: number;
   uid?: string;
+  value?: string | number | boolean;
+  ids?: string[];
+  revision?: number;
 }
 
 export type ClientFrame =
@@ -277,6 +281,11 @@ export interface CourseVoteUpdateFrame {
   now: number;
 }
 
+export interface HostNoticeFrame {
+  t: 'host-notice';
+  message: string;
+}
+
 export type ServerFrame =
   | HelloFrame
   | PongFrame
@@ -291,7 +300,8 @@ export type ServerFrame =
   | HostGrantedFrame
   | HostRevokedFrame
   | HostAckFrame
-  | CourseVoteUpdateFrame;
+  | CourseVoteUpdateFrame
+  | HostNoticeFrame;
 
 /** Server error codes the client must treat as terminal. */
 export const TERMINAL_ERROR_CODES = ['invalid-join', 'full'] as const;
@@ -360,6 +370,7 @@ const SERVER_FRAME_TAGS: Record<ServerFrameTag, true> = {
   'host-granted': true,
   'host-revoked': true,
   'host-ack': true,
+  'host-notice': true,
   'course-vote': true,
 };
 

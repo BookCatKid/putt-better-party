@@ -139,6 +139,12 @@ function BpLobbyDashboard() {
         createElement('header', { className: 'bp-dashboard-header' }, [
           createElement('p', { className: 'mb-1 text-3xl' }, '🎉'),
           createElement('h2', { className: 'mb-3 text-xl font-black' }, 'Party lobby'),
+          party.bpHostNotice &&
+            createElement(
+              'p',
+              { role: 'status', className: 'text-xs text-white/80' },
+              party.bpHostNotice.message,
+            ),
           createElement('div', { className: 'bp-dashboard-invite' }, [
             createElement(
               'p',
