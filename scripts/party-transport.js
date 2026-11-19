@@ -279,6 +279,10 @@ function connectBetterParty(code, identity, options = {}) {
     const roundChanged =
       hadRound && (!sameRound || (message.phase === 'lobby' && previous.phase !== 'lobby'));
     if (roundChanged) {
+      for (const player of previous.roster ?? []) {
+        bind.removeGhost(player.id);
+      }
+      lastPosition = '';
       roundChangePending = true;
       // Remember which attempt was live when the round changed, so the fresh
       // attempt can be told apart from the stale one even when the course is
@@ -483,11 +487,15 @@ function connectBetterParty(code, identity, options = {}) {
   let lastPosition = '';
   let lastPositionAt = 0;
   function publishPosition() {
+    const party = bind.partyStore.state;
     if (
       !synchronized ||
       !socketOpen() ||
       bind.document.visibilityState === 'hidden' ||
       !bind.settingsStore.state.ghosts ||
+      !party.mapReady ||
+      roundChangePending ||
+      !['countdown', 'playing'].includes(party.phase) ||
       bind.isSpectator()
     ) {
       return;
@@ -507,7 +515,11 @@ function connectBetterParty(code, identity, options = {}) {
     if (cup) {
       position.d = Number(Math.hypot(ballPos.x - cup[0], ballPos.z - cup[2]).toFixed(2));
     }
-    const payload = JSON.stringify(position);
+    const payload = JSON.stringify({
+      ...position,
+      matchId: party.matchId,
+      holeIndex: party.holeIndex,
+    });
     const now = Date.now();
     if (payload !== lastPosition || now - lastPositionAt >= 2000) {
       lastPosition = payload;

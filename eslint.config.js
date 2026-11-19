@@ -312,6 +312,34 @@ export default [
     },
   },
   {
+    files: ['scripts/follow-camera.js', 'scripts/follow-controls.js'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        followUseFrame: 'readonly',
+        followUseThree: 'readonly',
+        followReact: 'readonly',
+        FollowVector: 'readonly',
+        followGhosts: 'readonly',
+        followScene: 'readonly',
+        followGameStore: 'readonly',
+        liveGhost: 'readonly',
+        bpWatchLive: 'readonly',
+        useBetterPartyState: 'readonly',
+        betterPartyStore: 'readonly',
+        BetterPartyReact: 'readonly',
+        canWatch: 'readonly',
+        watchCandidates: 'readonly',
+        watchChoice: 'readonly',
+        followTarget: 'readonly',
+        bpSelectWatchTarget: 'readonly',
+      },
+    },
+    rules: {
+      'no-unused-vars': ['error', { varsIgnorePattern: '^Bp[A-Z]', args: 'none' }],
+    },
+  },
+  {
     files: ['scripts/party-runtime.js'],
     languageOptions: {
       globals: { ...globals.browser, partyRuntimeStore: 'readonly', u: 'readonly' },

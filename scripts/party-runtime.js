@@ -126,3 +126,16 @@ export function bpReceiveVote(message) {
     };
   });
 }
+
+export function bpSelectWatchTarget(target) {
+  partyRuntimeStore.setState((state) => ({
+    ...state,
+    bpWatchChoice: { matchId: state.matchId, holeIndex: state.holeIndex, target },
+  }));
+}
+
+export function bpWatchLive(value) {
+  if (partyRuntimeStore.state.bpWatchLive !== value) {
+    partyRuntimeStore.setState((state) => ({ ...state, bpWatchLive: value }));
+  }
+}

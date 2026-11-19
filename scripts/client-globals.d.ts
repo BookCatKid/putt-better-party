@@ -41,7 +41,7 @@ interface SnippetPartyState {
   startAt?: number;
   currentMap: { id: string } | null;
   config: Record<string, unknown>;
-  roster: unknown[];
+  roster: { id: string }[];
   board: unknown;
   final: unknown;
   vote: unknown;

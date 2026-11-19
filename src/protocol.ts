@@ -145,7 +145,7 @@ export interface RematchFrame {
  * distinguishes it by the presence of the coordinate keys. It is listed here so
  * the discriminator-free shape is recorded rather than assumed away.
  */
-export interface PositionUpdateFrame {
+export interface PositionUpdateFrame extends Partial<RoundIdentity> {
   x: number;
   y: number;
   z: number;

@@ -1502,3 +1502,46 @@ body:has(> #app) {
     max-height: 240px;
   }
 }
+
+.bp-watch-name {
+  pointer-events: auto;
+  text-align: left;
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 3px 4px;
+}
+.bp-watch-name:hover,
+.bp-watch-name[aria-pressed='true'] {
+  color: #a7f3d0;
+  background: #34d39926;
+}
+.bp-follow-controls {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 85vw;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: #0009;
+}
+.bp-follow-status {
+  font-size: 13px;
+  font-weight: 600;
+  color: #a7f3d0;
+}
+.bp-follow-controls select {
+  background: #11272b;
+  color: white;
+  padding: 5px 9px;
+  border-radius: 8px;
+  font-size: 12px;
+  max-width: 180px;
+  cursor: pointer;
+}
+.bp-watch-hint {
+  font-size: 11px;
+  color: #ffffffaa;
+}

@@ -769,7 +769,7 @@ export class Room {
       return;
     }
     if (
-      (message.t === 'prog' || message.t === 'forfeit' || message.f === 1) &&
+      (message.t === 'prog' || message.t === 'forfeit' || message.f === 1 || 'x' in message) &&
       ('matchId' in message || 'holeIndex' in message) &&
       (message.matchId !== this.matchId || message.holeIndex !== this.holeIndex)
     ) {

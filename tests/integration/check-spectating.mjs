@@ -123,6 +123,48 @@ try {
     'PASS spectator sees waiting message without local rendered ball or putt hint',
     waiting,
   );
+  await state(
+    'document.querySelector(".bp-follow-status")?.textContent.includes("Following Host")',
+  );
+  // Instrument Three's original camera lookAt solely in the isolated browser.
+  await client.evalJS(
+    `(async()=>{const three=await import("/assets/three.module-DJ81ilGZ.js");const proto=Object.values(three).find(value=>typeof value==="function"&&value.prototype&&Object.hasOwn(value.prototype,"lookAt"))?.prototype;if(!proto)throw Error("Object3D.lookAt not found");const original=proto.lookAt;proto.lookAt=function(...args){if(this.isCamera){const target=args[0];window.bpTestCameraTarget=typeof target==="object"?[target.x,target.y,target.z]:args.slice(0,3)}return original.apply(this,args)}})()`,
+  );
+  const broadcastBall = (coordX, coordZ) =>
+    send({
+      x: coordX,
+      y: 0.26,
+      z: coordZ,
+      px: coordX,
+      pz: coordZ,
+      c: 0,
+      m: 0,
+      matchId: snapshot.matchId,
+      holeIndex: snapshot.holeIndex,
+    });
+  broadcastBall(1.5, 3.5);
+  await state(
+    's.bpWatchLive && Math.abs(window.bpTestCameraTarget?.[0]-1.5)<.15 && Math.abs(window.bpTestCameraTarget?.[2]-3.5)<.15',
+  );
+  broadcastBall(4, 6);
+  await state(
+    's.bpWatchLive && Math.abs(window.bpTestCameraTarget?.[0]-4)<.15 && Math.abs(window.bpTestCameraTarget?.[2]-6)<.15',
+  );
+  const selector = 'document.querySelector(\'select[aria-label="Spectator camera"]\')';
+  await client.evalJS(
+    `(()=>{const select=${selector};select.value="free";select.dispatchEvent(new Event("change",{bubbles:true}))})()`,
+  );
+  await state(
+    'document.querySelector(".bp-follow-status")?.textContent==="Free camera" && !s.bpWatchLive',
+  );
+  await client.evalJS('document.querySelector(\'button[aria-label="Follow Host"]\').click()');
+  broadcastBall(4, 6);
+  await state(
+    's.bpWatchLive && document.querySelector(".bp-watch-name[aria-pressed=true]")?.textContent==="Host"',
+  );
+  console.log(
+    'PASS original Three camera follows moving remote ball, then switches between free and selected camera',
+  );
   const bounds = await client.evalJS(
     '(()=>{const c=document.querySelector("canvas").getBoundingClientRect();return {x:c.x+c.width/2,y:c.y+c.height/2}})()',
   );
@@ -164,6 +206,7 @@ try {
   const playing = await read();
   assert.equal(playing.role, 'player');
   assert.equal(playing.notice, null);
+  assert.equal(await client.evalJS('!!document.querySelector(".bp-follow-controls")'), false);
   assert.equal(playing.fly, false);
   assert.equal(playing.strokes, 0);
   assert(

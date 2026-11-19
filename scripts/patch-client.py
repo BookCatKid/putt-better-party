@@ -174,7 +174,7 @@ const isTransportSpectator = _e;
     source = replace_once(
         source,
         "Se=ge||xe;return",
-        """bpSpectating=w(M,e=>e.active&&e.selfRole===`spectator`),bpHideLocalBall=w(M,e=>e.active&&(!e.bpInitialSnapshot||e.selfRole===`spectator`||!e.roster.some(p=>p.uid===e.self?.uid))),Se=ge||xe||bpSpectating;return""",
+        """bpSpectating=w(M,e=>e.active&&e.selfRole===`spectator`),bpHideLocalBall=w(M,e=>e.active&&(!e.bpInitialSnapshot||e.selfRole===`spectator`||!e.roster.some(p=>p.uid===e.self?.uid))),bpWatchPhase=w(B,e=>e.phase),bpFollowId=w(M,e=>followTarget(e,bpWatchPhase)?.id??null),bpObserver=w(M,e=>canWatch(e,bpWatchPhase)),Se=ge||xe||bpSpectating||bpObserver;return""",
     )
     source = replace_once(
         source,
@@ -186,10 +186,24 @@ const isTransportSpectator = _e;
         "(0,Y.jsx)(en,{}),(0,Y.jsx)(nn,{})",
         "(0,Y.jsx)(en,{}),!bpHideLocalBall&&(0,Y.jsx)(nn,{})",
     )
+    source = replace_once(
+        source,
+        "Se?(0,Y.jsx)(Fr,{}):(0,Y.jsx)(Pr,{overview:l.overview,overviewRoots:p})",
+        "bpFollowId?(0,Y.jsx)(BpFollowCamera,{targetId:bpFollowId},bpFollowId):Se?(0,Y.jsx)(Fr,{}):(0,Y.jsx)(Pr,{overview:l.overview,overviewRoots:p})",
+    )
+    source = replace_once(
+        source,
+        "let s=E.state.ghosts,c=bt(s,U.size,On)",
+        "let s=E.state.ghosts||!!followTarget(M.state,B.state.phase),c=bt(s,U.size,On)",
+    )
+    source += (
+        "\nconst followUseFrame=W,followUseThree=G,followReact=J,FollowVector=H,followGhosts=U,followScene=V;\n"
+        + (root / "scripts/follow-camera.js").read_text()
+    )
     return (
         "import{bpConnection,bpAck,bpScenePrepared,transportSceneReadyLevelId,"
-        'receiveTransportHostToken,clearTransportHostToken,bpReceiveVote}from"./runtime-DL2fiDAQ.js";'
-        + source
+        'receiveTransportHostToken,clearTransportHostToken,bpReceiveVote,bpWatchLive}from"./runtime-DL2fiDAQ.js";'
+        'import{followTarget,canWatch,liveGhost}from"./bp-spectator-follow.js";' + source
     )
 
 
@@ -202,12 +216,12 @@ def runtime_patch(s):
     s = replace_once(
         s,
         "active:!0,code:e,hostToken:n,self:t,selfRole:",
-        "active:!0,replayId:null,vote:null,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
+        "active:!0,replayId:null,vote:null,bpWatchChoice:null,bpWatchLive:false,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
     )
     s = replace_once(
         s,
         "active:!1,selfRole:",
-        "active:!1,replayId:null,vote:null,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,selfRole:",
+        "active:!1,replayId:null,vote:null,bpWatchChoice:null,bpWatchLive:false,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,selfRole:",
     )
     s = replace_once(
         s,
@@ -232,7 +246,10 @@ patch("runtime-DL2fiDAQ.js", runtime_patch)
 
 def game_patch(s):
     s = replace_once(s, "children:Pt(c)", "children:i?Pt(c):`∞`")
-    s = 'import{bpHostAction,bpPickerBusy,bpLeaveParty,bpCastVote}from"./runtime-DL2fiDAQ.js";' + s
+    s = (
+        'import{bpHostAction,bpPickerBusy,bpLeaveParty,bpCastVote,bpSelectWatchTarget}from"./runtime-DL2fiDAQ.js";'
+        + s
+    )
     a = s.index("function At(")
     b = s.index("function jt(", a)
     s = (
@@ -363,6 +380,38 @@ def game_patch(s):
         "(0,J.jsx)(BpSpectating,{}),w&&!D",
         "(0,J.jsx)(BpSpectating,{}),(0,J.jsx)(BpHoleClock,{}),w&&!D",
     )
+    # Observer-only controls use the original renderer's ghost positions and
+    # never mount alongside the ordinary active-player camera.
+    s = (
+        'import{canWatch,watchChoice,watchCandidates,followTarget}from"./bp-spectator-follow.js";'
+        + s
+    )
+    s = replace_once(
+        s,
+        "(0,J.jsxs)(`span`,{className:`flex-1 truncate text-xs font-medium ${e.alive?`text-white/90`:`text-white/35 line-through`}`,children:[e.name,t?` (you)`:``]})",
+        "(0,J.jsx)(BpWatchName,{row:e,isSelf:t})",
+    )
+    s = replace_once(
+        s,
+        "(0,J.jsx)(BpSpectating,{}),(0,J.jsx)(BpHoleClock,{})",
+        "(0,J.jsx)(BpSpectating,{}),(0,J.jsx)(BpFollowControls,{}),(0,J.jsx)(BpHoleClock,{})",
+    )
+    s = replace_once(
+        s,
+        "O=x||E||D,k=()=>",
+        "bpObserver=w&&T===`playing`&&(D||i===`holed`||i===`forfeit`),O=x||E||D||bpObserver,k=()=>",
+    )
+    s = replace_once(
+        s,
+        "w&&!D&&(i===`holed`||i===`forfeit`))&&(0,J.jsx)(`button`",
+        "w&&!bpObserver&&!D&&(i===`holed`||i===`forfeit`))&&(0,J.jsx)(`button`",
+    )
+    s = replace_once(
+        s,
+        "O&&(0,J.jsx)(`p`,{className:`rounded-full bg-black/50 px-4 py-1.5 text-xs font-medium`,children:`Free cam:",
+        "O&&!bpObserver&&(0,J.jsx)(`p`,{className:`rounded-full bg-black/50 px-4 py-1.5 text-xs font-medium`,children:`Free cam:",
+    )
+    s += "\nconst followGameStore=z;\n" + (root / "scripts/follow-controls.js").read_text()
     # Host menu is a sibling of the settings wrapper, not inside it.
     a = s.index("function It(")
     s = s[:a] + (root / "scripts/match-details.js").read_text() + s[a:]
@@ -448,6 +497,9 @@ build_inputs = [root / "scripts" / "patch-client.py"] + sorted(
         "party-replay-scene.js",
         "replay-timeline.js",
         "replay-page.js",
+        "spectator-follow.js",
+        "follow-camera.js",
+        "follow-controls.js",
     )
 )
 build_hash = hashlib.sha256()
