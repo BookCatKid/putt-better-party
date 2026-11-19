@@ -523,15 +523,20 @@ function CommunityCoursePicker({ config, holeSettings }) {
     setBusy(true);
     setError('');
     bpPickerBusy(true);
+    // Capture the room the request is for. The fetch below is awaited, and the
+    // host may navigate to another party in the meantime; without this the
+    // imported course would be appended to whichever room is current when the
+    // response arrives, mixing one party's playlist into another's.
+    const code = betterPartyStore.state.code;
     try {
       const response = await fetch('/api/import', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          code: betterPartyStore.state.code,
+          code,
           uid: betterPartyStore.state.self.uid,
           session: betterPartyStore.state.self.session,
-          host: sessionStorage.getItem('bp.host.' + betterPartyStore.state.code),
+          host: sessionStorage.getItem('bp.host.' + code),
           id: course.id,
         }),
       });
@@ -541,11 +546,13 @@ function CommunityCoursePicker({ config, holeSettings }) {
       }
       setNames((previousNames) => ({ ...previousNames, [course.id]: course.title }));
       if (
-        betterPartyStore.state.phase === 'lobby' &&
-        betterPartyStore.state.config.mapSource === 'picked'
+        betterPartyStore.state.code !== code ||
+        betterPartyStore.state.phase !== 'lobby' ||
+        betterPartyStore.state.config.mapSource !== 'picked'
       ) {
-        update([...(betterPartyStore.state.config.selectedHoleIds ?? []), course.id]);
+        return;
       }
+      update([...(betterPartyStore.state.config.selectedHoleIds ?? []), course.id]);
     } catch (err) {
       setError(err.message);
     } finally {
