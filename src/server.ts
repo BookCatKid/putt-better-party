@@ -370,17 +370,19 @@ async function handleRequest(
         return response({ error: errorMessage(error) }, 400);
       }
       const items = [];
+      const configurationRevision = room.configRevision;
       for (const id of new Set<string>(playlistIds)) {
         items.push(await fetchPublicMap(id, { saved: true }));
       }
       if (!allowed()) {
         return response({ error: 'The lobby changed while loading the playlist' }, 409);
       }
-      room.configure(player.ws, {
-        mapSource: MAP_SOURCE.PICKED,
-        selectedHoleIds: playlistIds,
-        holes: playlistIds.length,
-      });
+      // The playlist was computed across an await, so between `allowed()` above
+      // and here the host may have edited the configuration. Applying the result
+      // regardless would silently discard that edit while reporting success.
+      if (!room.applyPlaylist(player.ws, playlistIds, configurationRevision)) {
+        return response({ error: 'Settings changed while the playlist was loading' }, 409);
+      }
       logEvent('playlist_imported', {
         room: room.code,
         uid: player.uid,

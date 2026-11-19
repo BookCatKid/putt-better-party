@@ -190,6 +190,22 @@ export class Room {
   initialPlayers = 0;
   private readonly admittedParticipants = new Set<string>();
   config: RoomConfig = { ...defaults, selectedHoleIds: [] };
+  /**
+   * Increments on every accepted configuration change.
+   *
+   * Settings edits are partial merges, so the *server* never sees an out-of-order
+   * write: frames arrive on one socket in order. Derived updates are different.
+   * A playlist import or a generator run reads the configuration, awaits network
+   * work, and then writes a whole playlist back. If a newer edit lands during
+   * that wait, applying the older result would silently discard it — the classic
+   * lost update. Callers capture this counter before awaiting and hand it back,
+   * and `applyPlaylist` refuses if anything changed in between.
+   *
+   * Deliberately not persisted in the checkpoint. It only orders work within one
+   * process lifetime, and a restore means the process that owned any in-flight
+   * work is gone, so a fresh counter is correct rather than lossy.
+   */
+  configRevision = 0;
   holeIds: string[] = [];
   specs: CourseSpecification[] = [];
   holeIndex = 0;
@@ -1017,9 +1033,39 @@ export class Room {
       next.holes = Math.max(1, next.selectedHoleIds.length);
     }
     this.config = next;
+    this.configRevision += 1;
     this.audit('configuration_changed', { uid: ws.data.uid, config: next });
     this.changed();
     this.broadcast(this.snapshot());
+  }
+  /**
+   * Apply a playlist computed from network work, but only if nothing changed
+   * while it was in flight.
+   *
+   * A playlist import or generator run reads the configuration, awaits upstream
+   * fetches, then writes the whole playlist back. If the host edited anything
+   * during that wait, writing the older result would discard their edit with no
+   * error shown — the request would report success and the newer state would
+   * simply disappear. `revision` is the counter captured before the await.
+   *
+   * Returns false when the write was refused. The caller turns that into an
+   * explicit conflict, because a silent no-op is the failure this guards against.
+   */
+  applyPlaylist(ws: RoomSocket, selectedHoleIds: string[], revision: number) {
+    if (revision !== this.configRevision) {
+      this.error(
+        ws,
+        'config-changed',
+        'Settings changed while the playlist was loading. Try again to keep both.',
+      );
+      return false;
+    }
+    const before = this.configRevision;
+    this.configure(ws, { mapSource: MAP_SOURCE.PICKED, selectedHoleIds });
+    // `configure` rejects an unknown course without changing anything, so a
+    // revision that did not move means the playlist was refused and the host has
+    // already been told why.
+    return this.configRevision !== before;
   }
   start(ws: RoomSocket) {
     if (this.config.mapSource === MAP_SOURCE.PICKED && !this.config.selectedHoleIds.length) {

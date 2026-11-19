@@ -2002,3 +2002,49 @@ test('a plausible but unearned score is accepted, and that is documented', async
   expect(host.player.done).toBe(true);
   room.dispose();
 });
+
+test('a playlist computed before a newer edit cannot overwrite it', () => {
+  const room = new Room('ABCDE', maps);
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, { t: 'config', config: { mapSource: 'picked', selectedHoleIds: ['p'] } });
+  const revision = room.configRevision;
+
+  // The host keeps editing while an import or generator run is still fetching.
+  // The newer edit deliberately differs from the in-flight result, so applying
+  // the stale playlist would be visible in the state rather than coincidentally
+  // identical.
+  room.handle(host.ws, {
+    t: 'config',
+    config: { mapSource: 'picked', selectedHoleIds: ['q'], timerMs: 60000 },
+  });
+
+  // The stale result must be refused rather than applied.
+  expect(room.applyPlaylist(host.ws, ['p', 'q'], revision)).toBe(false);
+  expect(room.config.selectedHoleIds).toEqual(['q']);
+  expect(room.config.timerMs).toBe(60000);
+  // Silent no-ops are the failure being guarded against, so the host is told.
+  expect(host.ws.frames.at(-1)).toMatchObject({ t: 'error', code: 'config-changed' });
+  room.dispose();
+});
+
+test('a playlist computed against the current configuration is applied', () => {
+  const room = new Room('ABCDE', maps);
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, { t: 'config', config: { mapSource: 'picked', selectedHoleIds: ['p'] } });
+
+  expect(room.applyPlaylist(host.ws, ['p', 'q'], room.configRevision)).toBe(true);
+  expect(room.config.selectedHoleIds).toEqual(['p', 'q']);
+  expect(room.config.holes).toBe(2);
+  room.dispose();
+});
+
+test('a playlist naming an unknown course is refused and changes nothing', () => {
+  const room = new Room('ABCDE', maps);
+  const host = enter(room, 'Host', true);
+  room.handle(host.ws, { t: 'config', config: { mapSource: 'picked', selectedHoleIds: ['p'] } });
+
+  expect(room.applyPlaylist(host.ws, ['missing'], room.configRevision)).toBe(false);
+  expect(room.config.selectedHoleIds).toEqual(['p']);
+  expect(host.ws.frames.at(-1)).toMatchObject({ t: 'error', code: 'invalid-config' });
+  room.dispose();
+});
