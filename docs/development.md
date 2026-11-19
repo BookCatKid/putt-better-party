@@ -38,6 +38,25 @@ The next-course failure regression (`check-next-failure.mjs`) starts its own ser
 
 Recovery tests start an isolated process with a temporary database. A browser debugging disconnection is a test failure, not a successful result.
 
+### Visual baselines
+
+`tests/integration/visual-regression.mjs` captures the approved screens (home, name entry, lobby and the playlist dialog at desktop and mobile widths) into `tests/visual-baseline/`:
+
+```sh
+BROWSER_SCRIPT=tests/integration/visual-regression.mjs \
+  VISUAL_DIR=tests/visual-baseline bun run test:browser
+```
+
+Baselines are machine-local and gitignored: font rasterisation and WebGL output differ between platforms, so captures are only comparable on the machine that made them. After an intentional UI change, capture into a fresh directory and pixel-diff with `tests/visual-diff.mjs` — a self-contained PNG codec, no dependencies:
+
+```sh
+BROWSER_SCRIPT=tests/integration/visual-regression.mjs \
+  VISUAL_DIR=/tmp/visual-fresh bun run test:browser
+bun tests/visual-diff.mjs tests/visual-baseline /tmp/visual-fresh
+```
+
+Screens that change print their differing-pixel share and write a `*-diff.png` heatmap into the fresh directory so the change is reviewable rather than guessed at. Two determinism rules keep the diff honest: the live WebGL canvas is hidden for party-surface captures (the lobby overlay is translucent over the running scene), and run-varying data — invite code, ball swatches, course titles, authors, ratings, thumbnails — is redacted to fixed strings. Transient and live-data surfaces (loading, leaderboard, vote, in-play HUD) are covered by the behavioural suites instead; a screenshot is never functional proof on its own.
+
 ### Known limits of the browser suite
 
 These are measured limits of the test harness and the pinned client, not open

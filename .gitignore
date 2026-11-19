@@ -23,3 +23,4 @@ dist/
 *.har
 
 .ruff_cache/
+tests/visual-baseline/
