@@ -69,26 +69,31 @@ test('a tag that agrees with the manifest is accepted', () => {
   expect(result.out).toContain(`tag v${manifestVersion}`);
 });
 
-test('the archive of HEAD is source only and reproducible', () => {
-  const directory = temporaryDirectory();
-  try {
-    const first = join(directory, 'first.tar.gz');
-    const second = join(directory, 'second.tar.gz');
-    expect(run(['archive', '--output', first]).code).toBe(0);
-    expect(run(['archive', '--output', second]).code).toBe(0);
-    // Reproducible releases are the point of building from a commit rather than a
-    // working tree: the same commit must produce the same bytes.
-    expect(readFileSync(first).equals(readFileSync(second))).toBe(true);
+test(
+  'the archive of HEAD is source only and reproducible',
+  () => {
+    const directory = temporaryDirectory();
+    try {
+      const first = join(directory, 'first.tar.gz');
+      const second = join(directory, 'second.tar.gz');
+      expect(run(['archive', '--output', first]).code).toBe(0);
+      expect(run(['archive', '--output', second]).code).toBe(0);
+      // Reproducible releases are the point of building from a commit rather than a
+      // working tree: the same commit must produce the same bytes.
+      expect(readFileSync(first).equals(readFileSync(second))).toBe(true);
 
-    const listing = spawnSync('tar', ['-tzf', first], { encoding: 'utf8' });
-    const members = listing.stdout.split('\n').filter(Boolean);
-    expect(members.some((name) => name.startsWith('private-client/'))).toBe(false);
-    expect(members.some((name) => name.startsWith('src/'))).toBe(true);
-    expect(members).toContain('package.json');
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
+      const listing = spawnSync('tar', ['-tzf', first], { encoding: 'utf8' });
+      const members = listing.stdout.split('\n').filter(Boolean);
+      expect(members.some((name) => name.startsWith('private-client/'))).toBe(false);
+      expect(members.some((name) => name.startsWith('src/'))).toBe(true);
+      expect(members).toContain('package.json');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+  // Two real tar invocations over the full tree; generous budget for loaded CI.
+  30_000,
+);
 
 test('an archive carrying the archived client is refused', () => {
   const directory = temporaryDirectory();
