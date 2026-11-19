@@ -158,6 +158,83 @@ function parseCourseUrl(input) {
   return match[1];
 }
 
+/**
+ * Saved playlists, read defensively.
+ *
+ * The store is a single JSON array under one key, so a corrupt value loses
+ * everything at once. The rule here is that nothing is destroyed to recover: an
+ * entry that cannot be understood is left in place and reported, so a later fix can
+ * still find it, and an older entry with no `id` is given one rather than discarded.
+ */
+function normalizePlaylist(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return null;
+  }
+  if (typeof entry.name !== 'string' || !entry.name.trim()) {
+    return null;
+  }
+  if (!Array.isArray(entry.ids) || entry.ids.length === 0) {
+    return null;
+  }
+  if (!entry.ids.every((id) => typeof id === 'string' && PLAYLIST_COURSE_ID.test(id))) {
+    return null;
+  }
+  return {
+    // Migration: an entry written before ids existed still belongs to its owner.
+    id: typeof entry.id === 'string' && entry.id ? entry.id : crypto.randomUUID(),
+    name: entry.name.trim().slice(0, 60),
+    ids: entry.ids.slice(),
+  };
+}
+
+function readSavedPlaylists() {
+  let raw;
+  try {
+    raw = localStorage.getItem('bp.playlists.v1');
+  } catch {
+    return {
+      playlists: [],
+      problem: 'This browser is blocking site storage, so saved playlists are unavailable.',
+    };
+  }
+  if (!raw) {
+    return { playlists: [], problem: '' };
+  }
+  let stored;
+  try {
+    stored = JSON.parse(raw);
+  } catch {
+    return {
+      playlists: [],
+      problem: 'Saved playlists could not be read. The stored data was left untouched.',
+    };
+  }
+  if (!Array.isArray(stored)) {
+    return {
+      playlists: [],
+      problem: 'Saved playlists could not be read. The stored data was left untouched.',
+    };
+  }
+  const playlists = [];
+  let dropped = 0;
+  for (const entry of stored) {
+    const normalized = normalizePlaylist(entry);
+    if (normalized) {
+      playlists.push(normalized);
+    } else {
+      dropped += 1;
+    }
+  }
+  return {
+    playlists: playlists.slice(0, 30),
+    problem: dropped
+      ? dropped +
+        (dropped === 1 ? ' saved playlist could not' : ' saved playlists could not') +
+        ' be read and were left in place.'
+      : '',
+  };
+}
+
 function CommunityCoursePicker({ config, holeSettings }) {
   const [pickerOpen, setPickerOpen] = BetterPartyReact.useState(false);
   const dialog = BetterPartyReact.useRef(null);
@@ -188,35 +265,34 @@ function CommunityCoursePicker({ config, holeSettings }) {
       mounted.current = false;
     };
   }, []);
-  const [saved, setSaved] = BetterPartyReact.useState(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem('bp.playlists.v1') || '[]');
-      return Array.isArray(stored)
-        ? stored
-            .filter(
-              (playlist) =>
-                typeof playlist.name === 'string' &&
-                Array.isArray(playlist.ids) &&
-                playlist.ids.length > 0 &&
-                playlist.ids.every((id) => typeof id === 'string'),
-            )
-            .slice(0, 30)
-        : [];
-    } catch {
-      return [];
-    }
-  });
+  const [savedLoad, setSavedLoad] = BetterPartyReact.useState(() => readSavedPlaylists());
+  const saved = savedLoad.playlists;
   const [savedId, setSavedId] = BetterPartyReact.useState('');
+  const [confirming, setConfirming] = BetterPartyReact.useState('');
   const [saveName, setSaveName] = BetterPartyReact.useState('');
   const [transfer, setTransfer] = BetterPartyReact.useState('');
   const [courseUrl, setCourseUrl] = BetterPartyReact.useState('');
   const [drag, setDrag] = BetterPartyReact.useState(null);
+  /**
+   * Write the whole list, reporting rather than swallowing a failure.
+   *
+   * A failed write must leave the previous list intact, so state only advances once
+   * `setItem` has actually succeeded. Quota is called out by name because "could not
+   * save" is unhelpful when the fix is to delete something.
+   */
   function store(next) {
     try {
       localStorage.setItem('bp.playlists.v1', JSON.stringify(next));
-      setSaved(next);
+      setSavedLoad({ playlists: next, problem: '' });
+      return true;
     } catch (err) {
-      setError('Could not save playlist: ' + err.message);
+      const quota = err && (err.name === 'QuotaExceededError' || err.code === 22);
+      setError(
+        quota
+          ? 'This browser has no room left for another playlist. Delete one and try again.'
+          : 'Could not save playlist: ' + err.message,
+      );
+      return false;
     }
   }
   function save() {
@@ -224,15 +300,77 @@ function CommunityCoursePicker({ config, holeSettings }) {
     if (!name || !picked.length) {
       return;
     }
+    // Overwriting is explicit: an existing name asks first instead of quietly
+    // replacing a playlist the player may not have meant to touch.
+    if (saved.some((playlist) => playlist.name === name)) {
+      setConfirming('overwrite');
+      return;
+    }
+    commitSave(name);
+  }
+  function commitSave(name) {
     const id = crypto.randomUUID();
-    store(
+    const written = store(
       [{ id, name, ids: [...picked] }, ...saved.filter((playlist) => playlist.name !== name)].slice(
         0,
         30,
       ),
     );
-    setSavedId(id);
-    setSaveName('');
+    if (written) {
+      setSavedId(id);
+      setSaveName('');
+      setConfirming('');
+    }
+  }
+  function renameSaved() {
+    const name = saveName.trim().slice(0, 60);
+    if (!savedId || !name) {
+      return;
+    }
+    if (saved.some((playlist) => playlist.id !== savedId && playlist.name === name)) {
+      setError('Another saved playlist already has that name.');
+      return;
+    }
+    const written = store(
+      saved.map((playlist) => (playlist.id === savedId ? { ...playlist, name } : playlist)),
+    );
+    if (written) {
+      setSaveName('');
+    }
+  }
+  function duplicateSaved() {
+    const source = saved.find((playlist) => playlist.id === savedId);
+    if (!source) {
+      return;
+    }
+    const base = (saveName.trim() || source.name + ' copy').slice(0, 60);
+    let name = base;
+    let suffix = 2;
+    while (saved.some((playlist) => playlist.name === name)) {
+      name = (base + ' ' + suffix).slice(0, 60);
+      suffix += 1;
+    }
+    const id = crypto.randomUUID();
+    const written = store([{ id, name, ids: [...source.ids] }, ...saved].slice(0, 30));
+    if (written) {
+      setSavedId(id);
+      setSaveName('');
+    }
+  }
+  function deleteSaved() {
+    if (!savedId) {
+      return;
+    }
+    // Deleting is irreversible, so it takes a second, deliberate click.
+    if (confirming !== 'delete') {
+      setConfirming('delete');
+      return;
+    }
+    const written = store(saved.filter((playlist) => playlist.id !== savedId));
+    if (written) {
+      setSavedId('');
+      setConfirming('');
+    }
   }
   /**
    * Put the current selection into the transfer box as a shareable document.
@@ -1310,29 +1448,70 @@ function CommunityCoursePicker({ config, holeSettings }) {
                     },
                     [
                       createElement('option', { value: '' }, 'Saved playlists…'),
-                      ...saved.map((playlist) =>
-                        createElement(
-                          'option',
-                          { key: playlist.id, value: playlist.id },
-                          playlist.name + ' (' + playlist.ids.length + ')',
+                      // Sorted by name: with more than a handful, insertion order is
+                      // no help at all in finding one.
+                      ...[...saved]
+                        .sort((left, right) => left.name.localeCompare(right.name))
+                        .map((playlist) =>
+                          createElement(
+                            'option',
+                            { key: playlist.id, value: playlist.id },
+                            playlist.name + ' (' + playlist.ids.length + ')',
+                          ),
                         ),
-                      ),
                     ],
                   ),
                   actionButton('Load', loadSaved, !savedId || busy || preparing, pill, {
                     'aria-label': 'Load saved playlist',
                   }),
                   actionButton(
-                    'Delete',
-                    () => {
-                      store(saved.filter((playlist) => playlist.id !== savedId));
-                      setSavedId('');
-                    },
-                    !savedId || busy || preparing,
+                    'Rename',
+                    renameSaved,
+                    !savedId || !saveName.trim() || busy || preparing,
                     pill,
-                    { 'aria-label': 'Delete saved playlist' },
+                    {
+                      'aria-label': 'Rename saved playlist',
+                    },
                   ),
+                  actionButton('Duplicate', duplicateSaved, !savedId || busy || preparing, pill, {
+                    'aria-label': 'Duplicate saved playlist',
+                  }),
+                  actionButton('Delete', deleteSaved, !savedId || busy || preparing, pill, {
+                    'aria-label': 'Delete saved playlist',
+                  }),
                 ]),
+                savedLoad.problem &&
+                  createElement(
+                    'p',
+                    { role: 'status', className: 'mt-2 text-xs text-amber-300' },
+                    savedLoad.problem,
+                  ),
+                confirming &&
+                  createElement('div', { className: 'bp-playlist-confirm mt-2', role: 'alert' }, [
+                    createElement(
+                      'p',
+                      { key: 'message' },
+                      confirming === 'delete'
+                        ? 'Delete this saved playlist? This cannot be undone.'
+                        : 'A playlist with that name already exists. Replace it?',
+                    ),
+                    actionButton(
+                      confirming === 'delete' ? 'Confirm delete' : 'Replace',
+                      () => {
+                        if (confirming === 'delete') {
+                          deleteSaved();
+                        } else {
+                          commitSave(saveName.trim().slice(0, 60));
+                        }
+                      },
+                      busy || preparing,
+                      pill,
+                      { 'aria-label': 'Confirm playlist change' },
+                    ),
+                    actionButton('Cancel', () => setConfirming(''), busy || preparing, pill, {
+                      'aria-label': 'Cancel playlist change',
+                    }),
+                  ]),
                 createElement('div', { className: 'bp-course-url mt-3' }, [
                   createElement('input', {
                     key: 'course-url',
