@@ -69,6 +69,17 @@ Without it the admin API answers `503` and stays closed.
 Nothing under `state/` or `web/` belongs in version control, and neither do logs.
 Back up the database as described below rather than copying a live file.
 
+### Match history
+
+A room checkpoint also carries the last **ten completed matches** for that party: the
+public course ids, titles and pars, and each player's display name, rank, holes
+survived, strokes and time. It survives a rematch and a server restart. It is
+deliberately **not** a recording: no course specification, geometry, socket, session or
+capability token is stored in it, so a history entry cannot be used to replay a course
+or to rejoin as somebody. The current match's per-hole rounds are separate and are
+cleared by a rematch; the history is not. Older checkpoints without a history load
+with an empty one.
+
 ## Starting, stopping and restarting
 
 `bun run start` runs in the foreground, which is the right default for local use

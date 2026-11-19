@@ -1,4 +1,49 @@
 // Lobby-only overlay, rendered above the original procedural preview scene.
+/**
+ * Completed matches, newest first.
+ *
+ * A compact summary rather than a replay: the time, how many holes, and the top
+ * three scores. The server keeps at most ten and never stores a course spec, so this
+ * is a history of results, not a way to replay a course.
+ */
+function BpMatchHistory({ history }) {
+  const createElement = BetterPartyReact.createElement;
+  if (!history.length) {
+    return createElement(
+      'p',
+      { className: 'bp-match-history-empty text-xs text-white/45' },
+      'No completed matches yet.',
+    );
+  }
+  return createElement(
+    'ul',
+    { className: 'bp-match-history' },
+    history.slice(0, 5).map((match) =>
+      createElement('li', { key: match.matchId }, [
+        createElement(
+          'span',
+          { key: 'meta', className: 'bp-match-history-meta' },
+          new Date(match.endedAt).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          }) +
+            ' · ' +
+            match.holes +
+            (match.holes === 1 ? ' hole' : ' holes'),
+        ),
+        createElement(
+          'span',
+          { key: 'score', className: 'bp-match-history-score' },
+          match.standings
+            .slice(0, 3)
+            .map((row) => row.name + ' ' + row.totalStrokes)
+            .join(' · '),
+        ),
+      ]),
+    ),
+  );
+}
+
 function BpLobbyDashboard() {
   const party = useBetterPartyState(betterPartyStore, (state) => state);
   const [copied, setCopied] = BetterPartyReact.useState(false);
@@ -22,6 +67,7 @@ function BpLobbyDashboard() {
   const disabled = busy || !party.bpConnected;
   const empty = config.mapSource === 'picked' && !config.selectedHoleIds?.length;
   const privateLobby = config.locked;
+  const history = Array.isArray(party.matchHistory) ? party.matchHistory : [];
   const invitation = location.origin + '/party/' + party.code;
 
   async function copyInvite() {
@@ -255,6 +301,14 @@ function BpLobbyDashboard() {
             ),
             panel('Match rules', matchRules, null, 'bp-dashboard-rules'),
             panel('Party settings', partySettings, null, 'bp-dashboard-settings'),
+            history.length
+              ? panel(
+                  'Recent matches',
+                  createElement(BpMatchHistory, { history }),
+                  null,
+                  'bp-dashboard-history',
+                )
+              : null,
           ]),
         ]),
         createElement('footer', { className: 'bp-dashboard-footer' }, [

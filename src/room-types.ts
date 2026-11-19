@@ -101,6 +101,34 @@ export interface RoundRecord {
   status: RoundStatus;
   rows: RoundScore[];
 }
+/**
+ * One completed match, kept for the party's history.
+ *
+ * Deliberately a summary and not a record: no course specification, no socket, no
+ * session and no cosmetic choice. `courses` carries the public id, title and par -
+ * metadata a results list needs - and `holes` is the true hole count even when the
+ * course list is truncated. `standings` keeps the display name and the scores, so a
+ * history entry can never be used to reconstruct a credential.
+ */
+export interface MatchHistoryCourse {
+  id: string;
+  title: string;
+  par: number | null;
+}
+export interface MatchHistoryRow {
+  name: string;
+  rank: number;
+  holesSurvived: number;
+  totalStrokes: number;
+  totalTimeMs: number;
+}
+export interface MatchSummary {
+  matchId: string;
+  endedAt: number;
+  holes: number;
+  courses: MatchHistoryCourse[];
+  standings: MatchHistoryRow[];
+}
 export interface RoomOptions {
   countdown?: number;
   results?: number;
@@ -123,6 +151,8 @@ export interface RoomCheckpoint {
   config: RoomConfig;
   titles: Record<string, string>;
   randomSeen: string[];
+  /** Completed matches, newest first. Absent in rows written before it existed. */
+  matchHistory?: MatchSummary[];
   phase: RoomPhase;
   starting: boolean;
   lastActivity: number;
@@ -226,6 +256,8 @@ export interface PartySnapshot {
   } | null;
   playlistTitles: Record<string, string>;
   roundHistory: RoundRecord[];
+  /** Completed matches in this party, newest first. */
+  matchHistory: MatchSummary[];
   initialPlayers: number;
   phase: RoomPhase;
   holeIndex: number;

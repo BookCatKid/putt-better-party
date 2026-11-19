@@ -1,7 +1,7 @@
 import { parseBallAppearance } from './ball-cosmetics.js';
 import { MAP_SOURCE, isRecord, type MapSource, type RoomConfig, type RoomPhase } from './domain.js';
 import { LATE_JOIN, type LateJoinPolicy } from './domain.js';
-import type { Identity, RoomCheckpoint } from './room-types.js';
+import type { Identity, MatchSummary, RoomCheckpoint } from './room-types.js';
 
 /**
  * Structural validation for a persisted room checkpoint.
@@ -57,6 +57,15 @@ const MAX_TITLE_LENGTH = 200;
 const MAX_TITLES = MAX_HOLE_COUNT;
 /** `Room.restore` keeps at most this many random-history entries. */
 const MAX_RANDOM_SEEN = 10_000;
+/** Completed matches kept per room, and the per-entry caps the room itself applies. */
+const MAX_MATCH_HISTORY = 10;
+const MAX_HISTORY_COURSES = 100;
+const MAX_HISTORY_ROWS = MAX_PLAYERS;
+const MAX_MATCH_ID_LENGTH = 100;
+const MAX_PAR = 1000;
+const MAX_TOTAL_STROKES = 2_000_000;
+/** An epoch timestamp or a match duration; both are milliseconds. */
+const MAX_TIMESTAMP = 10_000_000_000_000;
 const MAX_ROOM_CODE_LENGTH = 64;
 /** Well above the largest valid checkpoint (about 1 MB of capped history). */
 const MAX_PAYLOAD_LENGTH = 2_000_000;
@@ -192,6 +201,7 @@ function readCheckpoint(value: unknown): RoomCheckpoint {
     config: readConfig(value.config),
     titles: readTitles(value.titles),
     randomSeen: readRandomSeen(value.randomSeen),
+    matchHistory: readMatchHistory(value.matchHistory),
     phase: readPhase(value.phase),
     starting: readBoolean(value, 'starting'),
     lastActivity: readLastActivity(value),
@@ -493,4 +503,96 @@ function readRandomSeen(value: unknown): string[] {
     history.push(entry);
   }
   return history;
+}
+
+/**
+ * Completed-match history. Optional on read: a row written before it existed has
+ * none, which is a real empty history rather than corruption.
+ */
+function readMatchHistory(value: unknown): MatchSummary[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    reject('corrupt', `matchHistory must be an array, not ${describeValue(value)}`);
+  }
+  if (value.length > MAX_MATCH_HISTORY) {
+    reject(
+      'corrupt',
+      `matchHistory holds ${value.length} matches, more than the supported ${MAX_MATCH_HISTORY}`,
+    );
+  }
+  return value.map((entry) => readMatchSummary(entry));
+}
+
+function readMatchSummary(value: unknown): MatchSummary {
+  if (!isRecord(value)) {
+    reject('corrupt', `a match history entry must be an object, not ${describeValue(value)}`);
+  }
+  return {
+    matchId: readString(value, 'matchId', MAX_MATCH_ID_LENGTH),
+    endedAt: readInteger(value, 'endedAt', 0, MAX_TIMESTAMP),
+    holes: readInteger(value, 'holes', 0, MAX_RANDOM_HOLES),
+    courses: readHistoryCourses(value.courses),
+    standings: readHistoryRows(value.standings),
+  };
+}
+
+function readHistoryCourses(value: unknown): MatchSummary['courses'] {
+  if (!Array.isArray(value) || value.length > MAX_HISTORY_COURSES) {
+    reject('corrupt', `a match's courses must be an array of at most ${MAX_HISTORY_COURSES}`);
+  }
+  return value.map((entry) => {
+    if (!isRecord(entry)) {
+      reject('corrupt', 'a history course must be an object');
+    }
+    return {
+      id: readString(entry, 'id', MAX_COURSE_ID_LENGTH),
+      title: readHistoryTitle(entry),
+      par: readHistoryPar(entry),
+    };
+  });
+}
+
+function readHistoryTitle(entry: Record<string, unknown>): string {
+  const value = entry.title;
+  if (typeof value !== 'string' || value.length > MAX_TITLE_LENGTH) {
+    reject(
+      'corrupt',
+      `a history course title must be a string of at most ${MAX_TITLE_LENGTH} characters, not ${describeValue(value)}`,
+    );
+  }
+  return value;
+}
+
+function readHistoryPar(entry: Record<string, unknown>): number | null {
+  const value = entry.par;
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > MAX_PAR) {
+    reject(
+      'corrupt',
+      `a history course par must be null or a whole number up to ${MAX_PAR}, not ${describeValue(value)}`,
+    );
+  }
+  return value;
+}
+
+function readHistoryRows(value: unknown): MatchSummary['standings'] {
+  if (!Array.isArray(value) || value.length > MAX_HISTORY_ROWS) {
+    reject('corrupt', `a match's standings must be an array of at most ${MAX_HISTORY_ROWS}`);
+  }
+  return value.map((entry) => {
+    if (!isRecord(entry)) {
+      reject('corrupt', 'a history row must be an object');
+    }
+    return {
+      name: readString(entry, 'name', MAX_TITLE_LENGTH),
+      rank: readInteger(entry, 'rank', 1, MAX_PLAYERS),
+      holesSurvived: readInteger(entry, 'holesSurvived', 0, MAX_RANDOM_HOLES),
+      totalStrokes: readInteger(entry, 'totalStrokes', 0, MAX_TOTAL_STROKES),
+      totalTimeMs: readInteger(entry, 'totalTimeMs', 0, MAX_TIMESTAMP),
+    };
+  });
 }

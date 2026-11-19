@@ -31,6 +31,7 @@ import type {
   RosterEntry,
   Standing,
   RateBudget,
+  MatchSummary,
 } from './room-types.js';
 import type { BoardFrame, ServerFrame } from './protocol.js';
 
@@ -105,6 +106,17 @@ const BOARD_REFILL_PER_SECOND = 4;
  * dropping them too eagerly makes ghosts stutter on links that are merely busy.
  */
 const PRESENCE_BACKLOG_LIMIT = 64 * 1024;
+
+/**
+ * How many completed matches a party keeps, and how many courses per match.
+ *
+ * A history entry is a summary, not a recording. Ten matches covers an evening's
+ * play without letting a long-lived party accumulate; a hundred courses covers any
+ * normal playlist, and a longer one keeps its true hole count even though the course
+ * list is truncated. The cap exists because this is persisted with the room.
+ */
+const MAX_MATCH_HISTORY = 10;
+const MAX_HISTORY_COURSES = 100;
 
 /**
  * A token bucket: capacity is the burst, and it refills at a fixed rate. Time is
@@ -221,6 +233,12 @@ export class Room {
   players = new Map<string, Player>();
   phase: RoomPhase = 'lobby';
   roundHistory: RoundRecord[] = [];
+  /**
+   * Completed matches, newest first. Survives a rematch and a restart; only the
+   * current match's `roundHistory` is cleared. Bounded so a long-lived party cannot
+   * grow it without limit.
+   */
+  matchHistory: MatchSummary[] = [];
   initialPlayers = 0;
   private readonly admittedParticipants = new Set<string>();
   config: RoomConfig = { ...defaults, selectedHoleIds: [] };
@@ -442,6 +460,7 @@ export class Room {
         ].map((id) => [id, this.playlistTitle(id)]),
       ),
       roundHistory: this.roundHistory,
+      matchHistory: this.matchHistory,
       initialPlayers: this.initialPlayers,
       phase: this.phase,
       holeIndex: this.holeIndex,
@@ -2434,10 +2453,50 @@ export class Room {
     this.phase = 'final';
     this.pausedAt = null;
     this.onFinalize(this);
-    this.state();
+    // Recorded before the snapshot is broadcast, so the history the clients receive
+    // already contains the match that just ended.
     const standings = this.standings();
+    this.recordMatchSummary(standings);
+    this.state();
     this.audit('match_finalized', { standings, rounds: this.roundHistory });
     this.broadcast({ t: 'final', podium: standings.slice(0, 3), standings });
+  }
+  /**
+   * Keep a compact summary of the match that just ended.
+   *
+   * The current match is also the newest entry, so a client can show the previous
+   * matches with `matchHistory.slice(1)`. Recording is keyed on `matchId`, which
+   * makes a repeated `finalize()` a no-op rather than a duplicate.
+   *
+   * Nothing here is playable: the courses are ids, titles and pars, never a
+   * specification. Nothing here is a credential: the rows carry a display name and
+   * the scores, not a uid, session or token.
+   */
+  private recordMatchSummary(standings: Standing[]) {
+    if (!this.matchId || this.matchHistory[0]?.matchId === this.matchId) {
+      return;
+    }
+    const courses = this.holeIds.slice(0, MAX_HISTORY_COURSES).map((id, index) => ({
+      id,
+      title: this.playlistTitle(id),
+      par: this.specs[index]?.par ?? null,
+    }));
+    this.matchHistory = [
+      {
+        matchId: this.matchId,
+        endedAt: Date.now(),
+        holes: this.holeIds.length,
+        courses,
+        standings: standings.slice(0, 50).map((row) => ({
+          name: row.name,
+          rank: row.rank,
+          holesSurvived: row.holesSurvived,
+          totalStrokes: row.totalStrokes,
+          totalTimeMs: row.totalTimeMs,
+        })),
+      },
+      ...this.matchHistory,
+    ].slice(0, MAX_MATCH_HISTORY);
   }
   endHole() {
     if (this.phase !== 'playing') {
@@ -2605,6 +2664,11 @@ export class Room {
       config: structuredClone(this.config),
       titles,
       randomSeen: [...this.randomSeen],
+      matchHistory: this.matchHistory.map((match) => ({
+        ...match,
+        courses: match.courses.map((course) => ({ ...course })),
+        standings: match.standings.map((row) => ({ ...row })),
+      })),
       phase: this.phase,
       starting: this.starting,
       lastActivity: this.lastActivity,
@@ -2630,6 +2694,11 @@ export class Room {
         (data.config.mapSource === MAP_SOURCE.RANDOM ? data.config.holes : 3),
     };
     this.randomSeen = Array.isArray(data.randomSeen) ? data.randomSeen.slice(0, 10000) : [];
+    // History is optional: a row written before it existed restores with none rather
+    // than failing to load.
+    this.matchHistory = Array.isArray(data.matchHistory)
+      ? data.matchHistory.slice(0, MAX_MATCH_HISTORY)
+      : [];
     this.lastActivity = data.lastActivity;
     this.recoveryNotice = !!data.recoveryNotice || data.phase !== 'lobby' || !!data.starting;
     for (const id of this.config.selectedHoleIds) {

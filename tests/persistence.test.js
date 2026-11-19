@@ -544,6 +544,42 @@ test('an oversized random history is trimmed to the room cap instead of being re
   store.close();
 });
 
+test('a malformed match history is rejected rather than half-loaded', () => {
+  const store = new RoomStore(':memory:');
+  seedRow(store, 'ABCDE', checkpointPayload());
+  const match = {
+    matchId: 'match-1',
+    endedAt: Date.now(),
+    holes: 1,
+    courses: [{ id: 'public1', title: 'Course', par: 3 }],
+    standings: [{ name: 'Host', rank: 1, holesSurvived: 1, totalStrokes: 2, totalTimeMs: 1000 }],
+  };
+  const malformed = {
+    NOTARR: 'nope',
+    TOOMANY: new Array(11).fill(match),
+    NOMID: [{ ...match, matchId: '' }],
+    BADEND: [{ ...match, endedAt: 'yesterday' }],
+    BADHOLES: [{ ...match, holes: -1 }],
+    NOCOURSES: [{ ...match, courses: 'nope' }],
+    BADCOURSE: [{ ...match, courses: [{ id: '', title: 'Course', par: 3 }] }],
+    BADPAR: [{ ...match, courses: [{ id: 'public1', title: 'Course', par: 'three' }] }],
+    NOROWS: [{ ...match, standings: 'nope' }],
+    BADRANK: [{ ...match, standings: [{ ...match.standings[0], rank: 0 }] }],
+    BADNAME: [{ ...match, standings: [{ ...match.standings[0], name: '' }] }],
+    BADSTROKES: [{ ...match, standings: [{ ...match.standings[0], totalStrokes: -1 }] }],
+  };
+  for (const [code, matchHistory] of Object.entries(malformed)) {
+    seedRow(store, code, checkpointPayload({ code, matchHistory }));
+  }
+  const { result: rooms, messages } = captureErrors(() => store.load(new Map()));
+  expect([...rooms.keys()]).toEqual(['ABCDE']);
+  expect(messages.filter((message) => message.includes('(corrupt)')).length).toBe(
+    Object.keys(malformed).length,
+  );
+  rooms.get('ABCDE').dispose();
+  store.close();
+});
+
 test('an oversized payload is refused before it is parsed into memory', () => {
   const store = new RoomStore(':memory:');
   seedRow(store, 'ABCDE', checkpointPayload());

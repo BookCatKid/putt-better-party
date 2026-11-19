@@ -316,17 +316,17 @@ def runtime_patch(s):
     s = replace_once(
         s,
         "active:!0,code:e,hostToken:n,self:t,selfRole:",
-        "active:!0,replayId:null,vote:null,bpAttempt:0,bpResetPending:false,bpPausedAt:null,bpCoHost:false,bpPuttingLocked:false,bpStrokeAdjustment:0,bpHostNotice:null,bpWatchChoice:null,bpWatchLive:false,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,roster:[],board:null,final:null,code:e,hostToken:n,self:t,selfRole:",
+        "active:!0,replayId:null,vote:null,bpAttempt:0,bpResetPending:false,bpPausedAt:null,bpCoHost:false,bpPuttingLocked:false,bpStrokeAdjustment:0,bpHostNotice:null,bpWatchChoice:null,bpWatchLive:false,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,roster:[],board:null,final:null,matchHistory:[],code:e,hostToken:n,self:t,selfRole:",
     )
     s = replace_once(
         s,
         "active:!1,selfRole:",
-        "active:!1,replayId:null,vote:null,bpAttempt:0,bpResetPending:false,bpPausedAt:null,bpCoHost:false,bpPuttingLocked:false,bpStrokeAdjustment:0,bpHostNotice:null,bpWatchChoice:null,bpWatchLive:false,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,selfRole:",
+        "active:!1,replayId:null,vote:null,bpAttempt:0,bpResetPending:false,bpPausedAt:null,bpCoHost:false,bpPuttingLocked:false,bpStrokeAdjustment:0,bpHostNotice:null,bpWatchChoice:null,bpWatchLive:false,bpInitialSnapshot:false,bpSceneReady:null,bpConnected:false,bpEverConnected:false,bpConnectionError:null,awaitingPlayers:0,matchHistory:[],selfRole:",
     )
     s = replace_once(
         s,
         "phase:e.phase,holeIndex:e.holeIndex",
-        "bpPlaylistRevision:e.playlistRevision??0,bpPausedAt:e.pausedAt?Date.now()+e.pausedAt-e.now:null,recordEligible:e.recordEligible!==false,replayId:e.replayId??null,vote:e.vote?{...e.vote,endsAt:Date.now()+e.vote.endsAt-e.now}:null,bpInitialSnapshot:true,recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,awaitingPlayers:e.awaitingPlayers??0,nextError:e.nextError??null,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
+        "bpPlaylistRevision:e.playlistRevision??0,bpPausedAt:e.pausedAt?Date.now()+e.pausedAt-e.now:null,recordEligible:e.recordEligible!==false,replayId:e.replayId??null,vote:e.vote?{...e.vote,endsAt:Date.now()+e.vote.endsAt-e.now}:null,bpInitialSnapshot:true,recoveryNotice:!!e.recoveryNotice,randomHistoryCount:e.randomHistoryCount??0,preparing:!!e.preparing,awaitingPlayers:e.awaitingPlayers??0,nextError:e.nextError??null,playlistTitles:e.playlistTitles??{},roundHistory:e.roundHistory??[],matchHistory:e.matchHistory??[],initialPlayers:e.initialPlayers??0,phase:e.phase,holeIndex:e.holeIndex",
     )
     s = replace_once(
         s,
