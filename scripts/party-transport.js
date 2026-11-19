@@ -71,6 +71,16 @@ function connectBetterParty(code, identity, options = {}) {
   // move, and a reconnect has to claim with whatever the current host holds.
   let hostToken = options.hostToken;
   const initialRetryDelay = 1000;
+  const maximumRetryDelay = 15_000;
+  /**
+   * Reconnect delays are jittered by ±20%.
+   *
+   * Without it, every client dropped by the same event - a restart, a blip on the
+   * shared host - retries at the same instant and then doubles together, so the
+   * server takes the whole party back in synchronised waves. The spread is small
+   * enough that a reconnect stays prompt and large enough to break up the herd.
+   */
+  const retryJitter = 0.2;
   /** @type {WebSocket | null} */
   let socket = null;
   let disposed = false;
@@ -454,13 +464,24 @@ function connectBetterParty(code, identity, options = {}) {
     }
   }
 
+  /**
+   * The delay for this attempt: the current backoff, spread by the jitter.
+   *
+   * Kept separate from the doubling so the bound is stated once and the test can
+   * pin it: the result is always within ±`retryJitter` of `retryDelay`.
+   */
+  function nextRetryDelay() {
+    const spread = retryDelay * retryJitter;
+    return Math.round(retryDelay - spread + Math.random() * spread * 2);
+  }
+
   function scheduleReconnect() {
     if (disposed || terminalError) {
       return;
     }
     bind.clearTimeout(reconnectTimer);
-    reconnectTimer = bind.setTimeout(connect, retryDelay);
-    retryDelay = Math.min(retryDelay * 2, 15_000);
+    reconnectTimer = bind.setTimeout(connect, nextRetryDelay());
+    retryDelay = Math.min(retryDelay * 2, maximumRetryDelay);
   }
 
   function connect() {
@@ -586,6 +607,14 @@ function connectBetterParty(code, identity, options = {}) {
    * only waits for a close event keeps showing itself as connected while the
    * player's strokes go nowhere. Two unanswered heartbeats are treated as a
    * dropped connection and the normal reconnect path takes over.
+   *
+   * This is also why a throttled or suspended background tab is never declared
+   * dead without evidence. Browsers slow `setInterval` in hidden tabs and stop it
+   * entirely while a tab is frozen, so a backgrounded client sends *fewer* pings,
+   * not more - and a ping only counts against the connection once it has actually
+   * been written. The debt is cleared by any inbound frame, so a tab that resumes
+   * and answers is back to zero immediately. Judging a tab on elapsed wall time
+   * instead would kill exactly the connections that were merely asleep.
    */
   const heartbeat = bind.setInterval(() => {
     if (unansweredPings >= 2) {

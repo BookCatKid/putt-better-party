@@ -1,5 +1,20 @@
-import { test, expect } from 'bun:test';
+import { test, expect, beforeEach, afterEach } from 'bun:test';
 import { connectBetterParty } from '../scripts/party-transport.js';
+
+/**
+ * Reconnect delays are jittered by ±20% in production, which is what stops a whole
+ * party retrying in lockstep after a restart. Most tests here are about something
+ * else and assume the plain backoff, so randomness is pinned to the middle of the
+ * band - `Math.random()` returning 0.5 yields exactly the unjittered delay. The
+ * backoff test varies it deliberately to prove the bound holds at both extremes.
+ */
+const realRandom = Math.random;
+beforeEach(() => {
+  Math.random = () => 0.5;
+});
+afterEach(() => {
+  Math.random = realRandom;
+});
 
 /** Controllable fake clock replacing setTimeout/setInterval/clearTimeout/clearInterval. */
 function fakeClock() {
@@ -281,23 +296,58 @@ test('malformed and unknown frames are ignored without breaking the connection',
   dispose();
 });
 
-test('reconnect backoff doubles from one second to a 15 second cap and resets after recovery', () => {
+test('reconnect backoff doubles to a cap, stays jittered and resets after recovery', () => {
+  /**
+   * Measure the delay one drop actually waits, by stepping the fake clock one
+   * millisecond at a time until the next socket appears. Measuring rather than
+   * assuming is the point: it is what makes an absent jitter visible.
+   */
+  function measuredDelay(random, prepare) {
+    Math.random = () => random;
+    const fresh = fakeEnvironment();
+    const stop = connectBetterParty('ABCDE', IDENTITY, { bindings: fresh.bindings });
+    prepare(fresh);
+    // Captured after preparing, so the loop waits for the *next* socket only.
+    const before = fresh.WebSocket.sockets.length;
+    let elapsed = 0;
+    while (fresh.WebSocket.sockets.length === before && elapsed < 60_000) {
+      fresh.clock.advance(1);
+      elapsed += 1;
+    }
+    stop();
+    return elapsed;
+  }
+
+  const dropFirst = (fresh) => {
+    fresh.WebSocket.sockets[0].open();
+    fresh.WebSocket.sockets[0].drop();
+  };
+
+  // The band is ±20%, and 0.5 is its middle: the delay is the plain backoff.
+  expect(measuredDelay(0.5, dropFirst)).toBe(1000);
+  // The extremes prove the spread is real. Without it both of these are 1000, and
+  // every client dropped by one event would retry at the same instant.
+  expect(measuredDelay(0, dropFirst)).toBe(800);
+  expect(measuredDelay(0.999999, dropFirst)).toBe(1200);
+
+  // The doubling sequence holds at every draw, and stops at the cap.
   const env = fakeEnvironment();
   const dispose = connectBetterParty('ABCDE', IDENTITY, { bindings: env.bindings });
-  const delays = [];
-  // The first socket exists from the initial connect; each drop schedules the next.
+  Math.random = () => 0.5;
   env.WebSocket.sockets[0].open();
   env.WebSocket.sockets[0].drop();
-  let expected = 1000;
-  for (let attempt = 0; attempt < 6; attempt++) {
-    env.clock.advance(expected);
+  const delays = [];
+  let base = 1000;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    env.clock.advance(base);
     const socket = env.WebSocket.sockets[env.WebSocket.sockets.length - 1];
     socket.open();
     socket.drop();
-    delays.push(expected);
-    expected = Math.min(expected * 2, 15_000);
+    delays.push(base);
+    base = Math.min(base * 2, 15_000);
   }
   expect(delays).toEqual([1000, 2000, 4000, 8000, 15_000, 15_000]);
+
   // A completed handshake resets the backoff to the initial delay.
   env.clock.advance(15_000);
   const recovered = env.WebSocket.sockets[env.WebSocket.sockets.length - 1];
