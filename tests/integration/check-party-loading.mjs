@@ -50,8 +50,11 @@ try {
       input.dispatchEvent(new Event('input', {bubbles: true}));
     })()
   `);
-  await waitFor(client, '!!document.querySelector(".bp-join-form button:not([disabled])")');
-  await client.evalJS('document.querySelector(".bp-join-form button").click()');
+  // The ball picker renders a "+" button ahead of Join, so selecting the first
+  // button in the form clicks that instead of joining.
+  const joinButton = `[...document.querySelectorAll(".bp-join-form button")].find(b => b.textContent === "Join")`;
+  await waitFor(client, `!!${joinButton} && !${joinButton}.disabled`);
+  await client.evalJS(`${joinButton}.click()`);
 
   await waitFor(
     client,

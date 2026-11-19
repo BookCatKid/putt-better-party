@@ -47,8 +47,11 @@ try {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     })()
   `);
-  await waitFor(first, '!!document.querySelector(".bp-join-form button:not([disabled])")');
-  await first.evalJS('document.querySelector(".bp-join-form button").click()');
+  // The ball picker renders a "+" button ahead of Join, so selecting the first
+  // button in the form clicks that instead of joining.
+  const joinButton = `[...document.querySelectorAll(".bp-join-form button")].find(b => b.textContent === "Join")`;
+  await waitFor(first, `!!${joinButton} && !${joinButton}.disabled`);
+  await first.evalJS(`${joinButton}.click()`);
   await waitForLobby(first);
   const identity = await first.evalJS(`(async()=>({code:${store}.code, uid:${store}.self.uid}))()`);
   const credentials = await first.evalJS(
