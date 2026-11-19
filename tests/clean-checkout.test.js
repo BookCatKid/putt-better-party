@@ -11,32 +11,32 @@ import path from 'node:path';
  * property docs/installation.md promises. If someone un-tracks the archive
  * (or a path slips out of the index), `prepare:client` starts failing on
  * clean checkouts while local builds keep working — the worst kind of drift.
- * This test pins the invariant directly: every file the lock names is in the
- * git index, and the lock names what the archive holds.
+ *
+ * One `git ls-files` call, not one per path: per-file spawns can hit an index
+ * lock while a parallel test runs `git archive`, which is a flake, not a
+ * product failure. A single listing is atomic and hundreds of times faster.
  */
 
 const root = path.resolve(import.meta.dir, '..');
 const lock = JSON.parse(readFileSync(path.join(root, 'scripts/client-lock.json'), 'utf8'));
 
-function tracked(relativePath) {
-  const result = spawnSync('git', ['ls-files', '--error-unmatch', relativePath], {
-    cwd: root,
-    encoding: 'utf8',
-  });
-  return result.status === 0;
-}
-
-test('every lock-pinned original is tracked in git', () => {
-  const missing = Object.keys(lock).filter((servedPath) => !tracked('private-client' + servedPath));
-  expect(missing).toEqual([]);
-});
-
-test('the archive stays complete: tracked count matches the lock', () => {
+function trackedPaths() {
   const result = spawnSync('git', ['ls-files', 'private-client'], {
     cwd: root,
     encoding: 'utf8',
   });
-  expect(result.status).toBe(0);
-  const trackedCount = result.stdout.trim().split('\n').length;
-  expect(trackedCount).toBe(Object.keys(lock).length);
+  expect(result.status, result.stderr).toBe(0);
+  return new Set(result.stdout.trim().split('\n'));
+}
+
+test('every lock-pinned original is tracked in git', () => {
+  const tracked = trackedPaths();
+  const missing = Object.keys(lock).filter(
+    (servedPath) => !tracked.has('private-client' + servedPath),
+  );
+  expect(missing).toEqual([]);
+});
+
+test('the archive stays complete: tracked count matches the lock', () => {
+  expect(trackedPaths().size).toBe(Object.keys(lock).length);
 });

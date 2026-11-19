@@ -754,3 +754,28 @@ test('a well-formed checkpoint restores every persisted field', () => {
   room.dispose();
   store.close();
 });
+test('every non-lobby checkpoint phase recovers as a lobby — the interrupted-start matrix', () => {
+  // A process can die anywhere in the match cycle: mid-countdown, mid-hole,
+  // between holes, on the podium. None can resume phantom play, so all of them
+  // must restore to the same honest state: a lobby with a recovery notice and
+  // the roster/config intact. `playing` was already covered; this pins the rest.
+  const store = new RoomStore(':memory:');
+  for (const [index, phase] of ['countdown', 'playing', 'hole-results', 'final'].entries()) {
+    const code = `PHAS${index}`;
+    seedRow(store, code, checkpointPayload({ code, phase, starting: phase === 'countdown' }));
+  }
+  const catalog = new Map();
+  const rooms = store.load(catalog);
+  for (const [index] of ['countdown', 'playing', 'hole-results', 'final'].entries()) {
+    const room = rooms.get(`PHAS${index}`);
+    expect(room).toBeDefined();
+    expect(room.phase).toBe('lobby');
+    expect(room.recoveryNotice).toBe(true);
+    // The lobby is a real lobby, not a display of a dead match: identities and
+    // the host credential came back with it.
+    expect(room.hostToken).toBe('host-token');
+    expect(room.issued.get('uid-host')?.name).toBe('Host');
+    room.dispose();
+  }
+  store.close();
+});
