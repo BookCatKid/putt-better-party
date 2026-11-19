@@ -82,7 +82,7 @@ Preparation verifies the whole snapshot before writing anything:
 Verified all 275 archived asset hashes
 Cross-checked 158 runtime asset references against the lock
 Patched isolated browser bootstrap, local join, local catalog, original validation; Party transport, scene readiness, and initial ball placement patched; shot physics unchanged.
-Syntax-checked 5 patched bundle(s) before publishing
+Syntax-checked 10 patched bundle(s) before publishing
 ```
 
 The second line is the one worth understanding. The lock proves what is archived
@@ -108,6 +108,30 @@ Failure modes are deliberate and name the problem:
 
 Nothing is downloaded in any case, and no newer upstream release is silently
 substituted for the reviewed snapshot.
+
+### If the pinned upstream files are no longer available
+
+A clone of this repository always carries the archive — `private-client/` is
+force-tracked, so upstream availability is irrelevant to installation; that is
+the point of pinning. The scenarios that remain:
+
+- **The archive is absent** (a scrubbed or public export that cannot ship the
+  proprietary client). `bun run prepare:client` exits 1 on the first missing
+  file — `Missing archived asset: /assets/…; restore it from Git` — and the
+  service refuses to start without `web/`. Recovery is `bun run
+capture:client`, which re-downloads the snapshot from the live upstream.
+  Because upstream filenames are content-hashed, a path that still serves
+  returns byte-identical content and `verify-capture.py` confirms it against
+  the lock — the archive is rebuilt exactly, not approximately.
+- **Upstream has rotated its build.** Paths may 404 (the capture records them
+  `missing`, exit 1) or resolve only under new logical names (`diff-capture.py`
+  reports `added`/`removed` plus which patch anchors no longer hold). There is
+  no automatic adoption — the lock is a ratchet, not a suggestion — so the
+  options are restore the archive from a clone or deploy host, or deliberately
+  adopt the new upstream by updating the lock and re-proving every anchor.
+- **Do not "fix" this by vendoring assets elsewhere.** The originals belong to
+  their rights holders (see `NOTICE`); they are tracked only in this private
+  repository and must not be added to any public source tree.
 
 ### First run
 
