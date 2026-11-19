@@ -151,3 +151,39 @@ export async function waitFor(client, expression, timeout = 30000) {
       JSON.stringify(client.events.slice(-20)),
   );
 }
+
+/**
+ * Click a control the way a player would.
+ *
+ * The button is located by its visible text or `aria-label`, must be enabled,
+ * and — the part a page-side `.click()` cannot check — must be the element a
+ * real pointer would hit at its centre. Only then are the press and release
+ * dispatched as CDP input events. A control hidden under an overlay therefore
+ * fails the test instead of being clicked through, which is the assertion
+ * these suites exist to make.
+ *
+ * `selector` widens the element set for suites whose targets include links
+ * (`'button,a'`); the default stays `button` so a link that happens to share a
+ * label cannot be mistaken for the button.
+ */
+export async function clickButton(client, label, { selector = 'button' } = {}) {
+  const found = await client.evalJS(
+    `(()=>{const b=[...document.querySelectorAll(${JSON.stringify(
+      selector,
+    )})].find(b=>b.textContent===${JSON.stringify(label)}||b.getAttribute("aria-label")===${JSON.stringify(
+      label,
+    )});if(!b||b.disabled)return null;b.scrollIntoView({block:"nearest"});const r=b.getBoundingClientRect();const x=r.x+r.width/2,y=r.y+r.height/2;return {x,y,hit:b.contains(document.elementFromPoint(x,y))}})()`,
+  );
+  if (!found?.hit) {
+    throw Error('Not pointer-clickable: ' + label + ' ' + JSON.stringify(found));
+  }
+  for (const type of ['mousePressed', 'mouseReleased']) {
+    await client.call('Input.dispatchMouseEvent', {
+      type,
+      x: found.x,
+      y: found.y,
+      button: 'left',
+      clickCount: 1,
+    });
+  }
+}

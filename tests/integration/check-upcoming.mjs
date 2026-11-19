@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { connect, waitFor } from './cdp.mjs';
+import { connect, waitFor, clickButton } from './cdp.mjs';
 import { closePlaylistEditor, openPlaylistEditor } from './playlist-editor.mjs';
 
 /**
@@ -22,21 +22,7 @@ const expect = (condition, timeout = 30000) =>
     `(async()=>{const s=${state};return (${condition})&&!document.querySelector(".bp-party-loading")})()`,
     timeout,
   );
-const click = async (label) => {
-  const found = await client.evalJS(
-    `(()=>{const b=[...document.querySelectorAll("button,a")].find(b=>b.textContent===${JSON.stringify(label)}||b.getAttribute("aria-label")===${JSON.stringify(label)});if(!b||b.disabled)return null;b.scrollIntoView({block:"nearest"});const r=b.getBoundingClientRect();const x=r.x+r.width/2,y=r.y+r.height/2;return {x,y,hit:b.contains(document.elementFromPoint(x,y))}})()`,
-  );
-  assert(found?.hit, 'Not pointer-clickable: ' + label + ' ' + JSON.stringify(found));
-  for (const type of ['mousePressed', 'mouseReleased']) {
-    await client.call('Input.dispatchMouseEvent', {
-      type,
-      x: found.x,
-      y: found.y,
-      button: 'left',
-      clickCount: 1,
-    });
-  }
-};
+const click = (label) => clickButton(client, label, { selector: 'button,a' });
 const upcoming = () =>
   client.evalJS(`(() => {
     const element = document.querySelector('.bp-upcoming');

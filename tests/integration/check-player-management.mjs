@@ -1,4 +1,4 @@
-import { connect, waitFor } from './cdp.mjs';
+import { connect, waitFor, clickButton } from './cdp.mjs';
 import assert from 'node:assert/strict';
 
 const base = process.env.BASE || 'http://127.0.0.1:8789';
@@ -42,26 +42,7 @@ const state = (condition, timeout = 45000) =>
     timeout,
   );
 
-const click = async (label) => {
-  const point = await client.evalJS(
-    `(()=>{const b=[...document.querySelectorAll("button")].find(b=>!b.disabled&&(b.textContent===${JSON.stringify(label)}||b.getAttribute("aria-label")===${JSON.stringify(label)}));if(!b)return null;b.scrollIntoView({block:"nearest"});const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,hit:b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()`,
-  );
-  assert(point?.hit, 'Button not clickable: ' + label + ' ' + JSON.stringify(point));
-  await client.call('Input.dispatchMouseEvent', {
-    type: 'mousePressed',
-    x: point.x,
-    y: point.y,
-    button: 'left',
-    clickCount: 1,
-  });
-  await client.call('Input.dispatchMouseEvent', {
-    type: 'mouseReleased',
-    x: point.x,
-    y: point.y,
-    button: 'left',
-    clickCount: 1,
-  });
-};
+const click = (label) => clickButton(client, label);
 try {
   await client.call('Page.navigate', { url: base + '/home' });
   await waitFor(client, 'typeof document.querySelector("#create")?.onclick==="function"');

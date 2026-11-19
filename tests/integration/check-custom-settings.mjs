@@ -1,4 +1,4 @@
-import { connect, waitFor } from './cdp.mjs';
+import { connect, waitFor, clickButton } from './cdp.mjs';
 import { closePlaylistEditor, openPlaylistEditor } from './playlist-editor.mjs';
 import assert from 'node:assert/strict';
 const base = process.env.BASE || 'http://127.0.0.1:8789';
@@ -15,26 +15,7 @@ const expect = (cond) =>
     `(async()=>{const s=${state};return (${cond})&&!document.querySelector(".bp-party-loading")})()`,
     25000,
   );
-const click = async (label) => {
-  const response = await client.evalJS(
-    `(()=>{const b=[...document.querySelectorAll("button,a")].find(b=>b.textContent===${JSON.stringify(label)}||b.getAttribute("aria-label")===${JSON.stringify(label)});if(!b||b.disabled)return null;b.scrollIntoView({block:"nearest"});const r=b.getBoundingClientRect();const x=r.x+r.width/2,y=r.y+r.height/2;return {x,y,hit:b.contains(document.elementFromPoint(x,y))}})()`,
-  );
-  assert(response?.hit, 'Not pointer-clickable: ' + label + ' ' + JSON.stringify(response));
-  await client.call('Input.dispatchMouseEvent', {
-    type: 'mousePressed',
-    x: response.x,
-    y: response.y,
-    button: 'left',
-    clickCount: 1,
-  });
-  await client.call('Input.dispatchMouseEvent', {
-    type: 'mouseReleased',
-    x: response.x,
-    y: response.y,
-    button: 'left',
-    clickCount: 1,
-  });
-};
+const click = (label) => clickButton(client, label, { selector: 'button,a' });
 try {
   await client.call('Page.navigate', { url: base + '/home' });
   await waitFor(client, 'typeof document.querySelector("#create")?.onclick==="function"');
