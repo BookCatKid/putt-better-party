@@ -1,5 +1,8 @@
-import { test, expect, afterEach } from 'bun:test';
-import { detail, publicStats, rememberPublicMetadata, upstreamMetrics } from '../src/upstream.js';
+import { test, expect, mock, afterEach } from 'bun:test';
+import path from 'node:path';
+
+const root = path.resolve(import.meta.dir, '..');
+const adapterPath = path.join(root, 'src/upstream/client-adapter.ts');
 
 /**
  * Memory and work bounds on the upstream adapter.
@@ -7,11 +10,29 @@ import { detail, publicStats, rememberPublicMetadata, upstreamMetrics } from '..
  * The queues and both response caches were already bounded; what grew without limit
  * was the set of courses remembered from the catalogue, and what was duplicated was
  * two rooms fetching the same course detail at the same time.
+ *
+ * Isolation: catalog.test.js replaces this adapter module process-wide, and bun
+ * does not guarantee which test file runs first, so a plain import of
+ * src/upstream.js can come back bound to that file's fakes (the CI failure on
+ * 4289465). This file therefore installs its own adapter - one that delegates to
+ * the real implementation unless a test overrides it - and imports its own
+ * upstream instance by query string, so its results depend on no other file.
  */
+const realAdapter = await import(adapterPath + '?upstream-limits-real');
+let testBehavior = null;
+mock.module(adapterPath, () => ({
+  ...realAdapter,
+  invokePublicFunction: (identifier, method, data, transport) =>
+    testBehavior
+      ? testBehavior(identifier, method, data, transport)
+      : realAdapter.invokePublicFunction(identifier, method, data, transport),
+}));
+const { detail, publicStats, rememberPublicMetadata, upstreamMetrics } = await import(
+  path.join(root, 'src/upstream.ts') + '?upstream-limits'
+);
 
-const realFetch = globalThis.fetch;
 afterEach(() => {
-  globalThis.fetch = realFetch;
+  testBehavior = null;
 });
 
 /** A valid public id shape, distinct per index. */
@@ -42,7 +63,7 @@ test('the remembered-course map is bounded and keeps the most recent', async () 
 
   // No network is needed to answer this: the check is the map itself, so a refusal
   // means the course was forgotten and a different failure means it was kept.
-  globalThis.fetch = async () => {
+  testBehavior = () => {
     throw new Error('network disabled for this test');
   };
   expect(String((await rejection(publicStats(id(0))))?.message)).toContain(
@@ -55,11 +76,11 @@ test('the remembered-course map is bounded and keeps the most recent', async () 
 
 test('two rooms asking for the same course share one upstream request', async () => {
   let calls = 0;
-  globalThis.fetch = async () => {
+  testBehavior = () => {
     calls += 1;
     // A refusal is enough: the point is how many requests were made, and a rejected
     // response exercises the cleanup path as well as the success path.
-    return new Response('nope', { status: 500 });
+    throw new Error('Public catalog unavailable (HTTP 500)');
   };
   const shared = id(424242);
   const results = await Promise.all([
@@ -74,9 +95,9 @@ test('a finished request does not leave a stale entry behind', async () => {
   // The coalescing map must empty itself, or a later request for the same course
   // would be answered from a settled promise for ever.
   let calls = 0;
-  globalThis.fetch = async () => {
+  testBehavior = () => {
     calls += 1;
-    return new Response('nope', { status: 500 });
+    throw new Error('Public catalog unavailable (HTTP 500)');
   };
   const repeated = id(777777);
   expect(await rejection(detail(repeated, { saved: true }))).toBeInstanceOf(Error);
