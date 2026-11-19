@@ -315,6 +315,57 @@ function CommunityCoursePicker({ config, holeSettings }) {
   const [courseUrl, setCourseUrl] = BetterPartyReact.useState('');
   const [drag, setDrag] = BetterPartyReact.useState(null);
   /**
+   * The official community card has a per-card Stats expander; port it rather
+   * than drop it. The completions bucket already rides on the card, so the
+   * only extra read is average strokes, fetched once per course on first
+   * expand through the same public HoleStats call the original makes.
+   */
+  const [statsOpen, setStatsOpen] = BetterPartyReact.useState(() => new Set());
+  const [stats, setStats] = BetterPartyReact.useState({});
+  const statsInflight = BetterPartyReact.useRef(new Set());
+  function toggleStats(course) {
+    setStatsOpen((previous) => {
+      const next = new Set(previous);
+      if (next.has(course.id)) {
+        next.delete(course.id);
+      } else {
+        next.add(course.id);
+      }
+      return next;
+    });
+    if (course.id in stats || statsInflight.current.has(course.id)) {
+      return;
+    }
+    statsInflight.current.add(course.id);
+    fetch('/api/hole-stats?id=' + encodeURIComponent(course.id))
+      .then(async (response) => {
+        const data = await response.json();
+        setStats((previous) => ({ ...previous, [course.id]: response.ok ? data : null }));
+      })
+      .catch(() => setStats((previous) => ({ ...previous, [course.id]: null })))
+      .finally(() => statsInflight.current.delete(course.id));
+  }
+  function averageStrokes(courseId) {
+    const entry = stats[courseId];
+    if (entry === undefined) {
+      return '…';
+    }
+    if (entry == null || entry.avgStrokes == null) {
+      return '—';
+    }
+    return entry.avgStrokes.toFixed(1);
+  }
+  /** The official stats panel row: a small uppercase term over a bold value. */
+  const statDetail = (label, value) =>
+    createElement('div', {}, [
+      createElement(
+        'dt',
+        { className: 'text-[10px] uppercase tracking-wide text-[var(--sea-ink-soft)]' },
+        label,
+      ),
+      createElement('dd', { className: 'font-bold text-[var(--sea-ink)]' }, value),
+    ]);
+  /**
    * Write the whole list, reporting rather than swallowing a failure.
    *
    * A failed write must leave the previous list intact, so state only advances once
@@ -1316,7 +1367,32 @@ function CommunityCoursePicker({ config, holeSettings }) {
                 'aria-label': 'Add ' + course.title,
               },
             ),
+            actionButton(
+              'Stats ' + (statsOpen.has(course.id) ? '▴' : '▾'),
+              () => toggleStats(course),
+              false,
+              'rounded-full border border-[var(--line)] px-4 py-1.5 font-semibold text-[var(--sea-ink-soft)] hover:border-emerald-500',
+              { 'aria-expanded': statsOpen.has(course.id) },
+            ),
           ]),
+          statsOpen.has(course.id) &&
+            createElement(
+              'dl',
+              {
+                className: 'mt-3 grid grid-cols-2 gap-2 rounded-lg bg-black/[0.03] p-3 text-xs',
+              },
+              [
+                statDetail(
+                  'Completions',
+                  createElement(
+                    'span',
+                    { title: 'Number of completions' },
+                    '⛳ ' + (course.completionsBucket ?? '—'),
+                  ),
+                ),
+                statDetail('Avg strokes', averageStrokes(course.id)),
+              ],
+            ),
         ]),
       ],
     );
@@ -1419,6 +1495,7 @@ function CommunityCoursePicker({ config, holeSettings }) {
                   () => setMaker(null),
                   false,
                   'rounded-full bg-violet-600 px-3 py-1.5 font-semibold text-white',
+                  { title: 'Clear maker filter' },
                 ),
             ]),
             actionButton(

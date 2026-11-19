@@ -552,6 +552,19 @@ async function handleRequest(
       assertResponseWithinLimit(catalogPage);
       return response(catalogPage);
     }
+    if (pathname === '/api/hole-stats') {
+      if (!readOnly) {
+        return methodNotAllowed(READ_METHODS);
+      }
+      const courseId = url.searchParams.get('id') ?? '';
+      if (!isPublicCourseId(courseId)) {
+        return response({ error: 'Invalid course ID' }, 400);
+      }
+      // The public HoleStats read the community card's Stats panel makes.
+      // publicStats only projects public fields; unlisted ids and upstream
+      // failures surface through the shared error path like /api/catalog.
+      return response(await publicStats(courseId));
+    }
 
     if (pathname.startsWith('/api/preview/')) {
       if (!readOnly) {

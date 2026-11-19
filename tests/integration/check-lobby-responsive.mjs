@@ -234,6 +234,38 @@ try {
     client,
     'document.querySelectorAll(".bp-playlist-scroll .bp-playlist-item").length===3',
   );
+
+  /*
+   * The community card's Stats expander: a real toggle per card, fetching
+   * /api/hole-stats on first expand like the official gallery does. The dl
+   * must show Completions from the card and Avg strokes resolved live — a
+   * number, or — when the course genuinely has no average yet.
+   */
+  await waitFor(
+    client,
+    'document.querySelectorAll(".bp-catalog-scroll > ul > li").length>=6',
+    45000,
+  );
+  await client.evalJS(
+    'document.querySelector(".bp-catalog-scroll > ul > li button[aria-expanded]").click()',
+  );
+  await waitFor(client, '!!document.querySelector(".bp-catalog-scroll dl")');
+  await waitFor(
+    client,
+    '[...document.querySelectorAll(".bp-catalog-scroll dl dd")][1]?.textContent!=="…"',
+    20000,
+  );
+  const statsPanel = await client.evalJS(
+    '(()=>{const dl=document.querySelector(".bp-catalog-scroll dl");return {' +
+      'labels:[...dl.querySelectorAll("dt")].map(e=>e.textContent),' +
+      'completions:dl.querySelector("dd").textContent,' +
+      'strokes:[...dl.querySelectorAll("dd")][1].textContent,' +
+      'expanded:document.querySelector(".bp-catalog-scroll button[aria-expanded]").getAttribute("aria-expanded")}})()',
+  );
+  assert.deepEqual(statsPanel.labels, ['Completions', 'Avg strokes']);
+  assert(statsPanel.completions.startsWith('⛳ '), JSON.stringify(statsPanel));
+  assert(/^—$|^\d+\.\d$/.test(statsPanel.strokes), JSON.stringify(statsPanel));
+  assert.equal(statsPanel.expanded, 'true');
   const targets = await client.evalJS(
     '[...document.querySelectorAll(".bp-playlist-actions button")].map(b=>{const r=b.getBoundingClientRect();return r.width>=24&&r.height>=24&&b.tagName==="BUTTON"})',
   );
