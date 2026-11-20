@@ -1,0 +1,2 @@
+[test]
+coveragePathIgnorePatterns = ["**/private-client/**", "**/web/**", "**/node_modules/**", "**/tests/**", "**/scripts/**"]
