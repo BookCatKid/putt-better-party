@@ -220,14 +220,20 @@ a lack of interest:
    need a new frame carrying aim and power, which is a protocol change and a
    change to the patched client.
 
-3. **The simulation is not bit-deterministic across hosts.** The fixed-step clock
-   is reproducible in _time_ — a hidden page simulates nothing and catch-up is
-   bounded to 24 steps per frame, which is why a background tab cannot
-   fast-forward a hole (see
-   [background simulation](background-simulation.md)). But floating-point physics
-   replayed on a different machine and a different Bun build is not guaranteed to
-   produce bit-identical results, and a verifier that disagrees with the client by
-   one stroke is worse than no verifier.
+3. **The input cannot be recovered exactly, and that is the binding obstacle.**
+   Timing is _not_ the problem, which was measured rather than assumed: on a
+   fixed engine build and host, the same stroke produces a **bit-identical**
+   trajectory even under 8× CPU throttling and a 400 ms main-thread stall well
+   past the engine's own 0.2 s catch-up clamp
+   ([deterministic verification](deterministic-verification.md)). The problem is
+   the other end of the replay: a **quarter of one CSS pixel** of extra pointer
+   pull diverges the trajectory at its tenth sample and moves where the ball
+   stops by **1.96 cm**. Reproducing an outcome therefore needs the exact shot
+   parameters, and the client sends positions and stroke counts instead — it has
+   no field for aim or power. Replaying the client's own recorded path would
+   prove only that the client can produce a path. Whether Rapier yields identical
+   floats on a different engine build or target is also **unmeasured**, and a
+   verifier that disagrees by one stroke is worse than no verifier.
 
 4. **The cost would fall on every legitimate player.** Verification is server CPU
    per shot per player, for a threat that a private party with friends mostly does
@@ -269,3 +275,5 @@ written down where a reader can find them, rather than discovered in a round.
 - [Configuration](configuration.md) for the budgets and bounds quoted here.
 - [Background simulation](background-simulation.md) for why a hidden tab cannot
   fast-forward play.
+- [Deterministic verification](deterministic-verification.md) for the measured
+  replay results behind the input-recovery obstacle described above.
