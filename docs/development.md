@@ -26,11 +26,76 @@ bun run test:recovery
 bun run test:browser
 ```
 
+The one-command sweep — an isolated temporary service and database on its own
+port, one headless browser, every check in sequence with a per-check timeout
+and a summarized result — is:
+
+```sh
+bun run test:integration
+```
+
+It refuses to start rather than interfere with anything already running: a
+service answering on its port or an occupied debugging port are both errors.
+The service defaults to port 8799 (`BP_TEST_PORT`), deliberately not the 8789
+a developer's own service conventionally uses; each script gets
+`BP_TEST_TIMEOUT` seconds (default 300) before it is killed and reported as
+`TIME`. Passed logs are discarded; failed and timed-out logs are kept and
+their directory is printed. `BP_TEST_ONLY=a.mjs,b.mjs` runs a subset,
+`BP_TEST_SKIP=a.mjs` drops individual scripts. Helpers and measurement tools
+(`cdp`, `playlist-editor`, `profile-load`, `visual-regression`) are not checks
+and are never run; `check-voting` is skipped for the documented
+headless-renderer stall below; `check-admin` joins only when both
+`BP_ADMIN_PASSWORD_HASH` and `BP_TEST_ADMIN_PASSWORD` are set, otherwise it is
+reported skipped — a configuration limitation, not evidence. The checks that
+start their own service (`check-recovery`, `check-next-failure`) still do so
+on their own ports and run inside the sweep unchanged.
+
+To run a single check instead, prepare the client, start a service and use
+`BROWSER_SCRIPT`:
+
 Browser integration uses Chromium via the DevTools protocol. Set `CHROME` to an executable if it is not detected automatically. Set `BASE` to the running test service URL if necessary. Select a particular regression using `BROWSER_SCRIPT`, for example:
 
 ```sh
 BROWSER_SCRIPT=tests/integration/check-entry-style.mjs bun run test:browser
 ```
+
+### Load and soak
+
+Two harnesses measure the service rather than assert a product behaviour, and
+neither runs in the sweep because both need a service configured for them.
+
+`profile-load.mjs` (`bun run test:load`) is a probe: it prints measured numbers
+and asserts nothing, so a review compares runs. It creates many concurrent rooms,
+seeds a validated course index, broadcasts large playlists, holds long-running
+connections, fills one room to `BIG_MEMBERS` (default 50, the real party
+maximum), and finally aims `FLOOD_ROUNDS` broadcasts at a consumer that has
+stopped reading. That last one is a Python child holding a raw socket: Bun's own
+socket emulation drains the kernel regardless of listeners, so only a raw
+consumer produces genuine backpressure. It reports create/join/broadcast latency,
+pong latency, RSS, and — from `/health` — CPU as a fraction of one core, database
+writes and deletes, and the bytes queued for stuck sockets. The point of the slow
+consumer is isolation: the healthy member's broadcast latency must stay flat
+while the stuck socket's backlog grows.
+
+`check-soak.mjs` (`bun run test:soak`) does assert. It runs `CYCLES` of
+create/join/configure/leave, alternating clean closes with abrupt drops, then
+waits for the room sweep and requires that every abandoned room is gone, no
+socket survives, no undelivered bytes remain, the database saw at least one
+delete per room, and heap did not grow with the cycle count. It needs the service
+started with a short clock, because the production reclaim window is thirty
+minutes:
+
+```sh
+PORT=8803 BP_DB=/tmp/soak.sqlite BP_ROOM_IDLE_MS=1500 BP_ROOM_SWEEP_MS=500 \
+  bun src/server.ts
+BASE=http://127.0.0.1:8803 CYCLES=10 ROOM_IDLE_MS=1500 bun run test:soak
+```
+
+`BP_ROOM_IDLE_MS` and `BP_ROOM_SWEEP_MS` change only when the sweep decides, not
+what it decides; production runs the same `isReclaimable` on its default
+half-hour clock. The scope is the protocol, not the renderer, because a headless
+browser cannot survive this many cycles and the leaks being looked for are
+server-side.
 
 The loading regression (`check-party-loading.mjs`) delays the initial roster and scoreboard messages while the engine loads to verify that the incomplete HUD remains hidden.
 

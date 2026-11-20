@@ -68,7 +68,9 @@ try {
   const body = await client.evalJS('document.body.innerText');
   assert(!body.includes('Cached / local'));
   assert(!body.includes('Random cached holes'));
-  assert(await client.evalJS('document.querySelectorAll(".bp-catalog-scroll li").length>0'));
+  // The rows render asynchronously once the browse answers; on a cold service
+  // (fresh database, cold upstream cache) the dialog settles first.
+  await waitFor(client, 'document.querySelectorAll(".bp-catalog-scroll li").length>0', 30000);
   console.log('PASS actual browser CSS and public-only picker');
   const pic = await client.call('Page.captureScreenshot', { format: 'png' });
   await Bun.write('picker-proof.png', Buffer.from(pic.data, 'base64'));

@@ -14,6 +14,8 @@ export class RoomStore {
   private readonly put: Statement<unknown, [string, number, string]>;
   private readonly del: Statement<unknown, [string]>;
   private lastFailureReportAt = 0;
+  private writes = 0;
+  private deletes = 0;
 
   constructor(filename: string) {
     if (filename !== ':memory:') {
@@ -34,16 +36,27 @@ export class RoomStore {
   save(room: Room) {
     try {
       this.put.run(room.code, room.lastActivity, JSON.stringify(room.checkpoint()));
+      this.writes += 1;
     } catch (error) {
       this.reportFailure('save', error);
     }
   }
   remove(code: string) {
     try {
-      this.del.run(code);
+      // A DELETE that matches no row still succeeds; the statement's `changes`
+      // is what makes the counter mean "rows removed" rather than "statements
+      // issued", so a sweep walking rooms already gone does not look like work.
+      this.deletes += this.del.run(code).changes;
     } catch (error) {
       this.reportFailure('remove', error);
     }
+  }
+  /**
+   * Checkpoint counts for the health report: how busy the write side has been,
+   * never what was written.
+   */
+  stats() {
+    return { writes: this.writes, deletes: this.deletes };
   }
   /**
    * A failed checkpoint must not terminate the service. The room keeps playing

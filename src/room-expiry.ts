@@ -35,9 +35,13 @@ export interface RoomLiveness {
  * otherwise every abandoned "create party" click would leak a room for the life of
  * the process.
  */
-export function isReclaimable(room: RoomLiveness, now: number): boolean {
+export function isReclaimable(
+  room: RoomLiveness,
+  now: number,
+  idleLimitMs = ROOM_IDLE_LIMIT_MS,
+): boolean {
   if (room.connectedPlayers > 0) {
     return false;
   }
-  return now - room.lastActivity > ROOM_IDLE_LIMIT_MS;
+  return now - room.lastActivity > idleLimitMs;
 }

@@ -18,7 +18,7 @@ import { courseIndex, courseCount, fetchPublicMap, prepareMatch } from './catalo
 import { errorMessage } from './domain.js';
 import { rememberPublicMetadata } from './upstream.js';
 import { MAX_JSON_BODY_BYTES } from './request-guards.js';
-import { isReclaimable } from './room-expiry.js';
+import { ROOM_IDLE_LIMIT_MS, isReclaimable } from './room-expiry.js';
 import { ClientScriptAssets } from './client-scripts.js';
 import { createHttpHandler } from './http-routes.js';
 import { dispatchSocketMessage } from './socket-dispatch.js';
@@ -91,6 +91,7 @@ const handleRequest = createHttpHandler({
     onReplayRound,
   },
   admin,
+  databaseStats: () => store.stats(),
   clientScripts,
   leaderboard,
   replayArchive,
@@ -136,18 +137,24 @@ const tick = setInterval(() => {
   }
 }, 100);
 // Reclaim empty rooms, including never-joined rooms, after 30 minutes.
+// Soak tests set BP_ROOM_IDLE_MS / BP_ROOM_SWEEP_MS to run the same decision on
+// a seconds rather than half-hour clock; production keeps the defaults.
+const roomIdleLimitMs = Number(process.env.BP_ROOM_IDLE_MS) || ROOM_IDLE_LIMIT_MS;
+const reclaimIntervalMs = Number(process.env.BP_ROOM_SWEEP_MS) || 60_000;
 const reclaim = setInterval(() => {
   replayArchive.prune();
   const now = Date.now();
   for (const [code, room] of rooms) {
     const connectedPlayers = [...room.players.values()].filter((player) => player.ws).length;
-    if (isReclaimable({ connectedPlayers, lastActivity: room.lastActivity }, now)) {
+    if (
+      isReclaimable({ connectedPlayers, lastActivity: room.lastActivity }, now, roomIdleLimitMs)
+    ) {
       room.dispose();
       rooms.delete(code);
       store.remove(code);
     }
   }
-}, 60000);
+}, reclaimIntervalMs);
 
 /**
  * Stop accepting work, settle what is in flight, and release everything this

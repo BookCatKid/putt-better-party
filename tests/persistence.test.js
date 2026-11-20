@@ -779,3 +779,25 @@ test('every non-lobby checkpoint phase recovers as a lobby — the interrupted-s
   }
   store.close();
 });
+
+test('checkpoint counters count successful writes and deletes only', () => {
+  // /health reports these so an operator can see write pressure and so a soak
+  // can tell "the sweep ran" from "the sweep ran and did nothing". A counter
+  // that included failed attempts would make a locked database look busy.
+  const store = new RoomStore(':memory:');
+  expect(store.stats()).toEqual({ writes: 0, deletes: 0 });
+  const catalog = new Map();
+  const room = new Room('CNTRS', catalog, { onChange: (changed) => store.save(changed) });
+  room.issue('Host');
+  expect(store.stats().writes).toBeGreaterThan(0);
+  const writesAfterRoom = store.stats().writes;
+  store.save(room);
+  expect(store.stats().writes).toBe(writesAfterRoom + 1);
+  store.remove(room.code);
+  expect(store.stats().deletes).toBe(1);
+  // Deleting a row that is not there is not an error and not a delete.
+  store.remove('NOSUCH');
+  expect(store.stats().deletes).toBe(1);
+  room.dispose();
+  store.close();
+});

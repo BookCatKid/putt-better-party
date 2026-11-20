@@ -12,7 +12,7 @@
  * memory and connection counts.
  *
  * Usage: `bun tests/integration/profile-load.mjs` (env: BASE, ROOMS, MEMBERS,
- * PLAYLIST_SIZES, HOLD_MS).
+ * PLAYLIST_SIZES, HOLD_MS, BIG_MEMBERS, FLOOD_ROUNDS).
  */
 
 const base = process.env.BASE || 'http://127.0.0.1:8789';
@@ -25,6 +25,11 @@ const playlistSizes = (process.env.PLAYLIST_SIZES || '24,96')
   .split(',')
   .map((size) => Number(size));
 const holdMs = Number(process.env.HOLD_MS || 20000);
+// One room at the real party scale: the backlog asks about 50-player rooms
+// separately from many small ones, because fan-out cost grows per frame.
+const bigRoomMembers = Number(process.env.BIG_MEMBERS || 50);
+// Broadcast rounds aimed at a consumer that has stopped reading.
+const floodRounds = Number(process.env.FLOOD_ROUNDS || 30);
 
 const post = async (path, body) => {
   const response = await fetch(base + path, {
@@ -42,6 +47,24 @@ const post = async (path, body) => {
 
 const health = () => fetch(base + '/health').then((response) => response.json());
 
+/**
+ * The cost fields two health reads apart: CPU as a fraction of one core, and
+ * the database work done in between. Both are cumulative counters on the
+ * server; the interesting number is the delta over a measured window.
+ */
+const serverCost = (before, after, elapsedMs) => {
+  const cpuMicros =
+    after.cpuMicros.user -
+    before.cpuMicros.user +
+    (after.cpuMicros.system - before.cpuMicros.system);
+  return {
+    cpuFraction: Math.round((cpuMicros / (elapsedMs * 1000)) * 100) / 100,
+    dbWrites: after.database.writes - before.database.writes,
+    dbDeletes: after.database.deletes - before.database.deletes,
+    bufferedBytes: after.socketBufferedBytes,
+  };
+};
+
 const percentile = (values, ratio) => {
   const sorted = [...values].sort((first, second) => first - second);
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))];
@@ -55,6 +78,49 @@ const stats = (values) => ({
 });
 
 const mb = (bytes) => Math.round((bytes / 1_048_576) * 10) / 10;
+
+/**
+ * A joined player that never reads again, as a child process. Bun's socket
+ * emulation drains the kernel into JS memory no matter what listeners exist,
+ * so a Bun socket can never produce real backpressure; a raw Python socket
+ * holds the descriptor without recv() and the receive window genuinely closes.
+ * The child completes the upgrade and the join frame, then sleeps holding the
+ * connection; the caller kills it when the flood is measured.
+ */
+async function stuckJoin(code) {
+  const url = new URL(base);
+  const port = Number(url.port || 80);
+  const identity = await post('/api/join', { code, name: 'stuck' });
+  const payload = JSON.stringify({ t: 'join', ...identity, protocol: 2 });
+  const program = `
+import socket, sys, time, os, base64
+port, code, origin, payload = int(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4].encode()
+s = socket.create_connection(("127.0.0.1", port))
+key = base64.b64encode(os.urandom(16)).decode()
+s.sendall((
+    f"GET /ws/party/{code} HTTP/1.1\\r\\nHost: 127.0.0.1:{port}\\r\\n"
+    "Upgrade: websocket\\r\\nConnection: Upgrade\\r\\n"
+    f"Sec-WebSocket-Key: {key}\\r\\nSec-WebSocket-Version: 13\\r\\n"
+    f"Origin: {origin}\\r\\n\\r\\n"
+).encode())
+time.sleep(0.8)  # let the upgrade finish before the join frame
+mask = os.urandom(4)
+if len(payload) < 126:
+    header = bytes([0x81, 0x80 | len(payload)])
+else:
+    header = bytes([0x81, 0x80 | 126]) + len(payload).to_bytes(2, "big")
+masked = bytes(b ^ mask[i & 3] for i, b in enumerate(payload))
+s.sendall(header + mask + masked)
+time.sleep(300)  # hold the connection without ever reading it
+`;
+  const child = Bun.spawn(['python3', '-c', program, String(port), code, base, payload], {
+    stdout: 'ignore',
+    stderr: 'inherit',
+  });
+  // Let the upgrade and join register before the flood starts.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  return child;
+}
 
 /** Join one socket to a room and resolve once the hello/party frames arrive. */
 function joinSocket(code, identity, extra = {}) {
@@ -259,6 +325,110 @@ console.log(
     rssSeries.map(mb).join(', ') +
     ')',
 );
+
+// ---------------------------------------------------------------------------
+// Phase D: one room at full party scale.
+// A fifty-player room stresses a different axis than many two-player rooms:
+// every broadcast serializes once and then fans out fifty ways.
+// ---------------------------------------------------------------------------
+const bigCostBefore = await health();
+const bigStarted = Date.now();
+const bigCreated = await post('/api/create');
+if (bigCreated.status === 429) {
+  console.log('big-room phase skipped: room cap already reached');
+} else {
+  const bigJoins = [];
+  const bigMembers = [];
+  for (let member = 0; member < bigRoomMembers; member++) {
+    const identity = await post('/api/join', { code: bigCreated.code, name: 'big-' + member });
+    const started = Date.now();
+    bigMembers.push(
+      await joinSocket(
+        bigCreated.code,
+        identity,
+        member === 0 ? { host: bigCreated.hostToken } : {},
+      ),
+    );
+    bigJoins.push(Date.now() - started);
+  }
+  // One large playlist broadcast inside the full room: last member seen.
+  const fanSize = Math.min(Math.max(...playlistSizes), seedIds.length);
+  const sentAt = Date.now();
+  bigMembers[0].ws.send(
+    JSON.stringify({
+      t: 'config',
+      config: { mapSource: 'picked', selectedHoleIds: seedIds.slice(0, fanSize), holes: fanSize },
+    }),
+  );
+  const fanLatency = await waitFrame(
+    bigMembers.at(-1).frames,
+    (frame) => frame.t === 'party' && frame.config?.selectedHoleIds?.length === fanSize,
+    sentAt,
+  );
+  const bigHealth = await health();
+  console.log(
+    `big room: ${bigMembers.length} members, join ${JSON.stringify(stats(bigJoins))}ms, ` +
+      `${fanSize}-course broadcast to last member ${fanLatency}ms`,
+  );
+  console.log(
+    `  server during big room: ${JSON.stringify(serverCost(bigCostBefore, bigHealth, Date.now() - bigStarted))}`,
+  );
+
+  // -------------------------------------------------------------------------
+  // Phase E: a consumer that stops reading.
+  //
+  // A raw TCP socket completes the WebSocket handshake and the join frame,
+  // then pauses so its receive window fills and the server's send buffer has
+  // to grow. The questions a slow consumer raises are isolation — a healthy
+  // member must still see frames promptly — and how far the backlog grows.
+  // -------------------------------------------------------------------------
+  const stuck = await stuckJoin(bigCreated.code);
+  const stuckHealth = await health();
+  console.log(`  stuck socket joined (players=${stuckHealth.players})`);
+  const floodBefore = await health();
+  const floodStarted = Date.now();
+  const healthyLatencies = [];
+  const bufferedSeries = [];
+  for (let round = 0; round < floodRounds; round++) {
+    const floodSentAt = Date.now();
+    bigMembers[0].ws.send(
+      JSON.stringify({
+        t: 'config',
+        config: {
+          mapSource: 'picked',
+          selectedHoleIds: seedIds.slice(0, fanSize),
+          holes: fanSize,
+          // Each round must differ so the echo is a unique marker.
+          timerMs: 60_000 + round * 1_000,
+        },
+      }),
+    );
+    healthyLatencies.push(
+      await waitFrame(
+        bigMembers.at(-1).frames,
+        (frame) => frame.t === 'party' && frame.config?.timerMs === 60_000 + round * 1_000,
+        floodSentAt,
+      ),
+    );
+    bufferedSeries.push((await health()).socketBufferedBytes);
+  }
+  const floodAfter = await health();
+  console.log(
+    `slow consumer: ${floodRounds} broadcast rounds, healthy member ` +
+      `${JSON.stringify(stats(healthyLatencies))}ms`,
+  );
+  console.log(
+    `  server buffered for the stuck socket: ${bufferedSeries.map(mb).join(', ')}MB ` +
+      `(peak ${mb(Math.max(...bufferedSeries))}MB)`,
+  );
+  console.log(
+    `  server during flood: ${JSON.stringify(serverCost(floodBefore, floodAfter, Date.now() - floodStarted))}`,
+  );
+  stuck.kill();
+  for (const { ws } of bigMembers) {
+    ws.close();
+  }
+}
 
 // ---------------------------------------------------------------------------
 for (const { members } of parties) {

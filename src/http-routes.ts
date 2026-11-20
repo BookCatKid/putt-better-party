@@ -65,6 +65,8 @@ export interface HttpContext {
     onReplayRound: RoomOptions['onReplayRound'];
   };
   admin: (req: Request, pathname: string) => Promise<Response>;
+  /** Checkpoint counters for /health — counts only, never room contents. */
+  databaseStats: () => { writes: number; deletes: number };
   clientScripts: ClientScriptAssets;
   leaderboard: Leaderboard;
   replayArchive: ReplayArchive;
@@ -86,6 +88,7 @@ export function createHttpHandler(context: HttpContext) {
     rooms,
     roomOptions,
     admin,
+    databaseStats,
     clientScripts,
     leaderboard,
     replayArchive,
@@ -180,12 +183,17 @@ export function createHttpHandler(context: HttpContext) {
       // only: no room code, course, player name or credential appears here, since
       // a health endpoint is often the least protected surface on a service.
       const memory = process.memoryUsage();
+      const cpu = process.cpuUsage();
       let connectedPlayers = 0;
       let activeMatches = 0;
+      let socketBufferedBytes = 0;
       for (const room of rooms.values()) {
         for (const player of room.players.values()) {
           if (player.ws) {
             connectedPlayers += 1;
+            // Backpressure a slow consumer leaves behind: the lossy presence
+            // broadcast drops past its limit, but everything else still queues.
+            socketBufferedBytes += player.ws.getBufferedAmount?.() ?? 0;
           }
         }
         if (room.phase !== 'lobby') {
@@ -201,12 +209,17 @@ export function createHttpHandler(context: HttpContext) {
         players: connectedPlayers,
         activeMatches,
         uptimeSeconds: Math.round(process.uptime()),
+        socketBufferedBytes,
         memory: {
           // Heap is the number that matters for leak detection; RSS includes
           // memory we cannot release anyway.
           rssBytes: memory.rss,
           heapUsedBytes: memory.heapUsed,
         },
+        // Cumulative microseconds since start; a caller wanting utilisation
+        // compares two reads against the wall time between them.
+        cpuMicros: { user: cpu.user, system: cpu.system },
+        database: databaseStats(),
         upstream: upstreamMetrics(),
       });
     }

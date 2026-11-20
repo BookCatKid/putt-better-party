@@ -22,6 +22,34 @@ assert(page.holes.length === 24);
 const page2 = await get('/api/catalog?sort=new&offset=24');
 assert.equal(page2.offset, 24);
 assert.notEqual(page.holes[0].id, page2.holes[0].id);
+
+/**
+ * The newest listing is community-authored, so it can legitimately be a course
+ * the pinned validator refuses (a decoration scale outside the accepted range,
+ * for example) — that is the server working, not a regression. The catalogue
+ * assertion above is about listing; everything below needs a course that
+ * actually imports, so it takes the first one that does. Nothing here may pass
+ * without one, so an empty result is still a failure.
+ */
+async function firstImportableCourse(room, identity, host) {
+  for (const candidate of [...page.holes, ...page2.holes]) {
+    const response = await fetch(base + '/api/import', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        code: room.code,
+        uid: identity.uid,
+        session: identity.session,
+        host,
+        id: candidate.id,
+      }),
+    });
+    if (response.status === 200) {
+      return { course: candidate, response };
+    }
+  }
+  throw Error('no course on the first two pages could be imported');
+}
 async function connectRoom() {
   const room = await post('/api/create', {});
   const identity = await post('/api/join', {
@@ -58,7 +86,11 @@ async function connectRoom() {
 }
 const manualParty = await connectRoom();
 try {
-  const course = page.holes[0];
+  const { course } = await firstImportableCourse(
+    manualParty.r,
+    manualParty.j,
+    manualParty.r.hostToken,
+  );
   // A guest in the same lobby is a real, connected member with its own session.
   // Authorization to import is the crown's, not membership's: the guest must be
   // refused even though every other part of the request is valid. The guest has
@@ -158,7 +190,11 @@ try {
 // report see the id inside the specification.
 const identityParty = await connectRoom();
 try {
-  const course = page.holes[0];
+  const { course } = await firstImportableCourse(
+    identityParty.r,
+    identityParty.j,
+    identityParty.r.hostToken,
+  );
   const imported = await post('/api/import', {
     code: identityParty.r.code,
     uid: identityParty.j.uid,

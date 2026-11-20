@@ -3,6 +3,10 @@ name: CI
 on:
   push:
   pull_request:
+  # The browser suite is explicitly approved runs only: it needs a real
+  # Chromium and live read-only upstream access, neither of which a push can
+  # promise.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -36,3 +40,44 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 scripts/release.py check
+
+  browser:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+      - run: bun install --frozen-lockfile
+      - run: python -m pip install -r requirements-dev.txt
+      # private-client/ is tracked, so preparation is fully offline; the live
+      # dependency is upstream itself, which the next step separates out.
+      - run: bun run prepare:client
+      - name: Probe the external dependency
+        id: upstream
+        continue-on-error: true
+        run: curl -sf -o /dev/null https://putt.day/
+      - name: Browser integration sweep
+        if: steps.upstream.outcome == 'success'
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+          # Software rendering needs more headroom than Metal for the heavy
+          # two-context checks.
+          BP_TEST_TIMEOUT: '600'
+        run: bun run test:integration
+      - name: Preserve failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs
+          path: /tmp/bp-integration-logs.*
+      - name: Note the skipped dependency
+        if: steps.upstream.outcome != 'success'
+        run: echo "::warning::upstream putt.day is unreachable — the browser suite did not run; an unavailable external dependency is not a regression."
