@@ -199,9 +199,10 @@ code only.
   independently authored code is available for licensing, and that decision
   belongs to the owner.
 
-The repository owner decides whether this repository is public. It is currently
-published with the archive included, by that owner's decision; that decision
-covers this copy and does not grant a licence to anyone else's.
+The repository owner decides whether this repository is public. The owner has
+decided to publish it with the archive included, so the archived material may
+become publicly readable; that decision covers this copy and does not grant a
+licence to anyone else's.
 
 ## Publishing
 

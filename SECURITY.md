@@ -119,10 +119,10 @@ grant in `NOTICE` and `LICENSE` covers the independently authored code only, and
 these bytes are explicitly excluded from it.
 
 The repository owner has decided to publish this repository with that snapshot
-included, which means the archive is publicly readable. That is a decision about
-_this_ copy, taken by the person responsible for it. It does not grant anyone
-else a licence: **do not redistribute `private-client/` or the `web/` build
-derived from it**, and do not republish this material as your own, without
+included, which would make the archive publicly readable. That is a decision
+about _this_ copy, taken by the person responsible for it. It does not grant
+anyone else a licence: **do not redistribute `private-client/` or the `web/`
+build derived from it**, and do not republish this material as your own, without
 permission from the rights holders.
 
 A vulnerability in the original client's code is not this project's to fix — but
