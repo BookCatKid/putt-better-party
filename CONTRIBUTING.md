@@ -189,14 +189,19 @@ is to restore it from Git.
 ## Licensing and confidentiality
 
 The original client and its assets belong to their rights holders. They are
-archived here for private development and are **not** licensed by this project.
+archived here so the reviewed snapshot survives upstream updates, and they are
+**not** licensed by this project — the GPL grant covers independently authored
+code only.
 
 - Do not redistribute the client or the assets.
-- Do not make this repository public without permission.
-- Do not publish a public deployment without permission.
+- Do not republish the archived material as your own work.
 - Do not add a license file that purports to cover the archived material — only
   independently authored code is available for licensing, and that decision
   belongs to the owner.
+
+The repository owner decides whether this repository is public. It is currently
+published with the archive included, by that owner's decision; that decision
+covers this copy and does not grant a licence to anyone else's.
 
 ## Publishing
 

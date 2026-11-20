@@ -21,8 +21,8 @@
 #    dependencies to freeze; the pin that matters is the Bun image tag.
 #
 # Architecture: this is a multi-arch manifest. Bun publishes `linux/amd64` and
-# `linux/arm64`, so `docker build` produces a working image on either; the Oracle
-# host this was verified on is `aarch64`. Nothing in the image is architecture
+# `linux/arm64`, so `docker build` produces a working image on either; the image
+# this was verified on ran `aarch64`. Nothing in the image is architecture
 # specific: there are no compiled addons and no native modules.
 
 FROM oven/bun:1.4.2-alpine AS source
