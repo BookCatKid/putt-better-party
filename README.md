@@ -20,6 +20,21 @@
 - Review per-hole scorecards and final standings.
 - Rejoin with the same identity and recover room settings after service restarts.
 
+## Screenshots
+
+Captured from this service with the real prepared client, a real public catalog and
+real players joined over the protocol. Re-capture them after an intentional UI
+change with `bun run capture:screenshots` (see [development](docs/development.md)).
+
+|                                                            |                                            |
+| ---------------------------------------------------------- | ------------------------------------------ |
+| ![Home screen](docs/screenshots/home.png)                  | ![Party lobby](docs/screenshots/lobby.png) |
+| The home screen                                            | Party lobby with join code and settings    |
+| ![Playlist editor](docs/screenshots/playlist.png)          | ![In game](docs/screenshots/in-game.png)   |
+| Playlist editor over the live catalog                      | A round in progress                        |
+| ![In game on a phone](docs/screenshots/in-game-mobile.png) |                                            |
+| The same round at 390px wide                               |                                            |
+
 ## Getting started
 
 Install [Bun](https://bun.sh/), Python 3 and curl. From a clone of this repository:

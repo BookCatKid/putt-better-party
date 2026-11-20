@@ -122,6 +122,16 @@ bun tests/visual-diff.mjs tests/visual-baseline /tmp/visual-fresh
 
 Screens that change print their differing-pixel share and write a `*-diff.png` heatmap into the fresh directory so the change is reviewable rather than guessed at. Two determinism rules keep the diff honest: the live WebGL canvas is hidden for party-surface captures (the lobby overlay is translucent over the running scene), and run-varying data — invite code, ball swatches, course titles, authors, ratings, thumbnails — is redacted to fixed strings. Transient and live-data surfaces (loading, leaderboard, vote, in-play HUD) are covered by the behavioural suites instead; a screenshot is never functional proof on its own.
 
+### README screenshots
+
+`tests/integration/capture-screenshots.mjs` writes the images the README shows into `docs/screenshots/`. It is the opposite of a visual baseline on purpose: nothing is redacted and the WebGL canvas stays visible, because these exist to show a reader what the product looks like. That also means they cannot be compared — the courses a shot contains come from the live catalog — so they are committed as documentation and no test reads them.
+
+```sh
+BASE=http://127.0.0.1:8801 bun run capture:screenshots
+```
+
+It drives a real prepared client against a real service: creates a party, joins three guests over the protocol, imports real public courses, opens the playlist editor, starts the round and captures the same hole again at 390px. Re-run it after an intentional UI change and commit the result; a stale screenshot is worse than none.
+
 ### Known limits of the browser suite
 
 These are measured limits of the test harness and the pinned client, not open

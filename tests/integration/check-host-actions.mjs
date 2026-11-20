@@ -19,8 +19,20 @@ const click = (label) => clickButton(client, label);
 const game = '(await import("/assets/runtime-DL2fiDAQ.js")).m.state';
 const read = () =>
   client.evalJS(
-    `(async()=>{let s=${state},g=${game};return {matchId:s.matchId,holeIndex:s.holeIndex,name:g.level?.name,attempt:g.attemptSeq,strokes:g.strokes,ends:s.timerEndsAt,connected:s.bpConnected,phase:s.phase,levelId:g.level?.id}})()`,
+    `(async()=>{let s=${state},g=${game};return {matchId:s.matchId,holeIndex:s.holeIndex,name:g.level?.name,attempt:g.attemptSeq,strokes:g.strokes,ends:s.timerEndsAt,start:s.startAt,connected:s.bpConnected,phase:s.phase,levelId:g.level?.id}})()`,
   );
+/**
+ * What the host's own round budget should look like in this client.
+ *
+ * `party-transport.js` trims the server's `timerMs` by its clock safety margin
+ * before the runtime derives `timerEndsAt`, so the visible deadline lands inside
+ * the window the server still accepts (see CLOCK_SAFETY_MARGIN_MS and the
+ * matching test in tests/clock.test.js). A check that expected the raw server
+ * budget would fail against correct behaviour, so the expected value is written
+ * as the arithmetic the product documents rather than as a bare constant.
+ */
+const CLOCK_SAFETY_MARGIN_MS = 250;
+const visibleRoundMs = (serverMs) => serverMs - CLOCK_SAFETY_MARGIN_MS;
 try {
   await client.call('Page.navigate', { url: base + '/home' });
   await waitFor(client, 'typeof document.querySelector("#create")?.onclick === "function"');
@@ -113,9 +125,18 @@ try {
   await expect('s.config.timerMs===60000&&!!document.querySelector(".bp-host-panel")');
   console.log('PASS full-width timer field at 375px and repeated changes', timerBounds);
   await click('+30s');
-  await expect('s.timerEndsAt-s.startAt===90000&&!!document.querySelector(".bp-host-panel")');
+  // The host added 30s to a 60s round, so the client should now be showing a
+  // 90s budget less the safety margin it deliberately withholds.
+  const expectedRoundMs = visibleRoundMs(90000);
+  await expect(
+    `s.timerEndsAt-s.startAt===${expectedRoundMs}&&s.config.timerMs===60000&&!!document.querySelector(".bp-host-panel")`,
+  );
   const added = await read();
   assert(added.ends - before.ends >= 29500);
+  // The budget the host is shown, not just the shift in the deadline: an
+  // extension that moved `ends` but left the round shorter than asked for would
+  // pass a difference-only check.
+  assert.equal(added.ends - added.start, expectedRoundMs);
   console.log('PASS pointer-based add time', before.ends, added.ends);
   if (!(await client.evalJS('!!document.querySelector(".bp-host-panel")'))) {
     await click('Party controls');

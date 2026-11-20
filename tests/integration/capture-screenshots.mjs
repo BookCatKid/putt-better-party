@@ -138,13 +138,13 @@ try {
   await click('Edit playlist');
   await waitFor(client, 'document.querySelectorAll(".bp-catalog-scroll li").length>0', 45000);
   await shoot('playlist.png');
-  await client.evalJS(
-    '[...document.querySelectorAll("button")].find(b=>b.textContent==="Done"||b.getAttribute("aria-label")==="Close")?.click()',
-  );
-  await pause(400);
+  await click('Done');
+  // The picker covers the lobby, so the next shot is only the intended screen
+  // once it is gone.
+  await waitFor(client, '!document.querySelector(".bp-catalog-scroll")', 15000);
 
   /* Start the party and wait for the hole itself. */
-  await click('Start');
+  await click('Start party');
   await waitFor(
     client,
     '(async()=>{const s=' +
