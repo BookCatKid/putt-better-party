@@ -239,7 +239,7 @@ Do not publicly expose the service as part of this checklist without explicit au
 - [x] All upstream binding changes have binary/source evidence and reproducible validation. (No upstream binding changed in this pass. The one binding-related finding was a misread contract on our side, not a binding change: the client deliberately shows `timerMs` trimmed by `CLOCK_SAFETY_MARGIN_MS`, established from `scripts/party-transport.js` and by recording raw `party` frames, and the assertion was corrected to the documented arithmetic. The pinned client and validator remain untouched and hash-locked by `scripts/client-lock.json`; `bun run check` reconstructs and syntax-checks them offline before running.)
 - [x] No regressions in approved layout, original rendering/physics, playlist semantics or security boundaries. (No product code changed in this pass — the diff is the capture harness, the committed screenshots, `bunfig.toml` and documentation — so layout, rendering, physics, playlist semantics and the security boundary are unmodified by construction. The screenshots were reviewed as images to confirm they still show the approved surfaces correctly: lobby with the real backdrop, join code and four distinct palette swatches; in-game with ranks 1-4 and the flag/stroke column intact; the playlist picker with real catalogue cards; and the 390px layout. The determinism work touched only the capture script's own instrumentation, which pins clocks in the test page and never ships.)
 - [x] Reviewable commits, private repository, no proprietary downloads/secrets in Git, clean working tree. (**The repository-privacy clause of this item has been changed by the owner and the change is recorded rather than applied silently:** on 2026-11-19 the owner directed that the repository become public and that every push to `main` be deployed. **The open question that was blocking publication has been answered by the owner on 2026-11-20: keep the force-tracked `private-client/` snapshot in history rather than rewriting it out**, so the repository can be published with the archive included and `NOTICE` continues to exclude those bytes from the GPL grant. The repository is still `PRIVATE` at this commit; the flip is an owner action, not a code change, and nothing in the tree blocks it. The rest of the clause holds: no database, HAR file, credential, recording or log is tracked (`git status` is clean, and `.gitignore` covers `state/`, `*.sqlite`, `browser-*.log` and the temporary harness directories), and every commit in this pass is a separate reviewable change with its own rationale.)
-- [x] Final handoff records commit range, changes, test results, caveats, any policy decisions and how to reproduce the service. (Recorded in the handoff below and in the final report: commit range `62d7ac4..1a49cfa`, the per-subsystem changes, the check and sweep results with the measured reason for each failure, the caveats — Caddy `no-store` precedence for the dev server versus the deployed proxy, the headless renderer's second-course stall, live upstream drift affecting catalogue-dependent checks, and the stale-database artefact — the owner decisions on repository visibility and deployment, and how to reproduce the service locally.)
+- [x] Final handoff records commit range, changes, test results, caveats, any policy decisions and how to reproduce the service. (Recorded in the handoff below and in the final report: commit range starting at `62d7ac4` with each commit listed in the handoff table, the per-subsystem changes, the check and sweep results with the measured reason for each failure, the caveats — Caddy `no-store` precedence for the dev server versus the deployed proxy, the headless renderer's second-course stall, live upstream drift affecting catalogue-dependent checks, and the stale-database artefact — the owner decisions on repository visibility and deployment, and how to reproduce the service locally.)
 
 ## Handoff
 
@@ -260,16 +260,18 @@ reproduce each are given.
 - **Backlog:** **180 items ticked, 1 open.** The open item is P2
   server-verifiable gameplay, held open by owner direction; it carries a
   measured feasibility study and points at PR #1, which must not be merged.
-- **Commit range for this pass:** `62d7ac4..1a49cfa`, seven commits, with this
-  handoff committed on top. It names the deployed client build rather than a
-  server commit SHA, because a document cannot state the hash of the commit that
-  contains it without going stale the moment it is written.
+- **Commit range for this pass:** everything since `62d7ac4`, listed commit by
+  commit in the table below — that table is the authoritative record. Neither a
+  count nor an end hash is written here, because a document cannot state the
+  hash of the commit that contains it without going stale the moment it is
+  written: this section alone needed three corrections after its first draft.
 - **Deployed:** the public origin reports `version 1.0.0`, client
   `89e451ea5ce38852`, 275 archived assets. Its address is deliberately not
-  recorded here, for the same reason the deploy path is not: this repository is
-  published, and an operator's live deployment is not part of the source. That
-  client hash is the stable identifier: every commit in this range changed
-  documentation and tests only, so the build served to browsers has not moved.
+  recorded here, for the same reason the deploy path is not: an operator's live
+  deployment is not part of the source, and it should not appear in a repository
+  that is intended to be published. That client hash is the stable identifier:
+  every commit in this range changed documentation, tests or build comments
+  only, so the build served to browsers has not moved.
 - **Repository visibility:** still **private**, and no longer blocked. The owner
   directed on 2026-11-19 that it become public with every push to `main`
   deployed, and on 2026-11-20 decided the one open precondition: **keep the
@@ -288,21 +290,30 @@ reproduce each are given.
 | `1f7b5d1` | Recorded the server-verifiable gameplay study on the backlog item                                                           |
 | `10abf4e` | Fixed two stale statements in the closing sections (a duplicated sentence, a wrong open-item count)                         |
 | `1a49cfa` | Corrected the backlog note that described files which only the PR carries                                                   |
+| `2ec37cd` | Wrote this handoff section, which the review checklist promised but the file did not contain                                |
+| `c44d2e2` | Stopped the handoff claiming deployment happens by itself; it is operator-run                                               |
+| `22e012f` | Stopped `SECURITY.md` and `CONTRIBUTING.md` forbidding their own publication, and sanitised the Dockerfile comment          |
+| `9449c2a` | Recorded the owner's two decisions and removed the host path, compose project, SSH command and live domain from the backlog |
+| `e9578b7` | Described the publication decision without claiming the repository is already public                                        |
 
 ### Test results
 
-- `bun run check` at `1a49cfa`: Prettier clean, ESLint clean, Ruff clean,
-  ShellCheck clean, both `tsc` projects clean, **416 tests / 2121 assertions
-  across 51 files, 0 failures**.
+- `bun run check`: Prettier clean, ESLint clean, Ruff clean, ShellCheck clean,
+  both `tsc` projects clean, **416 tests / 2121 assertions across 51 files, 0
+  failures**. It ran green at `1a49cfa` and has been re-run green at every
+  commit since, most recently on the tree that carries this handoff.
 - Coverage, scoped to authored code by `bunfig.toml` (which excludes
   `private-client/`, `web/`, `node_modules/`, `tests/` and `scripts/`):
   **87.40% functions, 88.90% lines**. There is deliberately no threshold; see
   [development](docs/development.md) for why.
 - Browser sweep, run at `0a2a3ff`: **64 scripts = 49 passed, 8 failed,
   0 timed out, 7 skipped**, so all 57 that run are accounted for. That run is
-  still representative of this commit's code because the commits since then
-  changed `TODO.md` only — `git diff --stat 0a2a3ff..1a49cfa` lists no other
-  file — so no server or client code differs from what the sweep exercised.
+  still representative of this commit's code because nothing under `src/`,
+  `scripts/`, `web/` or `tests/` has changed since it: `git diff --name-only`
+  from `0a2a3ff` to `HEAD` lists only `TODO.md`, `SECURITY.md`,
+  `CONTRIBUTING.md` and `Dockerfile`, so no server, client or test code differs
+  from what the sweep exercised. The one code-adjacent edit is a Dockerfile
+  comment, which no check reads.
   The eight failures are diagnosed rather than unexplained: six are the
   documented headless-renderer stall family (`browser-match`,
   `check-background-clock`, `check-loading-fairness`, `check-next-failure`,
