@@ -250,7 +250,13 @@ reproduce each are given.
 
 ### State at this handoff
 
-- **Branch:** `main`, working tree clean. Every push is deployed automatically.
+- **Branch:** `main`, working tree clean. The owner's standing direction is that
+  every push to `main` is deployed. Deployment is **operator-run, not automatic**
+  — `.github/workflows/` contains `ci.yml` and `release.yml` and no deploy job —
+  so honouring the direction depends on the operator pushing the archive from
+  the deployment host. The command is under "Reproducing the service" below;
+  if it is ever skipped, nothing fails, which is worth knowing before assuming
+  the live site matches `main`.
 - **Backlog:** **180 items ticked, 1 open.** The open item is P2
   server-verifiable gameplay, held open by owner direction; it carries a
   measured feasibility study and points at PR #1, which must not be merged.
