@@ -15,6 +15,16 @@ bun run check
 
 The quality check runs Prettier, ESLint, Ruff, ShellCheck, strict TypeScript checking and the offline unit tests. CI uses the same check. The installed pre-commit hook formats and lints staged source, runs the type checker and runs the unit tests. Generated assets and room data are excluded from source control and formatting. The complete original asset snapshot is stored under `private-client/`, with every file listed by exact SHA-256 in `scripts/client-lock.json`. The quality check and pre-commit hook run `bun run prepare:client` to reconstruct the original validator and patched browser client offline. Catalog unit tests mock only public network answers and exercise the original pinned validator. No asset downloads or live public server are required.
 
+### Coverage
+
+`bun test --coverage` reports on authored code only: `bunfig.toml` excludes `private-client/`, `web/`, `node_modules/`, `tests/` and `scripts/`, so the figure describes the modules this project wrote rather than vendored bundles and test scaffolding. The patterns must be globs — a bare `private-client/` matches nothing.
+
+```sh
+bun test --coverage
+```
+
+There is deliberately no `coverageThreshold`. A percentage gate rewards tests that execute lines and punishes an honest `if`, so a drop is treated as a question — which behaviour is now unmeasured? — rather than a build failure. The per-file table is the artefact to read, and the low figures have known causes: `src/upstream.ts` and `src/upstream/client-adapter.ts` are facade and adapter layers exercised through their real consumers, `upstream/catalog.ts` and `upstream/transport.ts` carry request paths that need a live upstream or a mocked transport, and `shutdown.ts` is process-exit code driven by the integration harness. Behaviour-level gaps are closed by their own tests rather than by raising a number.
+
 ## Integration tests
 
 Prepare the client and start the service. Live integration tests exercise public read-only catalog endpoints and independent Better Party rooms:
@@ -131,6 +141,16 @@ BASE=http://127.0.0.1:8801 bun run capture:screenshots
 ```
 
 It drives a real prepared client against a real service: creates a party, joins three guests over the protocol, imports real public courses, opens the playlist editor, starts the round and captures the same hole again at 390px. Re-run it after an intentional UI change and commit the result; a stale screenshot is worse than none.
+
+A re-capture of an unchanged build produces byte-identical files, so a diff after a UI change shows only that change. Five things used to vary, and the script pins each one:
+
+- **Ball colours** come from the real join path: `/api/join` accepts the `ball` the entry screen saves in `localStorage`, so the host and each guest join with a palette entry instead of a random hue.
+- **The opening course** is drawn from the playlist by weighted vote. The playlist is narrowed to one course before the party starts, so the draw has a single possible outcome; the three-course playlist is still what the playlist shot shows.
+- **The animation clock** is pinned before any application script runs — both `performance.now` and the `requestAnimationFrame` timestamp, because the course's moving obstacles step from the latter.
+- **The settling ball** is waited out: the physics step is real even though the render clock is frozen, so a capture waits for the position to hold still for several samples.
+- **Per-run readings** — the random room code and the two stopwatches — have their text replaced with a fixed reading by a `MutationObserver`, since no product path can pin a value that must stay unguessable or keep ticking. Only the characters change; the element, classes and layout are the ones the product rendered.
+
+Catalogue thumbnails are lazy, so a capture waits for the ones on screen, and the guests join in sequence because the roster lists players in arrival order. Titles, ratings and thumbnails still come from the live catalog, so those can change when upstream does — that is expected of documentation.
 
 ### Known limits of the browser suite
 
