@@ -239,4 +239,111 @@ Do not publicly expose the service as part of this checklist without explicit au
 - [x] All upstream binding changes have binary/source evidence and reproducible validation. (No upstream binding changed in this pass. The one binding-related finding was a misread contract on our side, not a binding change: the client deliberately shows `timerMs` trimmed by `CLOCK_SAFETY_MARGIN_MS`, established from `scripts/party-transport.js` and by recording raw `party` frames, and the assertion was corrected to the documented arithmetic. The pinned client and validator remain untouched and hash-locked by `scripts/client-lock.json`; `bun run check` reconstructs and syntax-checks them offline before running.)
 - [x] No regressions in approved layout, original rendering/physics, playlist semantics or security boundaries. (No product code changed in this pass — the diff is the capture harness, the committed screenshots, `bunfig.toml` and documentation — so layout, rendering, physics, playlist semantics and the security boundary are unmodified by construction. The screenshots were reviewed as images to confirm they still show the approved surfaces correctly: lobby with the real backdrop, join code and four distinct palette swatches; in-game with ranks 1-4 and the flag/stroke column intact; the playlist picker with real catalogue cards; and the 390px layout. The determinism work touched only the capture script's own instrumentation, which pins clocks in the test page and never ships.)
 - [x] Reviewable commits, private repository, no proprietary downloads/secrets in Git, clean working tree. (**The repository-privacy clause of this item has been changed by the owner and the change is recorded rather than applied silently:** on 2026-11-19 the owner directed that the repository become public and that every push to `main` be deployed. It is still private as of this commit — `gh repo view` reports `PRIVATE` — so the remaining work before publication is the one open question recorded in the handoff: whether the force-tracked `private-client/` snapshot should be rewritten out of history or kept, which is an asset-rights decision for the owner. The rest of the clause holds: no database, HAR file, credential, recording or log is tracked (`git status` is clean, and `.gitignore` covers `state/`, `*.sqlite`, `browser-*.log` and the temporary harness directories), and every commit in this pass is a separate reviewable change with its own rationale.)
-- [x] Final handoff records commit range, changes, test results, caveats, any policy decisions and how to reproduce the service. (Recorded in the handoff below and in the final report: commit range `62d7ac4..009137f`, the per-subsystem changes, the check and sweep results with the measured reason for each failure, the caveats — Caddy `no-store` precedence for the dev server versus the deployed proxy, the headless renderer's second-course stall, live upstream drift affecting catalogue-dependent checks, and the stale-database artefact — the owner decisions on repository visibility and deployment, and how to reproduce the service locally.)
+- [x] Final handoff records commit range, changes, test results, caveats, any policy decisions and how to reproduce the service. (Recorded in the handoff below and in the final report: commit range `62d7ac4..1a49cfa`, the per-subsystem changes, the check and sweep results with the measured reason for each failure, the caveats — Caddy `no-store` precedence for the dev server versus the deployed proxy, the headless renderer's second-course stall, live upstream drift affecting catalogue-dependent checks, and the stale-database artefact — the owner decisions on repository visibility and deployment, and how to reproduce the service locally.)
+
+## Handoff
+
+Written 2026-11-20. This section exists because the review checklist promises it:
+the item above says the handoff is recorded below, and until now the file ended
+without one. Every figure here was measured, not recalled, and the commands to
+reproduce each are given.
+
+### State at this handoff
+
+- **Branch:** `main`, working tree clean. Every push is deployed automatically.
+- **Backlog:** **180 items ticked, 1 open.** The open item is P2
+  server-verifiable gameplay, held open by owner direction; it carries a
+  measured feasibility study and points at PR #1, which must not be merged.
+- **Commit range for this pass:** `62d7ac4..1a49cfa`, seven commits, with this
+  handoff committed on top. It names the deployed client build rather than a
+  server commit SHA, because a document cannot state the hash of the commit that
+  contains it without going stale the moment it is written.
+- **Deployed:** <https://putt-better-party.smrff.dev> reports `version 1.0.0`,
+  client `89e451ea5ce38852`, 275 archived assets. That client hash is the stable
+  identifier: every commit in this range changed documentation and tests only,
+  so the build served to browsers has not moved.
+- **Repository visibility:** still **private**. The owner directed on 2026-11-19
+  that it become public and that every push to `main` be deployed; the deploy
+  half is in place, the publication half is blocked on the decision below.
+
+### What each commit in the range did
+
+| commit    | change                                                                                                                      |
+| --------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `c6cf894` | Made README screenshot re-captures byte-stable (pinned ball hues, opening course, clocks, ball-at-rest, rewritten readings) |
+| `009137f` | Scoped coverage to authored code via `bunfig.toml`; recorded the backlog evidence                                           |
+| `0a2a3ff` | Closed the review checklist with per-item evidence                                                                          |
+| `dcd5d0e` | Corrected the sweep figures to the measured `49 passed, 8 failed, 7 skipped`                                                |
+| `1f7b5d1` | Recorded the server-verifiable gameplay study on the backlog item                                                           |
+| `10abf4e` | Fixed two stale statements in the closing sections (a duplicated sentence, a wrong open-item count)                         |
+| `1a49cfa` | Corrected the backlog note that described files which only the PR carries                                                   |
+
+### Test results
+
+- `bun run check` at `1a49cfa`: Prettier clean, ESLint clean, Ruff clean,
+  ShellCheck clean, both `tsc` projects clean, **416 tests / 2121 assertions
+  across 51 files, 0 failures**.
+- Coverage, scoped to authored code by `bunfig.toml` (which excludes
+  `private-client/`, `web/`, `node_modules/`, `tests/` and `scripts/`):
+  **87.40% functions, 88.90% lines**. There is deliberately no threshold; see
+  [development](docs/development.md) for why.
+- Browser sweep, run at `0a2a3ff`: **64 scripts = 49 passed, 8 failed,
+  0 timed out, 7 skipped**, so all 57 that run are accounted for. That run is
+  still representative of this commit's code because the commits since then
+  changed `TODO.md` only — `git diff --stat 0a2a3ff..1a49cfa` lists no other
+  file — so no server or client code differs from what the sweep exercised.
+  The eight failures are diagnosed rather than unexplained: six are the
+  documented headless-renderer stall family (`browser-match`,
+  `check-background-clock`, `check-loading-fairness`, `check-next-failure`,
+  `check-restart`, `check-round-reload`) where a second themed course wedges the
+  renderer and the failure surfaces as a CDP timeout, not a server error; the
+  other two (`check-toolbar-home`, `check-generator-leaderboard`) fail on
+  accumulated database state and pass repeatedly against a fresh service and
+  database.
+
+### Caveats
+
+- **The renderer stall family is an environment limit, not a product defect.**
+  It reproduces in control runs and is recorded in
+  [development](docs/development.md#known-limits-of-the-browser-suite).
+- **Live upstream drift** affects catalogue-dependent checks; a course withdrawn
+  upstream makes an import-based check fail for reasons unrelated to this code.
+- **`PROBE_THROTTLE=20` never finishes loading**, so the determinism probe's
+  usable ceiling is between 8× and 20×.
+- **`private-client/` is force-tracked** (275 files) despite being in
+  `.gitignore`; `tests/clean-checkout.test.js` pins that property because the
+  documented install path depends on it.
+
+### Policy decisions recorded in this pass
+
+- **License:** GPL-3.0-or-later for independently authored code only; `NOTICE`
+  excludes `private-client/` and `web/`.
+- **Repository visibility:** owner-directed toward public, not yet applied.
+- **Coverage:** measured and reported, never gated on a percentage.
+- **Visual baselines:** machine-local and gitignored; never a pass/fail gate, and
+  never diffed across machines because font rasterisation differs.
+- **Server-verifiable gameplay:** studied on PR #1, never merged; the honest
+  position that the server verifies consistency rather than truth stands.
+
+### Still open, and why
+
+1. **`private-client/` in Git history (owner decision).** The 275-file snapshot
+   is tracked, so it is inside every commit. Before the repository is flipped to
+   public, the owner must choose between rewriting that snapshot out of history
+   and keeping it. This is an asset-rights decision, not a technical one, and it
+   is the only thing standing between the current state and publication.
+2. **P2 server-verifiable gameplay (owner direction).** Studied and measured;
+   the work lives on PR #1 with a "do not merge" title. It stays open because
+   implementing verification would need a protocol change plus an engine
+   dependency in the request path, and that is a policy call.
+
+### Reproducing the service
+
+```bash
+bun run prepare:client        # offline; verifies 275 archived hashes
+PORT=8789 BP_DB=state/rooms.sqlite bun run start
+```
+
+Then open <http://localhost:8789>. `curl /health` should answer `"ok": true`.
+[Installation](docs/installation.md) covers the full path from a clean clone,
+including the pinned versions and the failure modes of client preparation.
