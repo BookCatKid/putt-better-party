@@ -10,6 +10,14 @@
   <a href="https://github.com/BookCatKid/putt-better-party/actions/workflows/ci.yml"><img src="https://github.com/BookCatKid/putt-better-party/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
+## Live instance
+
+A public instance runs at
+**[putt-better-party.smrff.dev](https://putt-better-party.smrff.dev)** — open it,
+create a party and share the invite code. It is one operator's deployment, not a
+service with an uptime commitment; every section below is also how to run your
+own.
+
 ## Features
 
 - Play public community courses with friends using the original game engine.
@@ -46,7 +54,12 @@ bun run prepare:client
 bun run start
 ```
 
-Open [http://localhost:8789](http://localhost:8789), create a party and share its invite code. Course metadata and specifications are retrieved from the public putt.day catalog; All original client assets from the reviewed snapshot are retained in this private repository so they survive upstream updates. Preparation verifies their SHA-256 hashes and builds the patched client entirely offline.
+Open [http://localhost:8789](http://localhost:8789), create a party and share its
+invite code. Course metadata and specifications are retrieved from the public
+putt.day catalog. The original client assets from the reviewed snapshot are
+retained in this repository, unlicensed by this project, so they survive upstream
+updates; preparation verifies their SHA-256 hashes and builds the patched client
+entirely offline.
 
 The [installation guide](docs/installation.md) covers exact versions, what each step does, the failure modes of client preparation, and how to verify a working install.
 
