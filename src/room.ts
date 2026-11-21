@@ -1,7 +1,7 @@
 import { parseBallAppearance } from './ball-cosmetics.js';
 import { isHostAction, normalizedName } from './host-actions.js';
 import { JoinRefused } from './join-errors.js';
-import { newReplayId, RoundReplayCapture } from './replays.js';
+import { newReplayId, RoundReplayCapture, type ReplayRound } from './replays.js';
 import { randomUUID, randomBytes, randomInt } from 'node:crypto';
 import { logEvent } from './event-log.js';
 import {
@@ -30,6 +30,9 @@ import {
   summarizeTeams,
 } from './room-scoring.js';
 import { buildCheckpoint, restoreRoom } from './room-persistence.js';
+import { normaliseShot } from './replay/constants.js';
+import { preparedModelLoader } from './replay/models.js';
+import { verifyReplayedRound } from './replay/verify.js';
 import type {
   RoomSocket,
   Identity,
@@ -933,6 +936,7 @@ export class Room {
       (message.t === 'prog' ||
         message.t === 'forfeit' ||
         message.t === 'replay-samples' ||
+        message.t === 'shot' ||
         message.f === 1 ||
         'x' in message) &&
       ('matchId' in message || 'holeIndex' in message) &&
@@ -948,6 +952,7 @@ export class Room {
       (message.t === 'prog' ||
         message.t === 'forfeit' ||
         message.t === 'replay-samples' ||
+        message.t === 'shot' ||
         message.f === 1 ||
         'x' in message) &&
       player.attempt &&
@@ -967,6 +972,21 @@ export class Room {
           this.replayCapture?.append(player, message.replay, this.elapsedHoleMs());
         }
         return;
+      case 'shot': {
+        // The exact input of the stroke the client is taking, sent before the
+        // trajectory it produces is reported. Recording it here is what lets the
+        // server replay the shot and check the result it is asked to believe.
+        // A shot that fails validation is not an error — an old client simply
+        // never sends the frame — it is only dropped from the record.
+        if (!this.playable(player) || player.puttingLocked) {
+          return;
+        }
+        const shot = normaliseShot({ dir: message.dir, power: message.power });
+        if (shot) {
+          this.replayCapture?.recordShot(player, shot);
+        }
+        return;
+      }
       case 'course-vote':
         return this.castVote(player, message);
       case 'ready':
@@ -1100,6 +1120,19 @@ export class Room {
         isIntegerInRange(message.s, Math.max(1, player.strokes), 200) &&
         message.p === this.specs[this.holeIndex]?.par
       ) {
+        // A finish frame names the number of strokes it claims. When the client
+        // also sent `shot` frames, that number is checkable against the inputs
+        // the server recorded. A mismatch is reported, never enforced: an old
+        // client sends no shot frames at all, and a legitimate restart can reset
+        // one side first, so rejecting on this would fail honest players.
+        const recordedShots = this.replayCapture?.recordedShotCount(player) ?? 0;
+        if (recordedShots > 0 && recordedShots !== message.s) {
+          this.audit('shot_count_mismatch', {
+            uid: player.uid,
+            reported: message.s,
+            recorded: recordedShots,
+          });
+        }
         player.strokes = message.s;
         this.replayCapture?.append(player, message.replay, this.elapsedHoleMs(), true);
         this.finish(player, true);
@@ -2441,17 +2474,15 @@ export class Room {
   recordRound(status: RoundStatus, rows: RoundScore[]) {
     if (this.replayId && this.replayCapture && this.onReplayRound) {
       try {
-        this.replayAvailable =
-          this.onReplayRound(
-            this.replayId,
-            this.replayCapture.finish(
-              this.holeIndex,
-              this.specs[this.holeIndex]?.name ?? this.holeIds[this.holeIndex],
-              status,
-              rows,
-              this.players,
-            ),
-          ) || this.replayAvailable;
+        const round = this.replayCapture.finish(
+          this.holeIndex,
+          this.specs[this.holeIndex]?.name ?? this.holeIds[this.holeIndex],
+          status,
+          rows,
+          this.players,
+        );
+        this.replayAvailable = this.onReplayRound(this.replayId, round) || this.replayAvailable;
+        this.verifyRoundTracks(round);
       } catch (error) {
         // Replay storage failure must never alter scoring or stop a match.
         console.error('Replay archive write failed:', errorMessage(error));
@@ -2472,6 +2503,42 @@ export class Room {
       status,
       rows,
     });
+  }
+  /**
+   * Replay each holed track's recorded shot inputs and check the reported
+   * trajectory against the physics that produced it.
+   *
+   * The check runs after the round is stored and is deliberately asynchronous:
+   * its verdict lands in the audit log and never changes a score. A course that
+   * uses event devices is refused by the verifier rather than replayed
+   * approximately, so those rounds simply produce no verdict.
+   */
+  private verifyRoundTracks(round: ReplayRound) {
+    if (!round.level) {
+      return;
+    }
+    for (const track of round.tracks) {
+      if (track.status !== 'holed' || !track.shots?.length || !track.native?.trajectory.length) {
+        continue;
+      }
+      const level = round.level;
+      void verifyReplayedRound({
+        specification: level,
+        shots: track.shots,
+        reported: track.native,
+        reportedHoled: true,
+        loadPiece: preparedModelLoader(),
+      }).then((result) => {
+        this.audit('shot_verification', {
+          uid: track.name,
+          ok: result.ok,
+          failure: result.failure ?? null,
+          detail: result.detail ?? null,
+          shots: result.shots,
+          maxPathDeviationCm: Math.round(result.maxPathDeviationCm * 100) / 100,
+        });
+      });
+    }
   }
   finalize() {
     clearTimeout(this.timer);

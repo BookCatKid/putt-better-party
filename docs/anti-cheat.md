@@ -202,47 +202,66 @@ not meaningful. The leaderboard records the name used; a cheater can use another
 This is why the leaderboard is described as a social record rather than a
 competitive ranking.
 
-## Why deterministic verification is not implemented
+## What deterministic verification does, and what it still does not settle
 
 Deterministic verification — replay the shot inputs through the physics and check
-the resulting score — is the only approach that would actually settle whether a
-score was earned. It is not implemented, and the reasons are concrete rather than
-a lack of interest:
+the resulting score — is the only approach that would settle whether a score was
+earned. It is **implemented on this branch** as an audit, and it deliberately does
+not gate scoring. The reasoning, and the remaining gap, are concrete:
 
-1. **The physics is in the pinned third-party bundles, not in this project.** The
-   server would need to run the original engine, including its rendering-adjacent
-   dependencies, to reproduce a shot. That is a much larger change than it
-   appears, and it would put game code this project does not own into the request
-   path.
+1. **The physics is the pinned engine, run natively.** The server does not
+   reimplement Rapier; it runs the same build the client ships. The
+   `@dimforge/rapier3d-compat` WebAssembly binary is **byte-identical** to the
+   one inlined in the client bundle — same SHA-256
+   (`18157113bd106b5c9644f4a293fea7ba8513e9d44a8b2ec47d11225439c381ca`, 1,569,397
+   bytes) — so "the same engine" is a hash comparison, not a claim. This is also
+   what makes cross-engine float drift a non-question on this pinned pair.
 
-2. **The input stream is not recorded as inputs.** The client sends positions and
-   stroke counts, not the shot parameters that produced them. A verifier would
-   need a new frame carrying aim and power, which is a protocol change and a
-   change to the patched client.
+2. **The input stream now carries inputs.** The client already kept every shot it
+   fired in `gameStore.shots` as `{dir, power}`; the transport forwards new
+   entries as a `shot` frame. That is a protocol addition, and an older client
+   simply never sends it — the frame is dropped rather than treated as an error,
+   so old and new clients interoperate.
 
-3. **The input cannot be recovered exactly, and that is the binding obstacle.**
-   Timing is _not_ the problem, which was measured rather than assumed: on a
-   fixed engine build and host, the same stroke produces a **bit-identical**
-   trajectory even under 8× CPU throttling and a 400 ms main-thread stall well
-   past the engine's own 0.2 s catch-up clamp
-   ([deterministic verification](deterministic-verification.md)). The problem is
-   the other end of the replay: a **quarter of one CSS pixel** of extra pointer
-   pull diverges the trajectory at its tenth sample and moves where the ball
-   stops by **1.96 cm**. Reproducing an outcome therefore needs the exact shot
-   parameters, and the client sends positions and stroke counts instead — it has
-   no field for aim or power. Replaying the client's own recorded path would
-   prove only that the client can produce a path. Whether Rapier yields identical
-   floats on a different engine build or target is also **unmeasured**, and a
-   verifier that disagrees by one stroke is worse than no verifier.
+3. **The comparison is path-based, because index-based cannot work.** The client
+   samples its trajectory once per render frame at `0.04 s` of accumulated
+   simulated time, so an honest run's sample boundaries land at slightly
+   different physical points from a fixed-step replay: measured at up to **~6 cm**
+   of index misalignment. The verifier therefore requires every reported point to
+   lie within **10 cm** of the replayed path, plus a matching rest position and a
+   matching holed/not-holed result. That tolerance is documented as an expected
+   comparison artifact, not as a fudge factor — a fabricated path cannot come
+   near it without running the same physics.
 
-4. **The cost would fall on every legitimate player.** Verification is server CPU
-   per shot per player, for a threat that a private party with friends mostly does
-   not face.
+4. **The measurement behind all of this is still the same one.** On a fixed
+   engine build and host, the same stroke produces a **bit-identical** trajectory
+   even under 8× CPU throttling and a 400 ms main-thread stall well past the
+   engine's own 0.2 s catch-up clamp
+   ([deterministic verification](deterministic-verification.md)). A **quarter of
+   one CSS pixel** of extra pointer pull, however, diverges the trajectory at its
+   tenth sample and moves where the ball stops by **1.96 cm** — which is exactly
+   why the verifier compares against a path with a tolerance rather than
+   demanding identical samples.
 
-So the position is stated plainly instead: **this server is not cheat-proof, and
-does not claim to be.** What it does is refuse reports that are impossible on
-their face, keep players from affecting each other's scores, and gate the public
-leaderboard so the easiest fabrications do not land there.
+5. **Courses it cannot model are refused, not approximated.** An approximation
+   would report an honest player as a cheat, which is worse than no verdict.
+   Courses with event devices (`events.nodes`), spline deck surfaces, an active
+   zone piece (boost, jump, sand, ice, bumper, geyser, portal) or a loop are
+   skipped: the client's engine had inputs the verifier does not have.
+
+6. **The verdict never changes a score.** Verification runs after the round is
+   stored, asynchronously, and writes one `shot_verification` event per holed
+   track. A failure is an operator signal, not a refusal. That is deliberate: a
+   verifier that can reject a legitimate player's score is a worse failure mode
+   than a cheater who is only recorded.
+
+So the honest position is now narrower than it was. The server **can** reproduce
+a recorded shot and check that the reported trajectory is the one the physics
+produces; it **does not** yet act on the result. Closing that last step means
+deciding what a mismatch should cost, which is a gameplay and fairness question
+rather than a technical one. Until it is answered, this is detection, not
+enforcement — and [the leaderboard gate](#the-leaderboard-has-an-eligibility-gate)
+is unchanged.
 
 ## If you need stronger guarantees
 
@@ -254,16 +273,25 @@ In rough order of cost:
   standings, and the event log (with `BP_EVENT_LOG` set) records `stroke_count`,
   `player_holed` and `player_forfeited` with strokes, time and par, so a dispute
   can be examined afterwards.
+- **Read the verification verdict.** With `BP_EVENT_LOG` set, every holed track
+  on a course the verifier can model gets a `shot_verification` event carrying
+  `ok`, the number of shots replayed and the worst path deviation in centimetres.
+  An `ok: false` on a plain course is the strongest evidence this server can
+  produce that a report did not come from its own physics.
 - **Treat the leaderboard as a social record.** It is already gated, already
   excludes custom playlists and restarts, and is not a competitive ranking.
-- **Deterministic verification** would require the four changes above. It is a
-  project, not a patch.
+- **Acting on a verdict** — refusing or flagging a score on a mismatch — is the
+  remaining step. It is a fairness decision, not a technical one, and is not
+  taken here.
 
 ## What is deliberately not claimed
 
 - Not "cheat-proof", "verified", "trusted" or "authenticated" scoring.
 - Not a competitive ranking, and not a record of who is actually good.
 - Not resistant to a player determined enough to open developer tools.
+- Not enforcement: a verification mismatch is recorded, never acted on, and a
+  course the verifier cannot model produces no verdict at all rather than a
+  guess.
 
 Every one of those would be false. The value of this page is that the limits are
 written down where a reader can find them, rather than discovered in a round.
@@ -276,4 +304,4 @@ written down where a reader can find them, rather than discovered in a round.
 - [Background simulation](background-simulation.md) for why a hidden tab cannot
   fast-forward play.
 - [Deterministic verification](deterministic-verification.md) for the measured
-  replay results behind the input-recovery obstacle described above.
+  replay results and the implementation behind the verdict described above.

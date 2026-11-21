@@ -28,4 +28,14 @@ The wordmark image docs/logo.png and the authored styles in
 scripts/better-party.css are original to this project and are covered by
 the GPL.
 
+Bundled third-party software:
+
+- @dimforge/rapier3d-compat (the Rapier 3D physics engine, WebAssembly
+  build) is a runtime dependency, used by src/replay/ to replay recorded
+  shots on the server. Copyright (C) Dimforge and Rapier contributors.
+  Licensed under the Apache License, Version 2.0; the package ships its
+  licence in package.json rather than as a separate file, so the full
+  text is at https://www.apache.org/licenses/LICENSE-2.0. The pinned
+  version is recorded in package.json and bun.lock.
+
 Better Party is not affiliated with putt.day.

@@ -190,10 +190,70 @@ instead of every frame.
 The probe is **not** part of `tests/integration/run-all.sh`: it is a measurement
 tool, not a pass/fail check, and it needs a service configured for it.
 
+The end-to-end **check** is part of the sweep. It needs `BP_EVENT_LOG` so the
+service records its verdict; `run-all.sh` sets that for the sweep, and a manual
+run has to pass it too:
+
+```bash
+BASE=http://127.0.0.1:8831 BP_EVENT_LOG=/tmp/bp-events.jsonl \
+  BROWSER_SCRIPT=tests/integration/check-shot-verification.mjs \
+  bash tests/integration/run-browser-test.sh
+```
+
 ## Status
 
-Studied and measured; **not implemented**, and deliberately not merged. The
-finding is that the honest position in [anti-cheat](anti-cheat.md) — the server
-verifies consistency, not truth — remains correct, and that closing the gap would
-require a protocol change plus an engine dependency in the request path, for a
-threat a private party with friends mostly does not face.
+Studied, measured and **implemented on this branch** (`p2-server-verifiable-gameplay`),
+deliberately **not merged to main**.
+
+The earlier conclusion on this page — that the gap could not be closed without an
+engine dependency in the request path — was **half right and half wrong**, and the
+wrong half is worth recording because the mistake was mine. The engine dependency
+turned out to be a single pinned package whose WebAssembly is **byte-identical**
+to the client's inlined copy, and the shot parameters turned out to be already in
+the client's store (`gameStore.shots`), so the "protocol change" was one new frame
+carrying data the client already had. Both obstacles were real; both were smaller
+than estimated.
+
+What was correct is the measurement itself, and it shaped the design rather than
+being discarded: because a sub-pixel input difference moves the rest position by
+~2 cm and because the client's sampling phase shifts an honest run by up to ~6 cm,
+the verifier compares **paths with a tolerance** instead of samples for equality.
+
+### What was built
+
+| Piece           | File                            | What it does                                                         |
+| --------------- | ------------------------------- | -------------------------------------------------------------------- |
+| Engine loader   | `src/replay/simulate.ts`        | Loads the pinned Rapier WASM; steps at `1/120` s per step            |
+| Shot replay     | `src/replay/simulate.ts`        | Replays one `{dir, power}` stroke from a given lie                   |
+| GLB reader      | `src/replay/glb.ts`             | Node traversal and TRS/matrix transforms; skips the `blades` subtree |
+| Piece table     | `src/replay/piece-registry.ts`  | 95 entries generated from the bundle's `R={…}` literal               |
+| Course geometry | `src/replay/course-geometry.ts` | Faithful to the client's `Ue()`: rotation, tilt, skirts, spawn, cup  |
+| Comparison      | `src/replay/verify.ts`          | Path tolerance, rest and holed checks, refusals                      |
+| Capture         | `src/replays.ts`                | `ReplayTrack.shots`, `recordShot`, `recordedShotCount`               |
+| Wiring          | `src/room.ts`                   | `case 'shot'`, `shot_count_mismatch`, `verifyRoundTracks`            |
+| Transport       | `scripts/party-transport.js`    | Forwards new `gameStore.shots` entries as `shot` frames              |
+
+The piece table is **generated, not transcribed**: the bundle's registry literal
+is evaluated with stubbed helpers, and `tests/piece-registry.test.js` re-derives
+it and fails on drift. Hand-transcription was tried first and produced a wrong
+table — that is recorded here so the next person does not repeat it.
+
+### The evidence
+
+- **Byte-identical engine.** SHA-256 of `@dimforge/rapier3d-compat@0.19.2`'s WASM
+  equals the client's inlined binary (`18157113…`, 1,569,397 bytes).
+- **A real probe reproduces.** `/tmp/p2-run.json`, a real "Snow Putt Intended"
+  run, replayed to a rest error of **0.055 cm** with point-to-path deviation of
+  **1.9 cm mean / 6 cm worst** — inside the 10 cm tolerance, deterministic and
+  byte-identical on rerun.
+- **A live end-to-end check passes.** `tests/integration/check-shot-verification.mjs`
+  drives the real client, holes out, and reads the server's own verdict:
+  `ok: true`, `shots: 1`, `maxPathDeviationCm: 1.41`.
+
+### What it still does not do
+
+The verdict is an audit entry, not a decision. Nothing is refused on a mismatch,
+and a course the verifier cannot model (event devices, splines, active zones,
+loops) produces no verdict rather than an approximation. Both are deliberate: a
+verifier that rejects an honest player is a worse failure than a cheater who is
+only recorded. Acting on the verdict is left open on purpose.

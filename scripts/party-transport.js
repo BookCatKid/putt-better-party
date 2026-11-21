@@ -128,6 +128,7 @@ function connectBetterParty(code, identity, options = {}) {
   let terminalError = '';
   let lastHoleIndex = -1;
   let lastStrokeCount = -1;
+  let lastShotCount = 0;
   let completionSent = false;
   let forfeitSent = false;
   let roundChangePending = false;
@@ -165,6 +166,7 @@ function connectBetterParty(code, identity, options = {}) {
       frame.t === 'prog' ||
       frame.t === 'forfeit' ||
       frame.t === 'replay-samples' ||
+      frame.t === 'shot' ||
       frame.t === 'scene' ||
       frame.f === 1
     ) {
@@ -223,6 +225,33 @@ function connectBetterParty(code, identity, options = {}) {
       return;
     }
     const game = bind.gameStore.state;
+    // The exact shot input is sent as the stroke is taken, before the
+    // trajectory it produced is reported. The server records these frames so it
+    // can replay the shot and check the reported result against the physics.
+    // `game.shots` is a list the pinned bundle already keeps; it only grows.
+    const shots = Array.isArray(game.shots) ? game.shots : [];
+    if (shots.length < lastShotCount) {
+      // A restart discards the attempt's shots; the server drops its copy in
+      // the same epoch, so resynchronise rather than skipping the fresh ones.
+      lastShotCount = shots.length;
+    }
+    if (shots.length > lastShotCount) {
+      for (const shot of shots.slice(lastShotCount)) {
+        if (
+          shot &&
+          Array.isArray(shot.dir) &&
+          send({
+            t: 'shot',
+            dir: [Number(shot.dir[0]), Number(shot.dir[1])],
+            power: Number(shot.power),
+          })
+        ) {
+          lastShotCount += 1;
+        } else {
+          break; // A send that failed leaves the count so the shot is retried.
+        }
+      }
+    }
     if (!party.bpPuttingLocked && game.strokes !== lastStrokeCount && game.phase !== 'holed') {
       if (send({ t: 'prog', st: game.strokes })) {
         lastStrokeCount = game.strokes;
@@ -330,6 +359,7 @@ function connectBetterParty(code, identity, options = {}) {
       completionSent = false;
       forfeitSent = false;
       lastStrokeCount = -1;
+      lastShotCount = 0;
     }
     // A snapshot only describes a round change when this connection already
     // knew a round. The very first snapshot introduces the round instead: the

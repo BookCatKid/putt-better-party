@@ -62,6 +62,8 @@ Without it the admin API answers `503` and stays closed.
 - `state/rooms.sqlite-wal` and `-shm` — SQLite's write-ahead log and shared
   memory, managed by SQLite.
 - `BP_EVENT_LOG` — private gameplay events, rotated at 8 MiB with six archives.
+  On a course the verifier can model, this is also where the `shot_verification`
+  verdict lands (see [deterministic verification](deterministic-verification.md)).
 - `web/` — the generated client. Rebuild it with `bun run prepare:client`.
 - `private-client/` — the archived original client. Source of truth for the
   build; never edited by hand.
