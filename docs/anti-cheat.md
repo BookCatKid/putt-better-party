@@ -1,9 +1,10 @@
 # Anti-cheat threat model
 
-The server does not simulate golf. It receives a score and records it. This page
-states precisely what the server enforces, what it cannot enforce, and what a
-deterministic verifier would actually require — because a claim of "cheat-proof"
-play would be false, and a vague one would be worse than none.
+The server does not decide a score by simulating golf. It receives a score and
+records it. This page states precisely what the server enforces, what it cannot
+enforce, and what deterministic verification does and does not settle — because a
+claim of "cheat-proof" play would be false, and a vague one would be worse than
+none.
 
 Every statement here was checked against the code and, where behaviour matters,
 against a running service. The measurements are recorded rather than described.
@@ -13,11 +14,14 @@ against a running service. The measurements are recorded rather than described.
 A player controls their own browser. The client runs the original physics engine,
 so the _only_ thing the server learns about a hole is what that client chooses to
 send. Anyone who can open developer tools can send any frame they like, including
-a hole-in-one on a par-10 course. The server's job is therefore not to verify the
-physics — it cannot — but to refuse reports that are **internally impossible**,
-to keep **one player's claims from affecting another's**, and to ensure the
-**public leaderboard** cannot be filled with scores that trivially self-discredit
-it.
+a hole-in-one on a par-10 course. The server's job is therefore to refuse reports
+that are **internally impossible**, to keep **one player's claims from affecting
+another's**, to ensure the **public leaderboard** cannot be filled with scores
+that trivially self-discredit it, and — since [deterministic
+verification](#what-deterministic-verification-does-and-what-it-still-does-not-settle)
+landed on this branch — to **replay the shots it was given and record whether the
+reported trajectory is the one the physics produces**. That last part is an
+audit, not a gate: it never changes a score.
 
 ## What the server enforces
 
@@ -159,8 +163,13 @@ A hole-in-one on a par 10 in **16 milliseconds**, recorded as a legitimate hole.
 Every check listed above passed, because the report was internally consistent:
 the par was real, one stroke is at least zero, and 16 ms is a number.
 
-That is the honest summary of the current state. The server verifies consistency,
-not truth.
+That is the honest summary of what the server **enforces**. The recorded verdict
+for this same class of report is now narrower: on a course the verifier can model,
+a report whose trajectory does not come from the physics is recorded as
+`shot_verification` with `ok: false` (see
+[deterministic verification](#what-deterministic-verification-does-and-what-it-still-does-not-settle)).
+The score is still stored and still counts. Detection and enforcement are
+different things, and only the first one is implemented.
 
 ### The stroke floor is not monotonic
 
@@ -191,9 +200,11 @@ forgotten. It is listed as a limitation so nobody assumes it is covered.
 
 ### Within a party, scores are taken at face value
 
-Other players see the reported score. There is no cross-checking between clients,
-no consensus, and no way for one player to dispute another's claim. A cheater in
-a private party with friends has no technical obstacle — only a social one.
+Other players see the reported score. There is no cross-checking between clients
+and no way for one player to dispute another's claim, and the verifier's verdict
+is not shown to them. A cheater in a private party with friends has no technical
+obstacle — only a social one — unless the host reads the event log, where a
+mismatch on a modelled course does appear.
 
 ### Anonymous identities mean a ban is not durable
 
