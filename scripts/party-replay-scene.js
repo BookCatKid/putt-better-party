@@ -36,6 +36,7 @@ export function BpPartyReplayScene({ level, tracks, clock, focus }) {
               style: { height: 'min(62svh, 560px)', width: '100%' },
             },
             [
+              component(BpReplayClock, { key: 'replay-clock', clock }),
               component(m, {
                 key: 'health',
                 surface: 'party-replay',
@@ -82,6 +83,19 @@ export function BpPartyReplayScene({ level, tracks, clock, focus }) {
       ),
     ),
   );
+}
+
+// Upstream's course devices (spinner, slider, pendulum, piston) animate from the
+// renderer's wall clock rather than from replay time, so they keep turning while
+// a replay is paused and drift whenever playback is not at 1x. Rebase that clock
+// onto the replay clock each frame. This hook runs at -2: ahead of the ball
+// driver (-1) and the devices (0), so everything in a frame sees one instant.
+function BpReplayClock({ clock }) {
+  const { clock: rendererClock } = l();
+  c(() => {
+    rendererClock.elapsedTime = clock.current / 1000;
+  }, -2);
+  return null;
 }
 
 function BpTimedDevices({ level, track, clock }) {
