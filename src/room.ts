@@ -32,7 +32,7 @@ import {
 import { buildCheckpoint, restoreRoom } from './room-persistence.js';
 import { normaliseShot } from './replay/constants.js';
 import { preparedModelLoader } from './replay/models.js';
-import { verifyReplayedRound } from './replay/verify.js';
+import { verifyReplayedRound, unverifiableReason } from './replay/verify.js';
 import type {
   RoomSocket,
   Identity,
@@ -2517,11 +2517,23 @@ export class Room {
     if (!round.level) {
       return;
     }
+    const level = round.level;
+    if (unverifiableReason(level)) {
+      return;
+    }
+    /*
+     * Ask before replaying whether this course can be modelled at all. The
+     * verifier would return `ok: false` with `failure: 'event-course'` for an
+     * event, spline, active-zone or loop course, and this method audits
+     * `result.ok` - so writing that through would record an honest player on a
+     * confetti course as a failed verification, indistinguishable in the log
+     * from a fabricated trajectory. Refusing to model a course is not a
+     * finding about the player, so it produces no verdict at all.
+     */
     for (const track of round.tracks) {
       if (track.status !== 'holed' || !track.shots?.length || !track.native?.trajectory.length) {
         continue;
       }
-      const level = round.level;
       void verifyReplayedRound({
         specification: level,
         shots: track.shots,

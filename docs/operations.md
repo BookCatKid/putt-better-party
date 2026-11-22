@@ -279,6 +279,38 @@ never becomes a crash. That has two consequences worth knowing:
   a window rather than forever. Take a backup before any version change, which
   `verify` then lets you inspect to confirm what the old build could read.
 
+## Comparing a replay against what the server predicted
+
+`scripts/compare-replay.mjs` is an operator tool: it reads an archived round out
+of the room database, replays each recorded shot through the same Rapier build
+the verifier audits with, and prints the two trajectories side by side. It is not
+part of `bun run check` and needs a database that has had a hole played into it.
+
+```sh
+bun scripts/compare-replay.mjs --db state/rooms.sqlite
+bun scripts/compare-replay.mjs --db state/rooms.sqlite --match <id> --hole 0 --all
+```
+
+It reports two different things, because they answer different questions.
+
+**Path deviation** is what the verifier enforces: for every point the client
+recorded, the distance to the nearest point on the replayed path. A real round on
+`hole in one` measured **1.41 cm** worst, against a 10 cm tolerance.
+
+**Index alignment** compares sample _i_ against sample _i_, which is what
+"identical" would mean — and it does **not** hold, by design rather than by
+defect. The client samples once per rendered frame and resets its accumulator on
+every sample, so its spacing is `ceil(0.04 / frameDelta) * frameDelta`, not
+`0.04 s`. The same shot at 30 fps and at 144 fps records different sample counts
+of the same path. The real round above recorded **94** client samples against
+**78** replayed ones for one stroke, with a worst index-aligned delta of
+**2.24 cm** — and the tail samples are the ball creeping to rest, repeated
+several times.
+
+So "the server predicted exactly what happened" is true of the **path** and not
+of the **sample list**. Anything comparing the two arrays element by element will
+report a mismatch on a completely honest run.
+
 ## Recovering from problems
 
 - **The client will not load.** `web/` is missing or stale. Run
