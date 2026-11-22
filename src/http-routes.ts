@@ -77,6 +77,34 @@ const html =
   '<!doctype html><html lang="en" class="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Party · Better Party</title><link rel="icon" href="/favicon.ico" type="image/x-icon"><link rel="stylesheet" href="/assets/styles-S28F_fms.css"><body class="bp-page"><div id="app"></div><script type="module" src="/assets/index-DFMxt6BL.js"></script></body></html>';
 
 /**
+ * One page of the leaderboard, with a replay link only where one still exists.
+ *
+ * A best score outlives its replay: recordings are kept by archive budget rather
+ * than by age, so a prune can drop a match whose score is still ranked. The link
+ * is therefore resolved against the archive at read time instead of trusted from
+ * the stored row, and a row whose recording is gone keeps its score and simply
+ * loses the link rather than pointing at a 404.
+ */
+export function leaderboardPage(
+  leaderboard: Leaderboard,
+  replayArchive: ReplayArchive,
+  holes: number,
+  search: string,
+  offset: number,
+) {
+  const page = leaderboard.list(holes, search, offset);
+  const ids = page.rows.flatMap((row) => (row.replayId ? [row.replayId] : []));
+  const retained = replayArchive.retained(ids);
+  return {
+    rows: page.rows.map(({ replayId, ...row }) => ({
+      ...row,
+      replayId: replayId && retained.has(replayId) ? replayId : null,
+    })),
+    nextOffset: page.nextOffset,
+  };
+}
+
+/**
  * Build the request handler `Bun.serve` delegates to. The returned function is
  * identical in shape to the bootstrap's old inline one: a WebSocket upgrade
  * answers `undefined` so the socket is not decorated as a response.
@@ -511,12 +539,10 @@ export function createHttpHandler(context: HttpContext) {
             ? new Response(round, {
                 headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
               })
-            : response({ error: 'Replay not found or expired' }, 404);
+            : response({ error: 'Replay not found' }, 404);
         }
         const summary = replayArchive.summary(match[1]);
-        return summary
-          ? response(summary)
-          : response({ error: 'Replay not found or expired' }, 404);
+        return summary ? response(summary) : response({ error: 'Replay not found' }, 404);
       }
       if (/^\/replays\/[A-Za-z0-9_-]{32}$/.test(pathname)) {
         if (!readOnly) {
@@ -537,9 +563,8 @@ export function createHttpHandler(context: HttpContext) {
         ) {
           return response({ error: 'Invalid leaderboard selection' }, 400);
         }
-        return response(
-          leaderboard.list(holes, (url.searchParams.get('search') ?? '').slice(0, 24), offset),
-        );
+        const search = (url.searchParams.get('search') ?? '').slice(0, 24);
+        return response(leaderboardPage(leaderboard, replayArchive, holes, search, offset));
       }
       if (pathname === '/leaderboard' && req.method === 'GET') {
         return page(await Bun.file(new URL('./leaderboard.html', import.meta.url)).text());

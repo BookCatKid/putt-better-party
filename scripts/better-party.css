@@ -1109,6 +1109,15 @@ body:has(> #app) {
 .bp-leaderboard-note {
   margin-top: 20px;
 }
+.bp-leaderboard-replay {
+  color: #a7f3d0;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 8px;
+}
+.bp-leaderboard-replay:hover {
+  text-decoration: underline;
+}
 
 /* Layout only. The archived lobby's colors, type, rounded panels,
    player row component and buttons are reused directly. */

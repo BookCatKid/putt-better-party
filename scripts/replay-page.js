@@ -437,8 +437,7 @@ export function component() {
           'p',
           {},
           summary.rounds.length +
-            ' recorded holes · Available until ' +
-            new Date(summary.expires).toLocaleDateString(),
+            (summary.rounds.length === 1 ? ' recorded hole' : ' recorded holes'),
         ),
     ]),
     summary &&
@@ -483,7 +482,7 @@ export function component() {
     createElement(
       'p',
       { key: 'privacy', className: 'bp-replay-note' },
-      'Anyone with this private-link URL can view the recorded match. Older recordings expire automatically.',
+      'Anyone with this private-link URL can view the recorded match. Recordings are kept until the archive reaches its storage budget.',
     ),
   ]);
 }

@@ -14,6 +14,8 @@ interface LeaderboardRow {
   strokes: number;
   timeMs: number;
   achievedAt: number;
+  /** The match to link to, or null when the recording is no longer archived. */
+  replayId: string | null;
 }
 
 /** A page of results. `nextOffset` is null on the last page. */
@@ -56,14 +58,37 @@ function duration(ms: number): string {
   return `${minutes}:${seconds}.${millis}`;
 }
 
-function row(values: Array<string | number>): HTMLTableRowElement {
+function row(values: Array<string | number | Node>): HTMLTableRowElement {
   const element = document.createElement('tr');
   for (const value of values) {
     const cell = document.createElement('td');
-    cell.textContent = String(value);
+    if (typeof value === 'string' || typeof value === 'number') {
+      cell.textContent = String(value);
+    } else {
+      cell.append(value);
+    }
     element.append(cell);
   }
   return element;
+}
+
+/**
+ * The replay cell for one score.
+ *
+ * A dash rather than a dead link when the recording is gone: the score is still
+ * real, and a link to a 404 would suggest otherwise.
+ */
+function replayCell(replayId: string | null): Node {
+  if (!replayId) {
+    return document.createTextNode('—');
+  }
+  const link = document.createElement('a');
+  link.href = '/replays/' + encodeURIComponent(replayId);
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.className = 'bp-leaderboard-replay';
+  link.textContent = 'Watch';
+  return link;
 }
 
 function describe(error: unknown): string {
@@ -104,6 +129,7 @@ async function load(append = false): Promise<void> {
           score.strokes,
           duration(score.timeMs),
           new Date(score.achievedAt).toLocaleDateString(),
+          replayCell(score.replayId),
         ]),
       );
     }

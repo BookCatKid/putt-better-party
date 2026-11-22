@@ -151,9 +151,21 @@ try {
     await client.evalJS('document.querySelector("#scores tr td:nth-child(3)").textContent'),
     '7',
   );
+  // The ranked row links to the match it came from, and that link must actually
+  // resolve to a replay rather than a 404.
+  const replayHref = await client.evalJS(
+    'document.querySelector("#scores tr td:nth-child(6) a")?.getAttribute("href") ?? null',
+  );
+  assert.match(replayHref ?? '', /^\/replays\/[A-Za-z0-9_-]{32}$/);
+  const replayId = replayHref.split('/').at(-1);
+  const replaySummary = await fetch(base + '/api/replays/' + replayId).then((response) =>
+    response.json(),
+  );
+  assert.equal(replaySummary.rounds.length, 1);
+  assert.equal(replaySummary.rounds[0].players[0].name, 'Leaderboard probe');
   assert.equal(client.events.filter((event) => event.type === 'exception').length, 0);
   console.log(
-    'PASS finalization records random match, leaderboard page renders and filters by hole count and player',
+    'PASS finalization records random match, leaderboard page renders, filters by hole count and player, and links to the replay of that match',
   );
 } finally {
   host?.close();

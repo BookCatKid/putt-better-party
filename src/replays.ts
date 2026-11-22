@@ -13,9 +13,8 @@ const MAX_PLAYER_SAMPLES = 18_010;
 const MAX_ROUND_SAMPLES = 300_000;
 const MAX_CHUNK_SAMPLES = 128;
 const MAX_STATES = 256;
-const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
+const MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024;
 const MAX_ROUND_BYTES = 16 * 1024 * 1024;
-const RETENTION_MS = 7 * 24 * 60 * 60_000;
 const integer = (value: unknown, min: number, max: number): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max;
 
@@ -276,19 +275,31 @@ export class ReplayArchive {
     this.prune();
   }
 
-  prune(now = Date.now()) {
+  /**
+   * Enforce the archive budget.
+   *
+   * Recordings are kept indefinitely by age, so the only reason to remove one is
+   * that the archive has outgrown its budget: the newest matches are kept and the
+   * oldest are dropped until the total fits. A leaderboard row can therefore
+   * outlive the replay it points at, which is why a link is only advertised while
+   * the archive still holds the match (see `retained`).
+   *
+   * The budget is a parameter so a test can drive eviction without writing a
+   * gigabyte; production always uses the module default.
+   */
+  prune(budgetBytes = MAX_ARCHIVE_BYTES) {
     const remove = this.db.query('DELETE FROM replay_rounds WHERE match_id = ?');
     const removeMatch = this.db.query('DELETE FROM replay_matches WHERE id = ?');
     const matches = this.db
-      .query<{ id: string; created: number; size: number }, []>(
-        'SELECT m.id, m.created, COALESCE(SUM(length(r.payload)+length(r.summary)),0) AS size FROM replay_matches m LEFT JOIN replay_rounds r ON r.match_id=m.id GROUP BY m.id ORDER BY m.created DESC, m.id',
+      .query<{ id: string; size: number }, []>(
+        'SELECT m.id, COALESCE(SUM(length(r.payload)+length(r.summary)),0) AS size FROM replay_matches m LEFT JOIN replay_rounds r ON r.match_id=m.id GROUP BY m.id ORDER BY m.created DESC, m.id',
       )
       .all();
     let retained = 0;
     this.db.transaction(() => {
       for (const match of matches) {
         retained += match.size;
-        if (match.created < now - RETENTION_MS || retained > MAX_ARCHIVE_BYTES) {
+        if (retained > budgetBytes) {
           remove.run(match.id);
           removeMatch.run(match.id);
         }
@@ -314,10 +325,8 @@ export class ReplayArchive {
 
   summary(id: string) {
     const match = this.db
-      .query<{ created: number }, [string, number]>(
-        'SELECT created FROM replay_matches WHERE id=? AND created>=?',
-      )
-      .get(id, Date.now() - RETENTION_MS);
+      .query<{ created: number }, [string]>('SELECT created FROM replay_matches WHERE id=?')
+      .get(id);
     if (!match) {
       return null;
     }
@@ -328,17 +337,40 @@ export class ReplayArchive {
       .all(id);
     return {
       created: match.created,
-      expires: match.created + RETENTION_MS,
       rounds: rounds.map(({ summary }) => JSON.parse(summary)),
     };
   }
 
   round(id: string, hole: number) {
     const row = this.db
-      .query<{ payload: Uint8Array }, [string, number, number]>(
-        'SELECT r.payload FROM replay_rounds r JOIN replay_matches m ON m.id=r.match_id WHERE r.match_id=? AND r.hole=? AND m.created>=?',
+      .query<{ payload: Uint8Array }, [string, number]>(
+        'SELECT r.payload FROM replay_rounds r JOIN replay_matches m ON m.id=r.match_id WHERE r.match_id=? AND r.hole=?',
       )
-      .get(id, hole, Date.now() - RETENTION_MS);
+      .get(id, hole);
     return row ? Bun.gunzipSync(new Uint8Array(row.payload)) : null;
+  }
+
+  /**
+   * Which of the given replay ids the archive still holds.
+   *
+   * A leaderboard row outlives its replay whenever the archive is pruned under its
+   * budget, so a link must be offered only for ids this returns. One query rather
+   * than one per row, because a leaderboard page is up to a hundred rows.
+   */
+  retained(ids: readonly string[]): Set<string> {
+    const present = new Set<string>();
+    if (!ids.length) {
+      return present;
+    }
+    const placeholders = ids.map(() => '?').join(', ');
+    const rows = this.db
+      .query<{ id: string }, string[]>(
+        `SELECT id FROM replay_matches WHERE id IN (${placeholders})`,
+      )
+      .all(...ids);
+    for (const row of rows) {
+      present.add(row.id);
+    }
+    return present;
   }
 }

@@ -117,9 +117,9 @@ test('round archive validates sample limits, deduplicates retransmissions, isola
     });
     expect(JSON.parse(Buffer.from(archive.round(id, 0)).toString())).toEqual(round);
     expect(new ReplayArchive(db).summary(id).rounds).toHaveLength(1);
-    archive.prune(Date.now() + 8 * 86400000);
-    expect(archive.summary(id)).toBeNull();
-    expect(archive.round(id, 0)).toBeNull();
+    // Recordings do not expire on a timer, so a later restart must still find this one.
+    expect(archive.retained([id])).toEqual(new Set([id]));
+    expect(new ReplayArchive(db).summary(id)).not.toBeNull();
   } finally {
     db.close();
   }
@@ -161,6 +161,59 @@ test('round scoped capture accepts only authorized current players and publishes
     expect(data.tracks[0].status).toBe('holed');
   } finally {
     room.dispose();
+    db.close();
+  }
+});
+test('recordings survive a long passage of time and are evicted oldest-first only when the archive budget is exceeded', () => {
+  const db = new Database(':memory:');
+  const archive = new ReplayArchive(db);
+  const round = {
+    index: 0,
+    title: 'Fixture',
+    status: 'completed',
+    level,
+    durationMs: 100,
+    tracks: [
+      {
+        id: 1,
+        name: 'Host',
+        hue: 10,
+        status: 'holed',
+        strokes: 1,
+        timeMs: 100,
+        truncated: false,
+        samples: [0, 100, 10, 200, 1],
+      },
+    ],
+  };
+  try {
+    const first = newReplayId();
+    const second = newReplayId();
+    expect(archive.record(first, round)).toBe(true);
+    expect(archive.record(second, round)).toBe(true);
+    // Explicit ages, so "oldest first" is a decision under test rather than a tie
+    // broken by id. `first` is a year old and `second` is recent.
+    const age = db.query('UPDATE replay_matches SET created = ? WHERE id = ?');
+    age.run(Date.now() - 365 * 86400000, first);
+    age.run(Date.now(), second);
+    // No age limit: a prune with the real budget removes nothing, however old the
+    // recording is. This is the assertion that fails if a retention window returns.
+    archive.prune();
+    expect(archive.retained([first, second])).toEqual(new Set([first, second]));
+    expect(archive.summary(first)).not.toBeNull();
+    expect(archive.round(first, 0)).not.toBeNull();
+    const size = db
+      .query('SELECT COALESCE(SUM(length(payload)+length(summary)),0) AS size FROM replay_rounds')
+      .get().size;
+    expect(size).toBeGreaterThan(0);
+    // Under a budget one byte short of the total, the older one goes and the newest stays.
+    archive.prune(size - 1);
+    expect(archive.retained([first, second])).toEqual(new Set([second]));
+    expect(archive.round(first, 0)).toBeNull();
+    expect(archive.round(second, 0)).not.toBeNull();
+    // The startup prune must not remove anything while the archive is inside budget.
+    expect(new ReplayArchive(db).retained([second])).toEqual(new Set([second]));
+  } finally {
     db.close();
   }
 });

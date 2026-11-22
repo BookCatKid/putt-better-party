@@ -80,6 +80,25 @@ or to rejoin as somebody. The current match's per-hole rounds are separate and a
 cleared by a rematch; the history is not. Older checkpoints without a history load
 with an empty one.
 
+### Party replays
+
+Replays are stored in the same database, in `replay_matches` and `replay_rounds`, and
+are **not** part of a room checkpoint: they survive a restart, and a room being
+reclaimed does not delete them.
+
+Recordings do not expire on a timer. The archive keeps every match until the compressed
+total would exceed **1 GiB**, and only then evicts its oldest matches until it fits, so
+the most recent recordings are always the ones kept. That budget is the only bound on
+the archive's disk use, so watch `state/rooms.sqlite` growth against the volume and
+raise or lower the constant in `src/replays.ts` deliberately rather than assuming a
+retention period exists.
+
+Because the budget can outlive a leaderboard row, a best score keeps its place after
+its recording is evicted; the leaderboard resolves each link against the archive on
+every read and shows no link rather than a broken one. Replays are also readable by
+anyone holding the 32-character link, and a link is an unguessable capability rather
+than an authenticated route.
+
 ### Tournament tables
 
 A checkpoint also carries the party's current tournament, when one is configured: the
