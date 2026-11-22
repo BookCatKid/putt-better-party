@@ -232,7 +232,13 @@ function ReplayViewer({ round }) {
     content = createElement(
       React.Suspense,
       { fallback: waiting },
-      createElement(Scene, { level: round.level, tracks, clock, focus }),
+      createElement(Scene, {
+        level: round.level,
+        tracks,
+        clock,
+        focus,
+        deviceClockMs: round.deviceClockMs,
+      }),
     );
   } else if (view === 'native' && single?.native?.trajectory.length) {
     const native = single.native;

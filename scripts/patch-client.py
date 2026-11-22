@@ -310,6 +310,14 @@ const isTransportSpectator = _e;
     source += (
         "\nconst followUseFrame=W,followUseThree=G,followReact=J,FollowVector=H,followGhosts=U,followScene=V;\n"
         + (root / "scripts/follow-camera.js").read_text()
+        + (root / "scripts/device-clock.js").read_text()
+    )
+    # Mounted beside the physics provider, so it runs for every course rather than
+    # only those carrying an events graph.
+    source = replace_once(
+        source,
+        "(0,Y.jsx)(b,{})",
+        "(0,Y.jsx)(b,{}),(0,Y.jsx)(BpDeviceClock,{})",
     )
     return (
         "import{bpConnection,bpAck,bpScenePrepared,transportSceneReadyLevelId,"

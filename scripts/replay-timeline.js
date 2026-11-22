@@ -54,6 +54,8 @@ export function createReplayRecorder() {
   let lastSequence;
   /** @type {string | null} */
   let lastNodes = null;
+  /** @type {number | null} */
+  let deviceClockOrigin = null;
   return {
     /** @param {SnippetPartyState} party @param {SnippetGameState} game @param {SnippetScene} scene @param {number} now */
     sample(party, game, scene, now, force = false) {
@@ -78,6 +80,7 @@ export function createReplayRecorder() {
         lastAt = -1;
         lastSequence = undefined;
         lastNodes = null;
+        deviceClockOrigin = null;
       }
       const at = Math.min(900000, Math.max(0, Math.round(now - party.startAt)));
       if (at <= lastAt || (!force && lastAt >= 0 && at - lastAt < 40)) {
@@ -92,6 +95,12 @@ export function createReplayRecorder() {
         samples.splice(0, SAMPLE_FIELDS);
       }
       const jump = lastAt < 0 || at - lastAt > 500 || scene.discontinuitySeq !== lastSequence;
+      // Clock-driven devices follow the renderer clock, whose phase at round
+      // start is arbitrary, so pin it once per attempt.
+      const clockMs = scene.deviceClockMs;
+      if (deviceClockOrigin === null && typeof clockMs === 'number' && Number.isFinite(clockMs)) {
+        deviceClockOrigin = Math.max(0, Math.round(clockMs));
+      }
       samples.push(at, Math.round(x * 100), Math.round(y * 100), Math.round(z * 100), Number(jump));
       lastAt = at;
       lastSequence = scene.discontinuitySeq;
@@ -114,8 +123,11 @@ export function createReplayRecorder() {
       ) {
         return undefined;
       }
-      /** @type {{samples: number[], states: ReplayDeviceState[], native?: {path:number[], trajectory:number[], events: {sample:number,node:string}[]}}} */
+      /** @type {{samples: number[], states: ReplayDeviceState[], deviceClockMs?: number, native?: {path:number[], trajectory:number[], events: {sample:number,node:string}[]}}} */
       const result = { samples: samples.slice(), states: states.slice() };
+      if (deviceClockOrigin !== null) {
+        result.deviceClockMs = deviceClockOrigin;
+      }
       if (final && game.result && Array.isArray(scene.traj)) {
         result.native = {
           path: (game.result.path ?? []).slice(),
@@ -128,6 +140,8 @@ export function createReplayRecorder() {
     sent() {
       samples = [];
       states = [];
+      // The device clock belongs to the attempt, not the chunk: later chunks of
+      // the same attempt must still report it.
     },
   };
 }

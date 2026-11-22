@@ -66,6 +66,78 @@ test('client recorder captures waiting and moving balls independently of presenc
   recorder.sample(party, game, scene, 2000);
   expect(recorder.payload(party, game, scene).samples).toEqual([0, 300, 15, 200, 1]);
 });
+test('recorder records the device clock once per attempt so a replay can reproduce the phase the devices were actually in', () => {
+  const recorder = createReplayRecorder();
+  const party = {
+    phase: 'playing',
+    mapReady: true,
+    selfRole: 'player',
+    matchId: 'bridge',
+    holeIndex: 0,
+    startAt: 1000,
+    currentMap: level,
+  };
+  const game = { level, phase: 'aiming', result: null };
+  const scene = {
+    ballPos: { x: 1, y: 0.15, z: 2 },
+    discontinuitySeq: 0,
+    activeEventNodes: [],
+    deviceClockMs: 98765,
+  };
+  expect(recorder.sample(party, game, scene, 1000)).toBe(true);
+  // The clock keeps running, but the recorded origin must not follow it: the
+  // devices' phase at the start of the attempt is the reference.
+  scene.deviceClockMs = 99500;
+  recorder.sample(party, game, scene, 1050);
+  expect(recorder.payload(party, game, scene).deviceClockMs).toBe(98765);
+
+  // A chunk upload mid-attempt must not lose the origin: the next chunk of the
+  // same attempt still has to report it, or the final payload omits the phase.
+  recorder.sent();
+  recorder.sample(party, game, scene, 1500);
+  expect(recorder.payload(party, game, scene).deviceClockMs).toBe(98765);
+
+  // A new attempt takes a new origin.
+  party.matchId = 'next';
+  scene.deviceClockMs = 200000;
+  recorder.sample(party, game, scene, 2000);
+  expect(recorder.payload(party, game, scene).deviceClockMs).toBe(200000);
+
+  // A client that cannot report the clock omits the field rather than sending 0,
+  // so the replay knows the phase is unknown instead of pretending it is zero.
+  const silent = createReplayRecorder();
+  delete scene.deviceClockMs;
+  silent.sample(party, game, scene, 3000);
+  expect(silent.payload(party, game, scene).deviceClockMs).toBeUndefined();
+});
+test('round archive keeps the reported device clock and tolerates clients that cannot report one', () => {
+  const capture = new RoundReplayCapture(level);
+  const payload = {
+    samples: [0, 100, 15, 200, 1, 50, 100, 15, 200, 0],
+    states: [],
+    deviceClockMs: 12345,
+  };
+  expect(capture.append(host, payload, 100)).toBeUndefined();
+  const round = capture.finish(0, 'Swinging Bridge', 'completed', [], new Map([[host.uid, host]]));
+  expect(round.deviceClockMs).toBe(12345);
+
+  // Absent (older clients) and malformed values must not poison the recording.
+  for (const value of [undefined, -1, 1.5, Number.NaN, 'nope']) {
+    const other = new RoundReplayCapture(level);
+    other.append(host, { ...payload, deviceClockMs: value }, 100);
+    const finished = other.finish(0, 'x', 'completed', [], new Map([[host.uid, host]]));
+    expect(finished.deviceClockMs).toBeUndefined();
+  }
+
+  // Two clients disagree: the earliest clock is the one nearest the round start.
+  // The later-reporting client holds the larger clock, so last-writer-wins would
+  // pick the wrong one; only an explicit minimum passes this.
+  const shared = new RoundReplayCapture(level);
+  shared.append(guest, { ...payload, deviceClockMs: 4000 }, 100);
+  shared.append(host, { ...payload, deviceClockMs: 9000 }, 100);
+  const merged = shared.finish(0, 'x', 'completed', [], new Map());
+  expect(merged.deviceClockMs).toBe(4000);
+});
 test('round archive validates sample limits, deduplicates retransmissions, isolates tracks and omits credentials', () => {
   const capture = new RoundReplayCapture(level);
   capture.append(host, batch([0, 10, 10, 20, 1, 50, 20, 10, 20, 0]), 100);

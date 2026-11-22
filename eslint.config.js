@@ -366,7 +366,7 @@ export default [
     },
   },
   {
-    files: ['scripts/follow-camera.js', 'scripts/follow-controls.js'],
+    files: ['scripts/follow-camera.js', 'scripts/follow-controls.js', 'scripts/device-clock.js'],
     languageOptions: {
       globals: {
         ...globals.browser,

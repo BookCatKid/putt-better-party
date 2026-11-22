@@ -99,6 +99,13 @@ every read and shows no link rather than a broken one. Replays are also readable
 anyone holding the 32-character link, and a link is an unguessable capability rather
 than an authenticated route.
 
+Each round stores `deviceClockMs`, the renderer clock when the attempt started. Course
+devices that animate on a clock rather than on events (spinner, slider, pendulum,
+piston) are placed by that phase, so without it a replay would put them somewhere the
+match never had them — a ball visibly crossing a raised bridge. Recordings made before
+the field existed omit it and fall back to replay time: stable, but not necessarily the
+phase that was played, so those rounds stay as they are.
+
 ### Tournament tables
 
 A checkpoint also carries the party's current tournament, when one is configured: the

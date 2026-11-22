@@ -1,7 +1,7 @@
 // Reuse the archived comparison renderer's approach: one course, coloured
 // meshes and a shared camera. Unlike its two compressed-time loops, use one
 // elapsed-round clock for every track.
-export function BpPartyReplayScene({ level, tracks, clock, focus }) {
+export function BpPartyReplayScene({ level, tracks, clock, focus, deviceClockMs }) {
   const theme = D.useMemo(() => w(level), [level]);
   const [graphics] = D.useState(() =>
     v({ coarsePointer: y(), embedded: false, forcedSafeMode: x() }),
@@ -36,7 +36,7 @@ export function BpPartyReplayScene({ level, tracks, clock, focus }) {
               style: { height: 'min(62svh, 560px)', width: '100%' },
             },
             [
-              component(BpReplayClock, { key: 'replay-clock', clock }),
+              component(BpReplayClock, { key: 'replay-clock', clock, deviceClockMs }),
               component(m, {
                 key: 'health',
                 surface: 'party-replay',
@@ -87,13 +87,15 @@ export function BpPartyReplayScene({ level, tracks, clock, focus }) {
 
 // Upstream's course devices (spinner, slider, pendulum, piston) animate from the
 // renderer's wall clock rather than from replay time, so they keep turning while
-// a replay is paused and drift whenever playback is not at 1x. Rebase that clock
-// onto the replay clock each frame. This hook runs at -2: ahead of the ball
-// driver (-1) and the devices (0), so everything in a frame sees one instant.
-function BpReplayClock({ clock }) {
+// a replay is paused. Rebase that clock onto the replay clock each frame, at -2:
+// ahead of the ball driver (-1) and the devices (0), so everything in a frame
+// sees one instant. Without a stored origin, replay time is all we have: stable,
+// but not necessarily the phase the match was actually in.
+function BpReplayClock({ clock, deviceClockMs }) {
   const { clock: rendererClock } = l();
+  const origin = Number.isFinite(deviceClockMs) ? deviceClockMs : 0;
   c(() => {
-    rendererClock.elapsedTime = clock.current / 1000;
+    rendererClock.elapsedTime = (origin + clock.current) / 1000;
   }, -2);
   return null;
 }

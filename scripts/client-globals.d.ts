@@ -78,6 +78,8 @@ interface SnippetScene {
   pointer: { x: number; z: number; active: boolean };
   discontinuitySeq?: number;
   activeEventNodes?: Iterable<string>;
+  /** The renderer's elapsed clock; clock-driven course devices follow it. */
+  deviceClockMs?: number;
   traj?: number[];
   eventTimeline?: { sample: number; node: string }[];
 }

@@ -162,6 +162,13 @@ try {
     Math.max(...real.samples.filter((_value, index) => index % 5 === 3)) -
     Math.min(...real.samples.filter((_value, index) => index % 5 === 3));
   assert(distance > 20, 'the real ball moved more than twenty centimetres');
+  // Clock-driven course devices (spinner, slider, pendulum, piston) animate from
+  // the renderer clock, whose phase at round start is arbitrary, so a replay can
+  // only place them correctly if the phase was recorded.
+  assert(
+    Number.isInteger(hole.deviceClockMs) && hole.deviceClockMs >= 0,
+    'the renderer clock at round start was recorded: ' + JSON.stringify(hole.deviceClockMs),
+  );
   console.log(
     'PASS actual ball motion and guest fixture timeline independently archived; match link available',
   );

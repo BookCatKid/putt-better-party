@@ -44,6 +44,8 @@ export type ReplayRound = {
   level: CourseSpecification | null;
   tracks: ReplayTrack[];
   durationMs: number;
+  /** Renderer clock when the attempt began; clock-driven devices animate from it. */
+  deviceClockMs?: number;
 };
 export function newReplayId() {
   return randomBytes(24).toString('base64url');
@@ -84,6 +86,8 @@ function validNative(value: unknown): NativeReplay | undefined {
 export class RoundReplayCapture {
   private readonly tracks = new Map<string, ReplayTrack>();
   private sampleCount = 0;
+  /** Earliest device clock reported by any client this round. */
+  private deviceClockMs: number | undefined;
 
   constructor(readonly level: CourseSpecification | null) {}
 
@@ -163,6 +167,20 @@ export class RoundReplayCapture {
       states.push({ at: state.at, nodes: [...new Set<string>(state.nodes)] });
     }
     const track = this.track(player);
+    const reportedClock = payload.deviceClockMs;
+    if (
+      typeof reportedClock === 'number' &&
+      Number.isInteger(reportedClock) &&
+      reportedClock >= 0 &&
+      reportedClock <= MAX_TIME + 2000
+    ) {
+      // The earliest clock is nearest the round start; a late joiner must not
+      // shift the phase the whole recording replays against.
+      this.deviceClockMs =
+        this.deviceClockMs === undefined
+          ? reportedClock
+          : Math.min(this.deviceClockMs, reportedClock);
+    }
     for (let offset = 0; offset < payload.samples.length; offset += SAMPLE_FIELDS) {
       const at = payload.samples[offset];
       const last = track.samples.at(-SAMPLE_FIELDS) ?? -1;
@@ -227,6 +245,7 @@ export class RoundReplayCapture {
       level: this.level,
       tracks,
       durationMs: Math.max(0, ...tracks.map((track) => track.samples.at(-SAMPLE_FIELDS) ?? 0)),
+      ...(this.deviceClockMs === undefined ? {} : { deviceClockMs: this.deviceClockMs }),
     };
   }
 }
