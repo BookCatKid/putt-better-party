@@ -40,6 +40,11 @@ fi
 
 logdir=$(mktemp -d -t bp-integration-logs.XXXXXX)
 db="${logdir}/rooms.sqlite"
+# check-shot-verification reads the service's own audit log for the verifier's
+# verdict, so the sweep has to give the service a log to write. Without it the
+# service writes no events and that check has nothing to assert against.
+eventlog="${logdir}/events.jsonl"
+export BP_EVENT_LOG="$eventlog"
 # The trap is installed before anything is started so a failure at any later
 # point — a browser that never opens its port, a service that never becomes
 # healthy — still releases what did start. Empty defaults keep `set -u` happy.
@@ -59,7 +64,7 @@ trap cleanup EXIT
 
 # The admin hash reaches the service only when the operator provided it; the
 # matching script password reaches check-admin through the normal environment.
-server_env=(PORT="$PORT" BP_DB="$db")
+server_env=(PORT="$PORT" BP_DB="$db" BP_EVENT_LOG="$eventlog")
 if [[ -n "${BP_ADMIN_PASSWORD_HASH:-}" ]]; then
   server_env+=(BP_ADMIN_PASSWORD_HASH="$BP_ADMIN_PASSWORD_HASH")
 fi

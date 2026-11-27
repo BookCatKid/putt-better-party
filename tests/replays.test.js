@@ -196,6 +196,47 @@ test('round archive validates sample limits, deduplicates retransmissions, isola
     db.close();
   }
 });
+test('a shot count that disagrees with the recorded inputs is still accepted, and never changes the score', async () => {
+  /*
+   * The finish frame names its own stroke count, and the server now also has the
+   * shot inputs it recorded. Comparing them is useful for an operator reading
+   * the log, but it must never reject: an older client sends no `shot` frames at
+   * all, so a strict check would refuse an honest player whose build predates the
+   * frame. This pins that a disagreeing finish still completes normally.
+   */
+  const db = new Database(':memory:');
+  const archive = new ReplayArchive(db);
+  const room = new Room('ABCDE', new Map([['course', { id: 'course', spec: level }]]), {
+    countdown: 1,
+    results: 1,
+    onReplayRound: archive.record.bind(archive),
+  });
+  const identity = room.issue('Host');
+  const ws = { data: {}, send() {}, close() {} };
+  try {
+    room.handle(ws, { t: 'join', ...identity, host: room.hostToken, protocol: 2 });
+    room.handle(ws, {
+      t: 'config',
+      config: { mapSource: 'picked', selectedHoleIds: ['course'], elimination: false },
+    });
+    room.handle(ws, { t: 'start' });
+    for (let attempt = 0; attempt < 100 && room.phase !== 'playing'; attempt++) {
+      await Bun.sleep(5);
+    }
+    expect(room.phase).toBe('playing');
+    const scope = { matchId: room.matchId, holeIndex: 0 };
+    // One real shot input recorded, but the finish claims three strokes.
+    room.handle(ws, { t: 'shot', ...scope, dir: [0, 1], power: 0.4 });
+    room.handle(ws, { f: 1, s: 3, p: 2, ...scope, replay: batch([10, 200, 10, 300, 0]) });
+    expect(room.phase).not.toBe('playing');
+    const data = JSON.parse(Buffer.from(archive.round(room.replayId, 0)).toString());
+    expect(data.tracks[0].shots).toEqual([{ dir: [0, 1], power: 0.4 }]);
+    expect(data.tracks[0].strokes).toBe(3);
+  } finally {
+    room.dispose();
+    db.close();
+  }
+});
 test('round scoped capture accepts only authorized current players and publishes one replay per completed hole', async () => {
   const db = new Database(':memory:');
   const archive = new ReplayArchive(db);

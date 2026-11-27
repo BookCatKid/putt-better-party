@@ -98,6 +98,27 @@ export interface ReplaySamplesFrame extends RoundIdentity {
 }
 
 /**
+ * The exact input of one stroke.
+ *
+ * This frame is an addition to the original protocol, not part of it: the pinned
+ * bundle keeps every shot in `gameStore.state.shots` but never sends them, so
+ * without this frame the server sees a trajectory and a stroke count and cannot
+ * check that either came from a real shot. `dir` is the unit vector in the
+ * course's xz plane and `power` is the client's own `0 < p <= 1` charge, so the
+ * pair is everything the physics needs to reproduce the stroke.
+ *
+ * It is sent when the shot is fired rather than batched with the trajectory,
+ * because the server wants the input *before* the result it is used to check.
+ */
+export interface ShotFrame extends RoundIdentity {
+  t: 'shot';
+  /** Unit vector `[x, z]` in the direction the ball is struck. */
+  dir: [number, number];
+  /** Charge in `(0, 1]`, where 1 is the client's maximum pull. */
+  power: number;
+}
+
+/**
  * The synthetic completion frame. `f: 1` is the original bundle's "I holed out"
  * signal, carrying strokes in `s` and par in `p`. It is kept verbatim because the
  * bundle writes these exact keys.
@@ -177,6 +198,7 @@ export type ClientFrame =
   | ProgressFrame
   | ForfeitFrame
   | ReplaySamplesFrame
+  | ShotFrame
   | FinishFrame
   | PingFrame
   | ConfigFrame
@@ -335,6 +357,7 @@ const CLIENT_FRAME_TAGS: Record<ClientFrameTag, true> = {
   prog: true,
   forfeit: true,
   'replay-samples': true,
+  shot: true,
   ping: true,
   config: true,
   start: true,

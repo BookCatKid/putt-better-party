@@ -5,6 +5,7 @@ import { replayBallColor } from './ball-cosmetics.js';
 import { randomBytes } from 'node:crypto';
 import type { Database } from 'bun:sqlite';
 import { isRecord, type CourseSpecification } from './domain.js';
+import type { ShotInput } from './replay/simulate.js';
 import type { Player, RoundScore, RoundStatus } from './room-types.js';
 
 const SAMPLE_FIELDS = 5;
@@ -32,6 +33,13 @@ export type ReplayTrack = {
   samples: number[];
   states: DeviceState[];
   native?: NativeReplay;
+  /**
+   * The exact shot inputs the client reported, in stroke order. Recorded from
+   * the `shot` frames, not part of the public replay summary — they exist so
+   * the server can replay each stroke and check the reported trajectory
+   * against the physics that produced it.
+   */
+  shots?: ShotInput[];
   truncated: boolean;
   strokes: number | null;
   timeMs?: number;
@@ -119,7 +127,38 @@ export class RoundReplayCapture {
     previous.samples = [];
     previous.states = [];
     previous.native = undefined;
+    previous.shots = undefined;
     previous.truncated = false;
+  }
+
+  /**
+   * Record one shot input as the client fired it.
+   *
+   * The frame is already validated for shape by the caller (`normaliseShot`);
+   * here the only bound is the count: a hole cannot produce more shots than a
+   * client could take, and a track with no trajectory at all still gets its
+   * inputs recorded so an early `f: 1` without samples is still checkable.
+   */
+  recordShot(player: Player, shot: ShotInput) {
+    const track = this.track(player);
+    const shots = track.shots ?? [];
+    if (shots.length >= 200) {
+      return;
+    }
+    shots.push({ dir: [shot.dir[0], shot.dir[1]], power: shot.power });
+    track.shots = shots;
+  }
+
+  /**
+   * How many shot inputs the room has recorded for this player's attempt.
+   *
+   * Read when a finish frame arrives, so the claimed stroke count can be
+   * compared with the inputs that were actually reported. Zero means the client
+   * never sent `shot` frames at all — an older build — and nothing can be
+   * compared.
+   */
+  recordedShotCount(player: Player) {
+    return this.tracks.get(player.uid)?.shots?.length ?? 0;
   }
 
   append(player: Player, payload: unknown, elapsed: number, finished = false) {

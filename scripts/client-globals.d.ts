@@ -65,6 +65,12 @@ interface SnippetGameState {
   level: { id: string; cup?: [number, number, number] } | null;
   /** Advanced once per installed level; absent in older builds. */
   attemptSeq?: number;
+  /**
+   * Every shot the current attempt has taken, as the pinned bundle records it
+   * (`{dir: [x, z], power}`). The transport forwards new entries as `shot`
+   * frames so the server can replay each stroke.
+   */
+  shots?: { dir: [number, number]; power: number }[];
 }
 
 /** The settings the transport reads. */

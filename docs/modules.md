@@ -17,6 +17,7 @@ The process is two layers: bootstrap, then a request map.
   - `src/upstream.ts` — the stable facade: re-exports plus `upstreamMetrics()` composed from each module's own counters. Callers import the facade, never the internals.
   - `client-adapter.ts`/`bindings.d.ts`/`request-queue.ts` — the pinned-protocol adapter boundary; upstream export names are wire contracts, not naming guidance.
 - **Services**: `catalog.ts` (the validated `courseIndex` plus `prepareMatch` random draws), `playlist-generator.ts` (the cancellable scan job), `leaderboard.ts`, `replays.ts`, `admin.ts`.
+- **`replay/` — offline shot verification.** Loads the pinned Rapier engine and replays the shot inputs a client reported, comparing the result against the trajectory it claimed. `simulate.ts` (engine loader, `replayShot`), `course-geometry.ts` (the client's `Ue()`/`Me()` course build), `piece-registry.ts` (the 95-piece table generated from the bundle), `glb.ts` (a GLB triangle reader), `models.ts` (piece model resolution), `verify.ts` (the comparison and its refusals), `constants.ts` (ball constants and `normaliseShot`). `room.ts` calls `verifyRoundTracks` after a round is stored; nothing here is on the request path or can change a score. See [deterministic verification](deterministic-verification.md).
 - **Cross-cutting**: `request-guards.ts` (HTTP bounds — body size, room-code alphabet), `config.ts`, `shutdown.ts`, `event-log.ts`, `deployment-headers.ts`, `domain.ts` (shared types and validators), `join-errors.ts`.
 
 ## Client scripts (`scripts/`)
